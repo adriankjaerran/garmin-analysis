@@ -13,6 +13,8 @@ TLS version Garmin requires.
 - `scripts/run_analysis.py`: per-second analysis of a FIT file: reps found from speed (independent of the lap button), breaks with HR recovery, km splits, Garmin laps matched to reps
 - `scripts/calibrate_distance.py <person>`: compares distance sources with Bislet track geometry and certified races, writes `calibration.json`
 - `scripts/gps_lap_analysis.py <person>`: GPS-mode manual laps at Bislet vs track geometry (hidden lag, lap booking, lap error), writes `gps_lap_analysis.json`
+- `scripts/session_groups.py <person>`: places, routes, session types, legs, writes `groups.json` ([session-groups.md](session-groups.md))
+- `scripts/similarity.py <person> build|search|nearest|groups|validate`: similarity engine on top of `groups.json`, writes `similarity_index.json` + `tracks.json` ([similarity.md](similarity.md))
 - `scripts/build_report.py <person>`: writes `data/<person>/report.html`, a self-contained overview (template: `scripts/report_template.html`)
 
 Guides: [garmin-api-guide.md](garmin-api-guide.md), [run-analysis.md](run-analysis.md), [report.md](report.md).
@@ -27,6 +29,10 @@ data/<person>/
     heart_rate.json  sleep.json  hrv.json  spo2.json  food_logs.json  fitness_age.json
   ranges/<endpoint>_<start>_<end>.json  daily_summaries, steps, stress, body_battery, sleep_summaries, weight, ...
   activities_index.json                  all activities (list endpoint)
+  groups.json                            places / routes / session types (session_groups.py)
+  similarity_index.json  tracks.json     similarity index + encoded track polylines (similarity.py)
+  regions.json  places.json              optional: named places / regions, start-cluster names
+  cache/                                 session_groups.pkl, similarity_tracks.pkl
   calibration.json                       distance calibration (calibrate_distance.py)
   gps_lap_analysis.json                  GPS-mode lap analysis (gps_lap_analysis.py)
   candidates/*.txt                       activity id lists (select_activities.py)

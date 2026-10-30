@@ -8,8 +8,9 @@ route (default: the largest ski route, i.e. the Holmenkollen rollerski climb).
 ## Grouping
 - **Places**: first GPS fix of each session, greedy density clustering (densest point + everything
   within 400 m, repeat). Name = known spot within 600 m (Bislet, Sognsvann, Frognerseteren,
-  Holmenkollen, Granåsen, NTNU Gløshaugen), else `<Garmin locationName>-<rank by size>`; the name is
-  also the place id. Overrides: `data/adrian/places.json` `{"Oslo-1": "Majorstuen"}` or
+  Holmenkollen, Granåsen, NTNU Gløshaugen; only the cluster nearest to the spot gets the name),
+  else `<Garmin locationName>-<rank by size>`; the name is also the place id. Where an activity
+  mostly happens (named places / regions by time share) is in [similarity.md](similarity.md). Overrides: `data/adrian/places.json` `{"Oslo-1": "Majorstuen"}` or
   `{"59.933,10.719": "name"}` (any place whose centre is within 400 m).
 - **Areas**: single-link chaining of start points at 2 km.
 - **Routes**: track on a 75 m grid; coverage(A|B) = share of A's cells within one cell of B's;

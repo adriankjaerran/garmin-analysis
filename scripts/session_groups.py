@@ -801,9 +801,17 @@ def main():
     groups = collections.defaultdict(list)
     for a, l in zip(geo, plab):
         groups[l].append(a)
+    cens = {l: tuple(float(v) for v in np.median([a["start"] for a in m], 0)) for l, m in groups.items()}
+    # a known name goes to the one cluster nearest to it (within 600 m); before, every cluster within
+    # 600 m got the same id and their entries in `places` overwrote each other
+    known_of = {}
+    for kn, q in KNOWN.items():
+        d, l = min((hav(c, q), l) for l, c in cens.items())
+        if d < 600:
+            known_of[l] = kn
     for l, m in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        cen = tuple(float(v) for v in np.median([a["start"] for a in m], 0))
-        nm = known_near(cen, 600)
+        cen = cens[l]
+        nm = known_of.get(l)
         if not nm:
             loc = collections.Counter(a["loc"] for a in m if a["loc"]).most_common(1)
             loc = loc[0][0] if loc else "?"
