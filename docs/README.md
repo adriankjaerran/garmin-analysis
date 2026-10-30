@@ -27,6 +27,7 @@
 | [similarity.md](similarity.md) | Similarity engine: named places / regions (Marka), workout hierarchy (6×1000 · rest), search, top-k nearest, map polylines |
 | [distance-calibration.md](distance-calibration.md) | Which distance to trust: Bislet track geometry and certified races |
 | [compare.md](compare.md) | Workout comparison: elapsed / moving / route-position ghost race, rep- and break-aligned intervals |
+| [fitness-model.md](fitness-model.md) | Shape scores over time (interval / long / ski / overall, VDOT scale): model, back-tests, why HR isn't used |
 | [report.md](report.md) | The HTML report: pages, data sources, how to rebuild |
 | [app.md](app.md) | The web app (FastAPI + Vite): maps for every activity and day, how to run, endpoints, extension points |
 | [onboarding-and-calibration.md](onboarding-and-calibration.md) | Best way to get data, onboarding a new runner, calibrating a new watch |
