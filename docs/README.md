@@ -28,6 +28,7 @@
 | [distance-calibration.md](distance-calibration.md) | Which distance to trust: Bislet track geometry and certified races |
 | [compare.md](compare.md) | Workout comparison: elapsed / moving / route-position ghost race, rep- and break-aligned intervals |
 | [report.md](report.md) | The HTML report: pages, data sources, how to rebuild |
+| [app.md](app.md) | The web app (FastAPI + Vite): maps for every activity and day, how to run, endpoints, extension points |
 | [onboarding-and-calibration.md](onboarding-and-calibration.md) | Best way to get data, onboarding a new runner, calibrating a new watch |
 
 ## Plans

@@ -6,4 +6,17 @@ dependencies = [
     "requests>=2.32",
     "fitparse>=1.2",
     "numpy>=2.5.4",
+    "fastapi>=0.162.0",
+    "uvicorn[standard]>=0.54.0",
 ]
+
+[project.scripts]
+garmin-app = "app.server.__main__:main"
+garmin-app-cache = "app.server.fitcache:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

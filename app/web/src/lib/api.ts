@@ -1,0 +1,94 @@
+// Typed fetch helpers. GET responses are memoised per URL for the session (data changes rarely;
+// reload the page to refetch).
+import { useEffect, useState } from "preact/hooks";
+
+export type Sport = "run" | "ski" | "hike" | "bike" | "swim" | "other";
+
+export interface Activity {
+  id: string; start: string; date: string; name: string | null; type: string; sport: Sport;
+  dist_km: number | null; dur_s: number | null; moving_s: number | null; hr: number | null; maxhr: number | null;
+  elev: number | null; load: number | null; te: number | null; kcal: number | null; location: string | null;
+  lat: number | null; lon: number | null; place: string | null; area: string | null; route: string | null;
+  stype: string | null; type_detail: string | null; sig: string | null; fit: boolean; track: boolean;
+}
+export interface Meta {
+  person: string; n_activities: number; n_tracks: number; first: string; last: string; years: string[];
+  sports: { id: Sport; n: number }[]; types: { id: string; n: number }[]; groups_built: string | null;
+}
+export interface Series { cols: string[]; t: number[]; lat?: (number | null)[]; lon?: (number | null)[];
+  hr?: (number | null)[]; speed?: (number | null)[]; alt?: (number | null)[]; dist?: (number | null)[];
+  cad?: (number | null)[]; power?: (number | null)[]; start_utc: number }
+export interface Lap { start: number | null; time: number | null; timer: number | null; dist: number | null; speed: number | null;
+  hr: number | null; maxhr: number | null; climb: number | null; desc: number | null; intensity: string | null; trigger: string | null }
+export interface Rep { start?: number; end?: number; time?: number; time_s?: number; dist?: number; dist_m?: number;
+  speed?: number; speed_ms?: number; hr: number | null; maxhr?: number | null }
+export interface Leg { t: number; dur_s: number; dist_m: number; kmh: number; hr: number | null; hr_max: number | null;
+  climb_m: number; desc_m: number; grade_pct: number | null }
+export interface Pause { t: number; dur_s: number; lat: number | null; lon: number | null; km: number; timer: number }
+export interface Similar { id: number; score: number; reasons: string }
+export interface ActivityDetail {
+  activity: Activity; group: Record<string, any>; legs: Leg[]; pauses: Pause[];
+  similar: { route?: Similar[]; workout?: Similar[] } | null;
+  route: { id: string; name: string; n: number; shape: string } | null;
+  laps: Lap[]; reps: Rep[]; breaks: any[]; series: Series | null; newer: string | null; older: string | null;
+}
+export interface TrackLite { id: string; date?: string; sport: Sport; type?: string; name?: string | null; km?: number | null;
+  bbox: [number, number, number, number]; poly: string }
+export interface DailySummary { date: string; steps: number | null; rhr: number | null; minhr: number | null; maxhr: number | null;
+  stress: number | null; bbmax: number | null; bbmin: number | null; resp: number | null; spo2: number | null;
+  mod: number | null; vig: number | null; kcal: number | null; floors: number | null }
+export interface Sleep { date: string; total: number; deep: number | null; light: number | null; rem: number | null;
+  awake: number | null; score: number | null; hr: number | null }
+export interface Day { date: string; activities: Activity[]; tracks: TrackLite[]; summary: DailySummary | null;
+  sleep: Sleep | null; hr: { rhr: number | null; values: [number, number][] } | null;
+  prev_active: string | null; next_active: string | null }
+export interface CalDay { date: string; n: number; km: number; s: number; sports: Record<string, number> }
+export interface Place { id: string; name: string; lat: number; lon: number; n: number; types: Record<string, number>;
+  area: string | null; routes: number; last: string | null }
+export interface RouteRow { id: string; name: string; place: string; sport: string; shape: string; dist_km: number;
+  n: number; first: string | null; last: string | null; has_legs: boolean }
+export interface RouteDetail extends RouteRow {
+  medoid: number; ref: { id: number; lat: number[]; lon: number[]; km: number[]; alt: (number | null)[] } | null;
+  waypoints: { km: number; name: string; lat: number; lon: number; share_stopped: number }[] | null;
+  legs_table: any; members: (Activity & { route_dir: string | null; pause_s: number | null; poly: string | null })[];
+}
+
+const memo = new Map<string, Promise<any>>();
+
+export function get<T>(url: string): Promise<T> {
+  let p = memo.get(url);
+  if (!p) {
+    p = fetch(url).then(async (r) => {
+      if (!r.ok) {
+        memo.delete(url);
+        let msg = `${r.status} ${r.statusText}`;
+        try { const j = await r.json(); msg = j.detail || j.todo || msg; } catch { /* not json */ }
+        throw new Error(msg);
+      }
+      return r.json();
+    });
+    memo.set(url, p);
+  }
+  return p;
+}
+
+export function qs(params: Record<string, string | number | null | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined && v !== "") q.set(k, String(v));
+  const s = q.toString();
+  return s ? "?" + s : "";
+}
+
+export function useApi<T>(url: string | null): { data: T | null; error: string | null; loading: boolean } {
+  const [st, set] = useState<{ data: T | null; error: string | null; loading: boolean; url: string | null }>(
+    { data: null, error: null, loading: !!url, url });
+  useEffect(() => {
+    if (!url) { set({ data: null, error: null, loading: false, url }); return; }
+    let live = true;
+    set((s) => ({ ...s, loading: true, error: null, url }));
+    get<T>(url).then((data) => live && set({ data, error: null, loading: false, url }),
+      (e) => live && set({ data: null, error: String(e.message || e), loading: false, url }));
+    return () => { live = false; };
+  }, [url]);
+  return st;
+}

@@ -1,0 +1,9 @@
+"""FastAPI backend. Reuses the analysis scripts in scripts/ by putting that folder on sys.path."""
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))

@@ -37,6 +37,7 @@ data/<person>/
   gps_lap_analysis.json                  GPS-mode lap analysis (gps_lap_analysis.py)
   candidates/*.txt                       activity id lists (select_activities.py)
   report.html                            overview built by build_report.py
+  cache/series/<id>.npz, cache/tracks.json  web app FIT cache (app/server/fitcache.py, docs/app.md)
   screenshots/<YYYY-MM-DD>/              report screenshots for visual checks
   profile/user_settings.json  heart_rate_zones.json
 ```
