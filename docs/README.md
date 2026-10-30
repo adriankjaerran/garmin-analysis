@@ -26,6 +26,7 @@
 | [session-groups.md](session-groups.md) | Places, routes, session types, legs and pauses, route comparison |
 | [similarity.md](similarity.md) | Similarity engine: named places / regions (Marka), workout hierarchy (6×1000 · rest), search, top-k nearest, map polylines |
 | [distance-calibration.md](distance-calibration.md) | Which distance to trust: Bislet track geometry and certified races |
+| [compare.md](compare.md) | Workout comparison: elapsed / moving / route-position ghost race, rep- and break-aligned intervals |
 | [report.md](report.md) | The HTML report: pages, data sources, how to rebuild |
 | [onboarding-and-calibration.md](onboarding-and-calibration.md) | Best way to get data, onboarding a new runner, calibrating a new watch |
 
