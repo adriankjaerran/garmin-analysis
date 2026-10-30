@@ -1,0 +1,1429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garmin data</title>
+<style>
+:root {
+  /* colour tokens */
+  --surface: #ffffff;
+  --surface-tint: #f6f7f8;
+  --surface-hover: #f1f3f5;
+  --hairline: #e3e6ea;
+  --text: #1d2125;
+  --text-muted: #67707a;
+  --accent: #2f5fd0;
+  --accent-surface: #e8eefb;
+  --state-good: #2f8a4c;
+  --state-version: #b88a00;
+  --state-duplicate: #c43c3c;
+  --state-failed: #8a9199;
+  --chart-1: #2f5fd0;
+  --chart-2: #c43c3c;
+  --chart-3: #2f8a4c;
+  --chart-4: #b88a00;
+  --chart-muted: #c9ced4;
+  /* type, spacing, radii, motion */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --fs-12: 12px; --fs-13: 13px; --fs-15: 15px; --fs-18: 18px;
+  --fw-regular: 400; --fw-semibold: 600;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px;
+  --radius-control: 6px; --radius-float: 8px;
+  --row: 32px; --control: 28px;
+  --sidebar: 200px;
+  --motion: 140ms;
+  --shadow-float: 0 8px 28px rgba(20, 24, 28, 0.14), 0 1px 3px rgba(20, 24, 28, 0.08);
+}
+@media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font-family: var(--font); font-size: var(--fs-13); color: var(--text); background: var(--surface); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.app { display: flex; height: 100vh; }
+
+/* sidebar */
+nav { width: var(--sidebar); flex: none; background: var(--surface-tint); border-right: 1px solid var(--hairline); padding: var(--space-4) 0; overflow-y: auto; }
+nav .who { font-size: var(--fs-15); font-weight: var(--fw-semibold); padding: 0 var(--space-4) var(--space-4); }
+nav .step { display: block; padding: 6px var(--space-4); color: var(--text); font-weight: var(--fw-semibold); }
+nav .tab { display: block; padding: 4px var(--space-4) 4px var(--space-5); color: var(--text-muted); }
+nav a:hover { background: var(--surface-hover); text-decoration: none; }
+nav a.current { color: var(--accent); background: var(--accent-surface); }
+nav .built { padding: var(--space-4); color: var(--text-muted); font-size: var(--fs-12); }
+
+/* main */
+main { flex: 1; min-width: 0; overflow: auto; padding: var(--space-4) var(--space-5) var(--space-6); }
+h1 { font-size: var(--fs-18); font-weight: var(--fw-semibold); margin: 0 0 var(--space-3); }
+h2 { font-size: var(--fs-15); font-weight: var(--fw-semibold); margin: 0; }
+section { border-top: 1px solid var(--hairline); padding-top: var(--space-3); margin-top: var(--space-4); }
+section:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+.head { display: flex; align-items: center; gap: var(--space-3); min-height: var(--control); margin-bottom: var(--space-2); }
+.head .count { color: var(--text-muted); }
+.head .tools { margin-left: auto; display: flex; gap: var(--space-2); align-items: center; }
+input, select { font: inherit; font-size: var(--fs-13); height: var(--control); border: 1px solid var(--hairline); border-radius: var(--radius-control); padding: 0 var(--space-2); background: var(--surface); color: var(--text); }
+input:focus, select:focus { outline: 2px solid var(--accent-surface); border-color: var(--accent); }
+button { font: inherit; height: var(--control); border: 1px solid var(--hairline); background: var(--surface); border-radius: var(--radius-control); padding: 0 var(--space-3); cursor: pointer; color: var(--text); }
+button:hover { background: var(--surface-hover); }
+
+/* tables */
+.tablewrap { overflow: auto; max-height: calc(100vh - 140px); border-top: 1px solid var(--hairline); }
+.tablewrap.short { max-height: none; }
+.tablewrap.mid { max-height: 360px; }
+td .best { color: var(--state-good); font-weight: var(--fw-semibold); }
+.chips { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-bottom: var(--space-2); }
+.chip { height: 24px; padding: 0 var(--space-2); border-radius: 12px; font-size: var(--fs-12); color: var(--text-muted); }
+.chip.on { background: var(--accent-surface); border-color: var(--accent); color: var(--accent); }
+.chart .mark { stroke: var(--text-muted); stroke-dasharray: 2 2; }
+.chart .marklabel { fill: var(--text-muted); font-size: 11px; font-family: var(--font); }
+table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+th, td { height: var(--row); padding: 0 var(--space-3); border-bottom: 1px solid var(--hairline); text-align: left; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+th { position: sticky; top: 0; background: var(--surface-tint); font-weight: var(--fw-semibold); color: var(--text-muted); cursor: pointer; user-select: none; z-index: 1; }
+th.sorted { color: var(--text); }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr:hover { background: var(--surface-hover); }
+tbody tr.clickable { cursor: pointer; }
+tbody tr.selected { background: var(--accent-surface); }
+td.muted { color: var(--text-muted); }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.dot.good { background: var(--state-good); }
+.dot.partial { background: var(--state-version); }
+.dot.none { background: var(--state-failed); }
+.mono { font-family: var(--mono); font-size: var(--fs-12); }
+
+/* label-value pairs */
+dl.kv { display: grid; grid-template-columns: max-content 1fr max-content 1fr; gap: 6px var(--space-4); margin: 0 0 var(--space-3); }
+dl.kv dt { color: var(--text-muted); }
+dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+/* charts */
+.chart { position: relative; margin-bottom: var(--space-3); }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart .title { color: var(--text-muted); margin-bottom: var(--space-1); }
+.chart .axis text { fill: var(--text-muted); font-size: var(--fs-12); font-family: var(--font); }
+.chart .axis line, .chart .grid line { stroke: var(--hairline); }
+.chart .tip { position: absolute; top: 0; right: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.chart .cursor { stroke: var(--text-muted); stroke-dasharray: 2 3; visibility: hidden; }
+.chart svg:hover .cursor { visibility: visible; }
+.chart .band { fill: var(--accent-surface); }
+.chart .band2 { fill: var(--accent); opacity: 0.35; }
+.note { color: var(--text-muted); margin: var(--space-2) 0 0; }
+.cols { display: grid; gap: var(--space-5); }
+.cols h2 { margin-bottom: var(--space-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.legend { display: flex; gap: var(--space-4); color: var(--text-muted); margin-bottom: var(--space-2); }
+.legend i { display: inline-block; width: 10px; height: 2px; margin-right: 6px; vertical-align: 3px; }
+
+/* panel */
+.panel { position: fixed; top: 0; right: 0; bottom: 0; width: 640px; max-width: 92vw; background: var(--surface); box-shadow: var(--shadow-float); border-left: 1px solid var(--hairline); display: none; flex-direction: column; z-index: 10; }
+.panel.open { display: flex; }
+.panel .grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.panel header { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--hairline); }
+.panel header h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel header button { margin-left: auto; width: var(--control); padding: 0; flex: none; }
+.panel .body { overflow: auto; padding: var(--space-4); flex: 1; }
+.empty { color: var(--text-muted); padding: var(--space-3) 0; }
+
+@media (max-width: 760px) {
+  .cols { grid-template-columns: 1fr !important; }
+  .app { flex-direction: column; height: auto; }
+  nav { width: auto; display: flex; flex-wrap: wrap; padding: var(--space-2); border-right: 0; border-bottom: 1px solid var(--hairline); }
+  nav .who, nav .built { display: none; }
+  nav .tab { display: none; }
+  nav .tab.visible { display: block; }
+  main { padding: var(--space-3); }
+  dl.kv { grid-template-columns: max-content 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav id="nav"></nav>
+  <main id="main"></main>
+</div>
+<aside class="panel" id="panel">
+  <div class="grip" id="grip"></div>
+  <header><h2 id="panel-title"></h2><button id="panel-close" title="Close" aria-label="Close">&#x2715;</button></header>
+  <div class="body" id="panel-body"></div>
+</aside>
+<script>
+const DATA = /*__DATA__*/null;
+
+// ---------- formatting ----------
+const nf0 = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat("en-GB", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nf2 = new Intl.NumberFormat("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const DASH = "—";
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const n0 = (v) => (v == null ? DASH : nf0.format(v));
+const n1 = (v) => (v == null ? DASH : nf1.format(v));
+const n2 = (v) => (v == null ? DASH : nf2.format(v));
+const dur = (s) => {
+  if (s == null) return DASH;
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`;
+};
+const hm = (s) => (s == null ? DASH : `${Math.floor(s / 3600)}h ${String(Math.round((s % 3600) / 60)).padStart(2, "0")}m`);
+const pace = (mps) => {
+  if (!mps || mps < 0.5) return DASH;
+  const spk = Math.round(1000 / mps);
+  return `${Math.floor(spk / 60)}:${String(spk % 60).padStart(2, "0")}`;
+};
+const typeLabel = (t) => (t || "").replace(/_v2$|_ws$/, "").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+const isRun = (t) => /running/.test(t);
+
+// ---------- routing ----------
+const STEPS = [
+  { id: "coverage", label: "Coverage", tabs: [] },
+  { id: "activities", label: "Activities", tabs: [{ id: "list", label: "List" }, { id: "years", label: "By year" }] },
+  { id: "runs", label: "Sessions", tabs: [{ id: "session", label: "Session" }, { id: "compare", label: "Compare" }, { id: "groups", label: "Places & routes" }, { id: "distance", label: "Distance check" }] },
+  { id: "health", label: "Health", tabs: [{ id: "days", label: "Days" }, { id: "trends", label: "Trends" }, { id: "heart", label: "Heart rate" }, { id: "sleep", label: "Sleep" }] },
+];
+function getState() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const step = STEPS.find((s) => s.id === p.get("step")) || STEPS[0];
+  const tab = step.tabs.find((t) => t.id === p.get("tab")) || step.tabs[0];
+  return { step: step.id, tab: tab ? tab.id : "", item: p.get("item") || "" };
+}
+function href(st) {
+  const p = new URLSearchParams();
+  p.set("step", st.step);
+  if (st.tab) p.set("tab", st.tab);
+  if (st.item) p.set("item", st.item);
+  return "#" + p.toString();
+}
+function go(patch) { location.hash = href({ ...getState(), ...patch }); }
+
+// ---------- table ----------
+const tableState = {};
+function table(id, cols, rows, opts = {}) {
+  const ts = (tableState[id] ||= { key: opts.sort || cols[0].key, dir: opts.dir || -1 });
+  const col = cols.find((c) => c.key === ts.key) || cols[0];
+  const val = col.sortVal || ((r) => r[col.key]);
+  const sorted = rows.slice().sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return (x < y ? -1 : x > y ? 1 : 0) * ts.dir;
+  });
+  const head = cols.map((c) => `<th class="${c.num ? "num" : ""} ${c.key === ts.key ? "sorted" : ""}" data-t="${id}" data-k="${c.key}" title="Sort">${esc(c.label)}${c.key === ts.key ? (ts.dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("");
+  const body = sorted.map((r) => {
+    const cls = [opts.rowKey || opts.rowLink ? "clickable" : "", opts.selected && opts.rowKey && String(r[opts.rowKey]) === opts.selected ? "selected" : ""].join(" ");
+    const attr = (opts.rowKey ? ` data-row="${esc(r[opts.rowKey])}"` : "") + (opts.rowLink ? ` data-href="${esc(opts.rowLink(r))}"` : "");
+    return `<tr class="${cls}"${attr}>` + cols.map((c) => {
+      const raw = r[c.key];
+      const shown = c.fmt ? c.fmt(raw, r) : raw == null ? DASH : esc(raw);
+      const title = c.title ? c.title(raw, r) : typeof raw === "string" ? raw : raw != null && c.num ? String(raw) : "";
+      const muted = shown === DASH ? " muted" : "";
+      return `<td class="${c.num ? "num" : ""}${muted}${c.cls ? " " + c.cls : ""}" title="${esc(title)}">${shown}</td>`;
+    }).join("") + "</tr>";
+  }).join("");
+  return `<div class="tablewrap ${opts.short ? "short" : opts.mid ? "mid" : ""}"><table><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td class="muted" colspan="${cols.length}">No rows match the filter. Clear it to see all rows.</td></tr>`}</tbody></table></div>`;
+}
+document.addEventListener("click", (e) => {
+  const th = e.target.closest("th[data-t]");
+  if (th) {
+    const ts = tableState[th.dataset.t];
+    if (ts.key === th.dataset.k) ts.dir *= -1; else { ts.key = th.dataset.k; ts.dir = -1; }
+    render(true);
+    return;
+  }
+  const chip = e.target.closest("[data-chip]");
+  if (chip) {
+    const set = (chipSets[chip.dataset.group] ||= new Set()), v = chip.dataset.chip;
+    if (set.has(v)) set.delete(v); else set.add(v);
+    render(true);
+    return;
+  }
+  if (e.target.closest("a")) return;
+  const tr = e.target.closest("tr[data-row], tr[data-href]");
+  if (tr) { if (tr.dataset.href) location.hash = tr.dataset.href; else go({ item: tr.dataset.row }); }
+});
+
+// ---------- charts ----------
+const charts = [];
+function chartBox(id, title, legend) {
+  const lg = legend ? `<div class="legend">${legend.map((l) => `<span><i style="background:var(${l.color})"></i>${esc(l.label)}</span>`).join("")}</div>` : "";
+  return `<div class="chart" id="${id}"><div class="title">${esc(title)}</div>${lg}<div class="tip"></div><div class="svg"></div></div>`;
+}
+// series: [{ points: [[x,y]...], color, label, fmt, bars }], x is ms epoch or seconds
+function drawChart(id, series, o = {}) {
+  charts.push({ id, series, o });
+}
+function paintCharts() {
+  for (const c of charts) paintChart(c);
+}
+function niceTicks(min, max, n) {
+  const span = max - min || 1;
+  const step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= step0);
+  const out = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+function paintChart({ id, series, o }) {
+  const box = document.getElementById(id);
+  if (!box) return;
+  const W = box.clientWidth, H = o.height || 160, L = 44, R = 8, T = 6, B = 22;
+  const all = series.flatMap((s) => s.points.filter((p) => p[1] != null));
+  if (!all.length) { box.querySelector(".svg").innerHTML = `<div class="empty">No data for this period.</div>`; return; }
+  const xs = series.flatMap((s) => s.points.map((p) => p[0])), ys = all.map((p) => p[1]);
+  let x0 = o.xMin ?? Math.min(...xs), x1 = o.xMax ?? Math.max(...xs);
+  let y0 = o.yMin ?? Math.min(...ys), y1 = o.yMax ?? Math.max(...ys);
+  if (o.clip) { const q = ys.slice().sort((a, b) => a - b); y0 = q[Math.floor(q.length * o.clip)]; y1 = q[Math.ceil(q.length * (1 - o.clip)) - 1]; }
+  if (o.zero) y0 = Math.min(0, y0);
+  const pad = (y1 - y0) * 0.06 || 1;
+  if (o.yMin == null && !o.zero) y0 -= pad;
+  y1 += pad;
+  const X = (x) => L + ((x - x0) / (x1 - x0 || 1)) * (W - L - R);
+  const Y = (y) => T + (1 - (Math.min(Math.max(y, y0), y1) - y0) / (y1 - y0 || 1)) * (H - T - B);
+  const yt = niceTicks(y0, y1, 4);
+  let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  if (o.bands) svg += o.bands.map(([a, b]) => `<rect class="band" x="${X(a)}" y="${T}" width="${Math.max(1, X(b) - X(a))}" height="${H - T - B}"/>`).join("");
+  if (o.bands2) svg += o.bands2.map(([a, b]) => `<rect class="band2" x="${Math.min(X(a), (X(a) + X(b)) / 2 - 1)}" y="${T}" width="${Math.max(2, X(b) - X(a))}" height="${H - T - B}"/>`).join("");
+  if (o.marks) svg += o.marks.map((m) => `<line class="mark" x1="${X(m.x)}" x2="${X(m.x)}" y1="${T + 12}" y2="${H - B}"/><text class="marklabel" x="${X(m.x)}" y="${T + 8}" text-anchor="${X(m.x) > W - 40 ? "end" : X(m.x) < L + 30 ? "start" : "middle"}">${esc(m.label)}</text>`).join("");
+  svg += `<g class="grid">${yt.map((v) => `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/>`).join("")}</g>`;
+  const yStep = yt.length > 1 ? yt[1] - yt[0] : 1;
+  const yDef = (v) => (yStep < 1 ? nf1.format(v) : nf0.format(v));
+  svg += `<g class="axis">${yt.map((v) => `<text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${o.yFmt ? o.yFmt(v) : yDef(v)}</text>`).join("")}`;
+  const xt = o.xTicks ? o.xTicks(x0, x1) : niceTicks(x0, x1, 6).map((v) => [v, o.xFmt ? o.xFmt(v) : nf0.format(v)]);
+  let lastX = -1e9;
+  for (const [v, label] of xt) {
+    const px = X(v);
+    if (px < L - 1 || px > W - R + 1 || px - lastX < 46) continue;
+    lastX = px;
+    svg += `<text x="${px}" y="${H - 6}" text-anchor="middle">${esc(label)}</text>`;
+  }
+  svg += `</g>`;
+  for (const s of series) {
+    if (s.bars) {
+      const bw = Math.max(1, ((W - L - R) / s.points.length) * 0.8);
+      svg += s.points.filter((p) => p[1] != null).map((p) => `<rect x="${X(p[0]) - bw / 2}" y="${Y(Math.max(p[1], 0))}" width="${bw}" height="${Math.abs(Y(p[1]) - Y(0))}" fill="var(${s.color})" opacity="0.85"/>`).join("");
+      continue;
+    }
+    let d = "", pen = false, prev = null;
+    for (const p of s.points) {
+      const gap = prev && o.gap && p[0] - prev[0] > o.gap;
+      if (p[1] == null || gap) pen = false;
+      if (p[1] != null) { d += `${pen ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`; pen = true; }
+      prev = p;
+    }
+    svg += `<path d="${d}" fill="none" stroke="var(${s.color})" stroke-width="${s.width || 1.4}" stroke-linejoin="round" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""}/>`;
+    if (s.dots) svg += s.points.filter((p) => p[1] != null).map((p) => `<circle cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="2.5" fill="var(${s.color})"/>`).join("");
+  }
+  svg += `<line class="cursor" y1="${T}" y2="${H - B}" x1="-10" x2="-10"/></svg>`;
+  box.querySelector(".svg").innerHTML = svg;
+  const svgEl = box.querySelector("svg"), cur = svgEl.querySelector(".cursor"), tip = box.querySelector(".tip");
+  const base = series[0].points;
+  svgEl.onmousemove = (e) => {
+    const rect = svgEl.getBoundingClientRect();
+    const x = x0 + ((e.clientX - rect.left - L) / (W - L - R)) * (x1 - x0);
+    let lo = 0, hi = base.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (base[m][0] < x) lo = m; else hi = m; }
+    const i = Math.abs(base[lo][0] - x) < Math.abs(base[hi][0] - x) ? lo : hi;
+    const px = X(base[i][0]);
+    cur.setAttribute("x1", px); cur.setAttribute("x2", px);
+    const parts = series.filter((s) => !s.noTip).map((s) => {
+      const p = s.points[i] && s.points[i][0] === base[i][0] ? s.points[i] : s.points.find((q) => q[0] === base[i][0]);
+      return p && p[1] != null ? `${s.label} ${s.fmt ? s.fmt(p[1]) : n0(p[1])}` : null;
+    }).filter(Boolean);
+    tip.textContent = [o.tipX ? o.tipX(base[i][0]) : "", ...parts].filter(Boolean).join("   ");
+  };
+  svgEl.onmouseleave = () => { cur.setAttribute("x1", -10); cur.setAttribute("x2", -10); tip.textContent = ""; };
+}
+const ymd = (ms) => new Date(ms).toISOString().slice(0, 10);
+const yearTicks = (x0, x1) => {
+  const out = [];
+  for (let y = new Date(x0).getUTCFullYear(); y <= new Date(x1).getUTCFullYear() + 1; y++) out.push([Date.UTC(y, 0, 1), String(y)]);
+  return out;
+};
+const dayTicks = (x0, x1) => {
+  const out = [];
+  const d = new Date(x0); d.setHours(0, 0, 0, 0);
+  for (; d.getTime() <= x1; d.setDate(d.getDate() + 1)) out.push([d.getTime(), d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })]);
+  return out;
+};
+const minTicks = (x0, x1) => niceTicks(x0 / 60, x1 / 60, 6).map((m) => [m * 60, `${m} min`]);
+
+// rolling mean over a [date, value] daily series
+function rolling(rows, key, n) {
+  const out = [], buf = [];
+  for (const r of rows) {
+    buf.push(r[key]);
+    if (buf.length > n) buf.shift();
+    const v = buf.filter((x) => x != null);
+    out.push([Date.parse(r.date), v.length >= n / 2 ? v.reduce((a, b) => a + b, 0) / v.length : null]);
+  }
+  return out;
+}
+
+// ---------- pages ----------
+const A = DATA.activities, D = DATA.daily, I = DATA.intraday, S = DATA.sleep;
+const runs = DATA.runs;
+
+function pageCoverage() {
+  const first = (arr, k) => (arr.length ? arr[0][k] : null);
+  const last = (arr, k) => (arr.length ? arr[arr.length - 1][k] : null);
+  const actAsc = A.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const dl = A.filter((a) => a.fit).sort((a, b) => (a.date < b.date ? -1 : 1));
+  const dWith = (k) => D.filter((d) => d[k] != null);
+  const span = (a, b) => (a && b ? Math.round((Date.parse(b) - Date.parse(a)) / 86400000) + 1 : 0);
+  const daily = (label, k, res) => {
+    const w = dWith(k), f = first(w, "date"), t = last(w, "date"), full = span(first(D, "date"), last(D, "date"));
+    const ok = w.length >= 0.9 * full;
+    return { data: label, from: f, to: t, n: w.length, unit: "days", res, state: ok ? "good" : "partial", stateL: ok ? "Complete" : `${n1((100 * w.length) / full)}% of days` };
+  };
+  const rows = [
+    { data: "Activity list", from: first(actAsc, "date")?.slice(0, 10), to: last(actAsc, "date")?.slice(0, 10), n: A.length, unit: "activities", res: "1 row per activity, 94 fields", state: "good", stateL: "Complete" },
+    { data: "Original watch files", from: first(dl, "date")?.slice(0, 10), to: last(dl, "date")?.slice(0, 10), n: dl.length, unit: "activities", res: "1 s (current watch); 1–4 s (Forerunner 935)", state: dl.length === A.length ? "good" : "partial", stateL: dl.length === A.length ? "Complete" : `${n0(A.length - dl.length)} not downloaded` },
+    { data: "Daily summaries", from: first(D, "date"), to: last(D, "date"), n: D.length, unit: "days", res: "1 row per day", state: "good", stateL: "Complete" },
+    daily("Steps", "steps", "Daily total"),
+    daily("Resting heart rate", "rhr", "Daily value"),
+    daily("Stress", "stress", "Daily average"),
+    daily("Body Battery", "bbmax", "Daily min and max"),
+    daily("Respiration", "resp", "Daily average"),
+    daily("SpO2", "spo2", "Daily average"),
+    { data: "Intraday heart rate", from: first(I, "date"), to: last(I, "date"), n: I.length, unit: "days", res: "1 sample per 2 min", state: "partial", stateL: "Available from 2026-06-01" },
+    { data: "Sleep", from: first(S, "date"), to: last(S, "date"), n: S.length, unit: "nights", res: "1 summary per night", state: "partial", stateL: "Only nights the watch was worn" },
+    { data: "HRV", from: null, to: null, n: 0, unit: "", res: DASH, state: "none", stateL: "No data on this account" },
+  ];
+  const cols = [
+    { key: "data", label: "Data" },
+    { key: "from", label: "From" },
+    { key: "to", label: "To" },
+    { key: "n", label: "Count", num: true, fmt: (v) => n0(v) },
+    { key: "unit", label: "Unit", fmt: (v) => (v ? esc(v) : DASH) },
+    { key: "res", label: "Resolution" },
+    { key: "stateL", label: "State", fmt: (v, r) => `<span class="dot ${r.state}"></span>${esc(v)}`, sortVal: (r) => r.state },
+  ];
+  tableState.coverage ||= { key: "data", dir: 0 };
+  return `<h1>Coverage</h1>${table("coverage", cols, rows, { short: true })}`;
+}
+
+let actFilter = { q: "", type: "" };
+function actCols() {
+  return [
+    { key: "date", label: "Date", fmt: (v) => esc(v.slice(0, 16)) },
+    { key: "name", label: "Name" },
+    { key: "type", label: "Type", fmt: (v) => esc(typeLabel(v)) },
+    { key: "dist", label: "Distance (km)", num: true, fmt: n2 },
+    { key: "dur", label: "Time", num: true, fmt: dur },
+    { key: "pace", label: "Pace (/km)", num: true, fmt: (v, r) => (r.dist && r.moving ? pace((r.dist * 1000) / r.moving) : DASH), sortVal: (r) => (r.dist && r.moving ? r.moving / r.dist : null) },
+    { key: "hr", label: "Avg HR", num: true, fmt: n0 },
+    { key: "maxhr", label: "Max HR", num: true, fmt: n0 },
+    { key: "elev", label: "Ascent (m)", num: true, fmt: n0 },
+    { key: "cad", label: "Cadence", num: true, fmt: n0 },
+    { key: "load", label: "Load", num: true, fmt: n0 },
+    { key: "te", label: "Aerobic TE", num: true, fmt: n1 },
+    { key: "kcal", label: "kcal", num: true, fmt: n0 },
+    { key: "fit", label: "Watch file", fmt: (v) => (v ? `<span class="dot good"></span>Downloaded` : DASH), sortVal: (r) => (r.fit ? 1 : 0) },
+  ];
+}
+function pageActivitiesList(st) {
+  const types = [...new Set(A.map((a) => a.type))].sort();
+  const q = actFilter.q.toLowerCase();
+  const rows = A.filter((a) => (!actFilter.type || a.type === actFilter.type) && (!q || (a.name || "").toLowerCase().includes(q) || a.date.includes(q)));
+  return `<section><div class="head"><h1 style="margin:0">Activities</h1><span class="count">${n0(rows.length)} of ${n0(A.length)}</span>
+    <div class="tools"><input id="q" placeholder="Search name or date" value="${esc(actFilter.q)}"><select id="type"><option value="">All types</option>${types.map((t) => `<option value="${t}" ${t === actFilter.type ? "selected" : ""}>${esc(typeLabel(t))}</option>`).join("")}</select></div></div>
+    ${table("acts", actCols(), rows, { sort: "date", rowKey: "id", selected: st.item })}</section>`;
+}
+function pageActivitiesYears() {
+  const by = {};
+  for (const a of A) {
+    const y = a.date.slice(0, 4), g = isRun(a.type) ? "Running" : /skiing/.test(a.type) ? "Skiing" : "Other";
+    const k = y;
+    by[k] ||= { year: y, n: 0, runN: 0, runKm: 0, runH: 0, skiN: 0, skiKm: 0, otherN: 0, hours: 0, load: null };
+    const r = by[k];
+    r.n++; r.hours += (a.dur || 0) / 3600; if (a.load != null) r.load = (r.load || 0) + a.load;
+    if (g === "Running") { r.runN++; r.runKm += a.dist || 0; r.runH += (a.dur || 0) / 3600; }
+    else if (g === "Skiing") { r.skiN++; r.skiKm += a.dist || 0; }
+    else r.otherN++;
+  }
+  const rows = Object.values(by);
+  for (const r of rows) r.runPace = r.runKm ? (r.runH * 3600) / r.runKm : null;
+  const cols = [
+    { key: "year", label: "Year" },
+    { key: "n", label: "Activities", num: true, fmt: n0 },
+    { key: "hours", label: "Hours", num: true, fmt: n1 },
+    { key: "runN", label: "Runs", num: true, fmt: n0 },
+    { key: "runKm", label: "Running (km)", num: true, fmt: n0 },
+    { key: "runPace", label: "Avg run pace (/km)", num: true, fmt: (v) => (v ? pace(1000 / v) : DASH) },
+    { key: "skiN", label: "Ski sessions", num: true, fmt: n0 },
+    { key: "skiKm", label: "Skiing (km)", num: true, fmt: n0 },
+    { key: "otherN", label: "Other", num: true, fmt: n0 },
+    { key: "load", label: "Training load", num: true, fmt: n0 },
+  ];
+  // monthly running km
+  const months = {};
+  for (const a of A) if (isRun(a.type)) months[a.date.slice(0, 7)] = (months[a.date.slice(0, 7)] || 0) + (a.dist || 0);
+  const ski = {};
+  for (const a of A) if (/skiing/.test(a.type)) ski[a.date.slice(0, 7)] = (ski[a.date.slice(0, 7)] || 0) + (a.dist || 0);
+  const first = A.map((a) => a.date).sort()[0], mlist = [];
+  for (let d = new Date(first.slice(0, 7) + "-01T00:00:00Z"); d <= new Date(); d.setUTCMonth(d.getUTCMonth() + 1)) mlist.push(d.toISOString().slice(0, 7));
+  drawChart("ch-months", [
+    { points: mlist.map((m) => [Date.parse(m + "-15"), months[m] || 0]), color: "--chart-1", label: "Running", fmt: (v) => n0(v) + " km", bars: true },
+  ], { zero: true, height: 170, xTicks: yearTicks, tipX: (x) => ymd(x).slice(0, 7) });
+  drawChart("ch-ski", [
+    { points: mlist.map((m) => [Date.parse(m + "-15"), ski[m] || 0]), color: "--chart-3", label: "Skiing", fmt: (v) => n0(v) + " km", bars: true },
+  ], { zero: true, height: 110, xTicks: yearTicks, tipX: (x) => ymd(x).slice(0, 7) });
+  tableState.years ||= { key: "year", dir: -1 };
+  return `<h1>By year</h1>${table("years", cols, rows, { short: true })}
+    <section><div class="head"><h2>Distance per month</h2></div>${chartBox("ch-months", "Running (km)")}${chartBox("ch-ski", "Skiing (km)")}</section>`;
+}
+
+let dayFilter = { year: "" };
+function pageHealthDays() {
+  const years = [...new Set(D.map((d) => d.date.slice(0, 4)))].sort().reverse();
+  dayFilter.year ||= years[0];
+  const rows = D.filter((d) => dayFilter.year === "all" || d.date.startsWith(dayFilter.year));
+  const cols = [
+    { key: "date", label: "Date" },
+    { key: "steps", label: "Steps", num: true, fmt: n0 },
+    { key: "rhr", label: "Resting HR", num: true, fmt: n0 },
+    { key: "minhr", label: "Min HR", num: true, fmt: n0 },
+    { key: "maxhr", label: "Max HR", num: true, fmt: n0 },
+    { key: "stress", label: "Avg stress", num: true, fmt: n0 },
+    { key: "bbmax", label: "Body Battery max", num: true, fmt: n0 },
+    { key: "bbmin", label: "Body Battery min", num: true, fmt: n0 },
+    { key: "resp", label: "Respiration", num: true, fmt: n0 },
+    { key: "spo2", label: "SpO2 (%)", num: true, fmt: n0 },
+    { key: "mod", label: "Moderate min", num: true, fmt: n0 },
+    { key: "vig", label: "Vigorous min", num: true, fmt: n0 },
+    { key: "floors", label: "Floors", num: true, fmt: n0 },
+    { key: "kcal", label: "kcal", num: true, fmt: n0 },
+  ];
+  return `<section><div class="head"><h1 style="margin:0">Days</h1><span class="count">${n0(rows.length)} days</span>
+    <div class="tools"><select id="year">${years.map((y) => `<option ${y === dayFilter.year ? "selected" : ""}>${y}</option>`).join("")}<option value="all" ${dayFilter.year === "all" ? "selected" : ""}>All years</option></select></div></div>
+    ${table("days", cols, rows, { sort: "date" })}</section>`;
+}
+function pageHealthTrends() {
+  const t = { xTicks: yearTicks, tipX: (x) => ymd(x), height: 150, xMin: Date.parse(D[0].date), xMax: Date.parse(D[D.length - 1].date) };
+  drawChart("tr-rhr", [
+    { points: rolling(D, "rhr", 30), color: "--chart-2", label: "30-day avg", fmt: n1 },
+  ], t);
+  drawChart("tr-steps", [{ points: rolling(D, "steps", 30), color: "--chart-1", label: "30-day avg", fmt: n0 }], { ...t, zero: true });
+  drawChart("tr-stress", [{ points: rolling(D, "stress", 30), color: "--chart-4", label: "30-day avg", fmt: n0 }], t);
+  drawChart("tr-bb", [
+    { points: rolling(D, "bbmax", 30), color: "--chart-3", label: "Max", fmt: n0 },
+    { points: rolling(D, "bbmin", 30), color: "--chart-3", label: "Min", fmt: n0, dash: "3 3" },
+  ], t);
+  drawChart("tr-resp", [{ points: rolling(D, "resp", 30), color: "--chart-1", label: "30-day avg", fmt: n1 }], t);
+  return `<h1>Trends</h1>
+    ${chartBox("tr-rhr", "Resting heart rate (bpm), 30-day average")}
+    ${chartBox("tr-steps", "Steps per day, 30-day average")}
+    ${chartBox("tr-stress", "Average stress, 30-day average")}
+    ${chartBox("tr-bb", "Body Battery, 30-day average", [{ label: "Max", color: "--chart-3" }, { label: "Min (dashed)", color: "--chart-3" }])}
+    ${chartBox("tr-resp", "Respiration (breaths/min), 30-day average")}`;
+}
+function pageHealthHeart() {
+  if (!I.length) return `<h1>Heart rate</h1><div class="empty">No intraday heart rate downloaded. Run scripts/fetch_daily.py to fetch it.</div>`;
+  const pts = I.flatMap((d) => d.values);
+  drawChart("hr-all", [{ points: pts, color: "--chart-2", label: "", fmt: (v) => n0(v) + " bpm" }], {
+    height: 200, gap: 15 * 60 * 1000, xTicks: dayTicks,
+    tipX: (x) => new Date(x).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
+  });
+  const rows = I.map((d) => {
+    const v = d.values.map((x) => x[1]);
+    return { date: d.date, rhr: d.rhr, n: v.length, min: Math.min(...v), max: Math.max(...v), avg: v.reduce((a, b) => a + b, 0) / v.length, worn: v.length * 2 / 60 };
+  });
+  const cols = [
+    { key: "date", label: "Date" },
+    { key: "rhr", label: "Resting HR", num: true, fmt: n0 },
+    { key: "min", label: "Min", num: true, fmt: n0 },
+    { key: "avg", label: "Average", num: true, fmt: n0 },
+    { key: "max", label: "Max", num: true, fmt: n0 },
+    { key: "n", label: "Samples", num: true, fmt: n0 },
+    { key: "worn", label: "Hours with data", num: true, fmt: n1 },
+  ];
+  return `<h1>Heart rate</h1>${chartBox("hr-all", "Heart rate (bpm), every 2 minutes")}
+    <section><div class="head"><h2>Per day</h2></div>${table("hrdays", cols, rows, { sort: "date", short: true })}</section>`;
+}
+function pageHealthSleep() {
+  if (!S.length) return `<h1>Sleep</h1><div class="empty">No sleep recorded in the downloaded period.</div>`;
+  const cols = [
+    { key: "date", label: "Night of" },
+    { key: "total", label: "Asleep", num: true, fmt: hm },
+    { key: "deep", label: "Deep", num: true, fmt: hm },
+    { key: "light", label: "Light", num: true, fmt: hm },
+    { key: "rem", label: "REM", num: true, fmt: hm },
+    { key: "awake", label: "Awake", num: true, fmt: hm },
+    { key: "score", label: "Score", num: true, fmt: n0 },
+    { key: "hr", label: "Avg HR", num: true, fmt: n0 },
+    { key: "spo2", label: "Avg SpO2 (%)", num: true, fmt: n0 },
+    { key: "resp", label: "Respiration", num: true, fmt: n0 },
+    { key: "stress", label: "Avg stress", num: true, fmt: n0 },
+  ];
+  return `<section><div class="head"><h1 style="margin:0">Sleep</h1><span class="count">${n0(S.length)} nights</span></div>${table("sleep", cols, S, { sort: "date", short: true })}</section>`;
+}
+
+// ---------- runs ----------
+const fmtPace = (v) => { const s = Math.round(v * 60); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+function paceSeries(run) {
+  const ix = Object.fromEntries(run.cols.map((c, i) => [c, i]));
+  const sp = run.rows.map((r) => r[ix.speed]);
+  return run.rows.map((r, i) => {
+    const w = sp.slice(Math.max(0, i - 5), i + 5).filter((v) => v != null);
+    const m = w.length ? w.reduce((a, b) => a + b, 0) / w.length : null;
+    return [r[ix.t], m && m > 1.2 ? 1000 / m / 60 : null];
+  });
+}
+function hrSeries(run) {
+  const ix = Object.fromEntries(run.cols.map((c, i) => [c, i]));
+  return run.rows.map((r) => [r[ix.t], r[ix.hr]]);
+}
+const runIds = () => Object.keys(runs).sort((a, b) => (actById(b).date > actById(a).date ? 1 : -1));
+const AMAP = Object.fromEntries(A.map((a) => [String(a.id), a]));
+const actById = (id) => AMAP[String(id)];
+const isIntervals = (run) => run.analysis.laps.some((l) => l.intensity === "active");
+const diff = (a, b, f) => (a == null || b == null ? DASH : (a - b >= 0 ? "+" : "−") + f(Math.abs(a - b)));
+const secs = (v) => n0(v) + " s";
+const percentile = (arr, q) => { const s = arr.filter((v) => v != null).sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(s.length * q))] : null; };
+
+const DEVICE_LABEL = { fr935: "FR935", 4315: "product 4315", 3077: "product 3077" };
+const ENV_LABEL = { track: "track", open: "open sky", urban_or_trees: "urban or trees", unknown: "unknown", indoor: "indoor (no GPS)" };
+const SIGNAL_LABEL = { pos: "GPS position", dist: "Distance field", speed: "Speed field", cad: "Cadence", power: "Power" };
+const sgn = (v, f = n2) => { if (v == null) return DASH; const t = f(Math.abs(v)); return (/[1-9]/.test(t) ? (v > 0 ? "+" : "−") : "") + t; };
+const boundaryShort = (r) => `${r.boundary_source === "detected+compensated" ? "det+comp" : r.boundary_source || "?"} · ${r.dist_source === "lap" ? "lap dist" : "det dist"}`;
+// 2 = pressed early/late, 1 = confirmed, 0 = no press
+const checkState = (r) => { const c = [r.start_check, r.end_check].filter(Boolean); return !c.length ? 0 : c.every((x) => x === "confirmed") ? 1 : 2; };
+function checkCell(r) {
+  const st = checkState(r);
+  const both = r.start_check && r.end_check;
+  const txt = st === 2 ? r.flag.replace(/pressed /g, "").replace(/ by [0-9.]+ s/g, "").replace(/; /g, ", ") : st === 1 ? (both ? "confirmed" : `${r.start_check ? "start" : "end"} confirmed`) : "no lap press";
+  return `<span class="dot ${["none", "good", "partial"][st]}"></span>${esc(txt)}`;
+}
+
+function pageRunSession(st) {
+  const ids = runIds();
+  if (!ids.length) return `<h1>Session</h1><div class="empty">No watch files downloaded. Run scripts/fetch_activities.py to fetch them.</div>`;
+  const id = ids.includes(st.item) ? st.item : ids[0];
+  const run = runs[id], a = actById(id), an = run.analysis, g = run.garmin, T = an.totals;
+  const picker = `<select id="runpick">${ids.map((x) => `<option value="${x}" ${x === id ? "selected" : ""}>${esc(actById(x).date.slice(0, 10))}  ${esc(SPORT_LABEL[sportOf(x)] || "")} · ${esc(actById(x).name)}</option>`).join("")}</select>`;
+  if (run.sport === "ski") return pageSkiSession(id, picker);
+  const iv = isIntervals(run);
+
+  const cmp = [
+    { m: "Distance", w: T.dist, g: g.dist, f: (v) => n0(v) + " m",
+      wx: T.distance_uncertainty_pct != null ? ` ± ${n2(T.distance_uncertainty_pct)} % (1σ, ${ENV_LABEL[T.gps_env] || T.gps_env || "?"})` : "",
+      wt: T.distance_uncertainty_pct != null ? `1σ uncertainty ${n2(T.distance_uncertainty_pct)} %, GPS environment: ${ENV_LABEL[T.gps_env] || T.gps_env}${T.gps_jitter_m != null ? `, jitter ${n2(T.gps_jitter_m)} m` : ""}` : "" },
+    { m: "Elapsed time", w: T.elapsed, g: g.elapsed, f: dur },
+    { m: "Moving time", w: T.moving, g: g.moving, f: dur },
+    { m: iv ? "Reps" : "Running segments", w: T.reps, g: g.reps, f: n0 },
+    { m: iv ? "Time in reps" : "Time running", w: T.rep_time, g: g.rep_time, f: dur },
+    { m: iv ? "Distance in reps" : "Distance running", w: T.rep_dist, g: g.rep_dist, f: (v) => n0(v) + " m" },
+    { m: iv ? "Time in breaks" : "Time stopped", w: T.break_time, g: g.break_time, f: dur },
+    { m: "Average HR", w: T.hr, g: g.hr, f: n0 },
+    { m: "Max HR", w: T.maxhr, g: g.maxhr, f: n0 },
+  ].map((r) => ({ ...r, d: diff(r.w, r.g, r.f) }));
+  const cmpCols = [
+    { key: "m", label: "Measure" },
+    { key: "w", label: "Watch file", num: true, fmt: (v, r) => (v == null ? DASH : r.f(v) + (r.wx ? `<span class="muted">${esc(r.wx)}</span>` : "")), title: (v, r) => r.wt || (v == null ? "" : String(v)) },
+    { key: "g", label: "Garmin activity", num: true, fmt: (v, r) => (v == null ? DASH : r.f(v)) },
+    { key: "d", label: "Difference", num: true },
+  ];
+  tableState.cmp = { key: "_", dir: 0 };
+
+  const base = {
+    xTicks: minTicks, tipX: (x) => dur(x), bands: iv ? an.reps.map((r) => [r.start, r.end]) : null,
+    bands2: iv ? an.reps.flatMap((r) => [[r.start - (r.start_uncertainty_s || 0), r.start + (r.start_uncertainty_s || 0)], [r.end - (r.end_uncertainty_s || 0), r.end + (r.end_uncertainty_s || 0)]]) : null,
+  };
+  const paceS = paceSeries(run), pv = paceS.map((p) => p[1]);
+  drawChart("s-pace", [{ points: paceS, color: "--chart-1", label: "Pace", fmt: fmtPace }], { ...base, height: 150, yFmt: fmtPace, yMin: percentile(pv, 0.01), yMax: Math.min(percentile(pv, 0.97), 12) });
+  drawChart("s-hr", [{ points: hrSeries(run), color: "--chart-2", label: "HR", fmt: n0 }], { ...base, height: 150 });
+
+  const lapFor = (n) => an.laps.find((l) => l.rep === n);
+  const reps = an.reps.map((r) => {
+    const l = lapFor(r.n);
+    return { ...r, lapTime: l?.time, lapDist: l?.dist, lapSpeed: l?.speed };
+  });
+  const repCols = [
+    { key: "n", label: iv ? "Rep" : "Segment", num: true },
+    { key: "start", label: "Start", num: true, fmt: dur },
+    { key: "time", label: "Time", num: true, fmt: dur },
+    { key: "dist", label: "Dist (m)", num: true, fmt: n0 },
+    { key: "speed", label: "Pace", num: true, fmt: pace, sortVal: (r) => (r.speed ? -r.speed : null) },
+    { key: "hr", label: "Avg HR", num: true, fmt: n0 },
+    { key: "maxhr", label: "Max HR", num: true, fmt: n0 },
+    ...(iv ? [
+      { key: "lapTime", label: "Lap time", num: true, fmt: (v) => (v == null ? DASH : dur(v)) },
+      { key: "lapDist", label: "Lap (m)", num: true, fmt: n0 },
+      { key: "lapSpeed", label: "Lap pace", num: true, fmt: pace },
+      { key: "dt", label: "Δ time", num: true, fmt: (v, r) => diff(r.time, r.lapTime, (x) => n1(x) + " s"), sortVal: (r) => (r.lapTime == null ? null : r.time - r.lapTime) },
+    ] : []),
+    { key: "boundary_source", label: "Boundary", fmt: (v, r) => esc(boundaryShort(r)), title: (v, r) => `Boundaries: ${v || "?"}; distance: ${r.dist_source === "lap" ? "Garmin lap distance" : "watch distance between detected boundaries"}${r.dist_detected != null ? ` (detected ${n1(r.dist_detected)} m)` : ""}` },
+    { key: "start_uncertainty_s", label: "± start/end", num: true, fmt: (v, r) => (v == null && r.end_uncertainty_s == null ? DASH : `±${n1(v)} / ${n1(r.end_uncertainty_s)} s`) },
+    ...(iv ? [
+      { key: "press_start_dt", label: "Press Δ start/end", num: true, fmt: (v, r) => (v == null && r.press_end_dt == null ? DASH : `${sgn(v, n1)} / ${sgn(r.press_end_dt, n1)} s`), title: (v, r) => `Lap press minus boundary: start ${sgn(v)} s, end ${sgn(r.press_end_dt)} s (positive = pressed late)` },
+      { key: "flag", label: "Press check", title: (v, r) => v || (checkState(r) ? "confirmed" : "no lap press near the boundary"), fmt: (v, r) => checkCell(r), sortVal: (r) => checkState(r) },
+    ] : []),
+  ];
+  tableState.reps ||= { key: "n", dir: 1 };
+
+  const brk = an.breaks.map((b, i) => ({ ...b, after: i + 1 }));
+  const brkCols = [
+    { key: "after", label: iv ? "After rep" : "After segment", num: true },
+    { key: "time", label: "Duration", num: true, fmt: dur },
+    { key: "standing", label: "Standing", num: true, fmt: dur },
+    { key: "dist", label: "Distance (m)", num: true, fmt: n0 },
+    { key: "hr_peak", label: "Peak HR", num: true, fmt: n0 },
+    { key: "hr_60", label: "HR after 60 s", num: true, fmt: n0 },
+    { key: "hr_end", label: "HR at restart", num: true, fmt: n0 },
+    { key: "hr_drop", label: "HR drop", num: true, fmt: n0 },
+  ];
+  tableState.breaks ||= { key: "after", dir: 1 };
+
+  const kmCols = [
+    { key: "km", label: "Km", num: true },
+    { key: "time", label: "Time (= pace /km)", num: true, fmt: dur },
+    { key: "hr", label: "Avg HR", num: true, fmt: n0 },
+  ];
+  tableState.km ||= { key: "km", dir: 1 };
+
+  const lc = an.lag_compensation;
+  const note = `<p class="note">Watch ${esc(DEVICE_LABEL[an.device] || an.device || "?")}, ${an.mode === "track" ? "track mode" : an.mode === "gps" ? "GPS mode" : esc(an.mode || "?")}, detector v${esc(an.version || "?")}.${lc ? ` Lag compensation: start ${sgn(lc.start_s)} s, end ${sgn(lc.end_s)} s (${esc(lc.source || "default")}).` : ""}${iv ? " Darker strips around each rep edge show the ±1σ boundary uncertainty." : ""}</p>`;
+  return `<section><div class="head"><h1 style="margin:0">${esc(a.name)}</h1><span class="count">${esc(a.date.slice(0, 16))}</span><div class="tools">${picker}</div></div>
+      ${groupInfo(id)}${table("cmp", cmpCols, cmp, { short: true })}${note}</section>
+    <section><div class="head"><h2>Pace and heart rate</h2>${iv ? `<span class="count">Reps shaded</span>` : ""}</div>
+      ${chartBox("s-pace", "Pace (min/km), 10 s smoothing")}${chartBox("s-hr", "Heart rate (bpm)")}</section>
+    <section><div class="head"><h2>${iv ? "Reps" : "Running segments"}</h2><span class="count">${n0(reps.length)}</span></div>${table("reps", repCols, reps, { short: true })}</section>
+    <section><div class="head"><h2>${iv ? "Breaks" : "Stops"}</h2><span class="count">${n0(brk.length)}</span></div>${brk.length ? table("breaks", brkCols, brk, { short: true }) : `<div class="empty">No stops.</div>`}</section>
+    ${!iv ? `<section><div class="head"><h2>Km splits</h2></div>${table("km", kmCols, an.km_splits, { short: true })}</section>` : ""}
+    ${legsPauses(id)}
+    ${similarSection(id)}`;
+}
+
+// ---------- session groups (groups.json from scripts/session_groups.py) ----------
+const G = DATA.groups || { fields: { legs: [], pauses: [], reps: [] }, places: {}, areas: {}, routes: {}, activities: {} };
+const GA = G.activities;
+const chipSets = {};
+const legPick = {};
+let grpFilter = { sport: "" };
+const asRows = (field, rows) => (rows || []).map((r, i) => Object.assign({ n: i + 1 }, Object.fromEntries(G.fields[field].map((k, j) => [k, r[j]]))));
+const sportOf = (id) => runs[id]?.sport || GA[id]?.sport || (/skiing/.test(actById(id)?.type || "") ? "ski" : "run");
+const SPORT_LABEL = { run: "Run", ski: "Ski", hike: "Hike", other: "Other" };
+const SESSION_TYPE = { intervals_track: "Intervals, track", intervals_road: "Intervals, road", intervals_treadmill: "Intervals, treadmill", run_nogps: "Run, no GPS", run_other: "Run, other", "race?": "Race?", ski_easy: "Ski easy", ski_hard: "Ski hard", ski_long: "Ski long", stop_watch: "Stopwatch" };
+const stype = (t) => SESSION_TYPE[t] || typeLabel(t);
+const SHAPE_LABEL = { laps: "laps", out_and_back: "out & back", point_to_point: "point to point", loop_cw: "loop, clockwise", loop_ccw: "loop, anticlockwise" };
+const sessionHref = (id) => (runs[id] ? href({ step: "runs", tab: "session", item: String(id) }) : href({ step: "activities", tab: "list", item: String(id) }));
+const groupsHref = (item) => href({ step: "runs", tab: "groups", item });
+const compareHref = (ids) => href({ step: "runs", tab: "compare", item: ids.map(String).join(",") });
+const median = (arr) => { const s = arr.filter((v) => v != null).sort((a, b) => a - b); return s.length ? (s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : null; };
+const mean = (arr) => { const v = arr.filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+const kmhPace = (kmh) => (kmh ? pace(kmh / 3.6) : DASH);
+function chips(group, counts, label = (k) => k) {
+  const set = (chipSets[group] ||= new Set());
+  return `<div class="chips">${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<button class="chip ${set.has(k) ? "on" : ""}" data-group="${group}" data-chip="${esc(k)}">${esc(label(k))} ${n0(n)}</button>`).join("")}</div>`;
+}
+const chipPass = (group, v) => !chipSets[group]?.size || chipSets[group].has(v);
+const countBy = (arr, f) => arr.reduce((o, x) => { const k = f(x); if (k != null) o[k] = (o[k] || 0) + 1; return o; }, {});
+
+function pageGroups(st) {
+  if (!DATA.groups) return `<h1>Places & routes</h1><div class="empty">No groups yet. Run scripts/session_groups.py, then rebuild the report.</div>`;
+  if (G.routes[st.item]) return pageRoute(st.item);
+  const place = st.item.startsWith("place:") ? st.item.slice(6) : "";
+  const all = Object.entries(GA).map(([id, g]) => ({ id, ...g }));
+  const bySport = all.filter((g) => !grpFilter.sport || g.sport === grpFilter.sport);
+  const acts = bySport.filter((g) => chipPass("grp", g.type));
+  const sports = countBy(all, (g) => g.sport);
+  const sportSel = `<select id="grpsport"><option value="">All sports</option>${Object.keys(sports).map((k) => `<option value="${k}" ${k === grpFilter.sport ? "selected" : ""}>${esc(SPORT_LABEL[k] || k)} (${n0(sports[k])})</option>`).join("")}</select>`;
+  // places
+  const pl = {};
+  for (const g of acts) {
+    if (!g.place) continue;
+    const p = (pl[g.place] ||= { key: "place:" + g.place, name: g.place, area: G.areas[g.area]?.name || g.area, n: 0, types: {}, routes: new Set(), first: g.date, last: g.date });
+    p.n++; p.types[g.type] = (p.types[g.type] || 0) + 1; if (g.route) p.routes.add(g.route);
+    if (g.date < p.first) p.first = g.date; if (g.date > p.last) p.last = g.date;
+  }
+  const places = Object.values(pl).map((p) => ({ ...p, nroutes: p.routes.size, typesL: Object.entries(p.types).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${stype(t)} ${n}`).join(", ") }));
+  tableState.gplaces ||= { key: "n", dir: -1 };
+  const placeCols = [
+    { key: "name", label: "Place", title: (v, r) => `${v} (area ${r.area})` },
+    { key: "n", label: "Sessions", num: true, fmt: n0 },
+    { key: "nroutes", label: "Routes", num: true, fmt: n0 },
+    { key: "last", label: "Last" },
+    { key: "typesL", label: "Types" },
+  ];
+  // routes
+  const inSet = new Set(acts.map((g) => g.id));
+  const routes = Object.entries(G.routes).filter(([, r]) => !place || r.place === place).map(([rid, r]) => {
+    const mem = r.members.map(String).filter((m) => inSet.has(m));
+    const dates = mem.map((m) => GA[m]?.date).filter(Boolean).sort();
+    return { id: rid, name: r.name, place: r.place, sport: r.sport, shape: r.shape, dist: r.dist_km, n: mem.length, total: r.n, first: dates[0], last: dates[dates.length - 1], legs: r.legs_table ? r.legs_table.legs.length : null, mode: r.legs_mode };
+  }).filter((r) => r.n > 0);
+  tableState.groutes ||= { key: "n", dir: -1 };
+  const routeCols = [
+    { key: "name", label: "Route" },
+    { key: "sport", label: "Sport", fmt: (v) => esc(SPORT_LABEL[v] || v) },
+    { key: "shape", label: "Shape", fmt: (v) => esc(SHAPE_LABEL[v] || v) },
+    { key: "dist", label: "km", num: true, fmt: n1 },
+    { key: "n", label: "Sessions", num: true, fmt: (v, r) => (v === r.total ? n0(v) : `${n0(v)} of ${n0(r.total)}`) },
+    { key: "first", label: "First" },
+    { key: "last", label: "Last" },
+    { key: "legs", label: "Legs", num: true, fmt: (v, r) => (v == null ? DASH : `${n0(v)} ${r.mode === "stops" ? "between stops" : "of ~1 km"}`) },
+  ];
+  // sessions
+  const sess = acts.filter((g) => !place || g.place === place).map((g) => ({ ...g, name: actById(g.id)?.name, routeName: g.route ? G.routes[g.route]?.name : null, speed: g.dist_km && g.moving_s ? (g.dist_km * 3600) / g.moving_s : null }));
+  tableState.gsess ||= { key: "date", dir: -1 };
+  const sessCols = [
+    { key: "date", label: "Date" },
+    { key: "sport", label: "Sport", fmt: (v) => esc(SPORT_LABEL[v] || v) },
+    { key: "type", label: "Type", fmt: (v, r) => esc(stype(v) + (r.type_detail ? ` · ${r.type_detail}` : "")) },
+    { key: "sig", label: "Workout" },
+    { key: "place", label: "Place" },
+    { key: "routeName", label: "Route", fmt: (v, r) => (v ? esc(`${r.route} ${v}`) : DASH) },
+    { key: "dist_km", label: "km", num: true, fmt: (v, r) => (v == null ? DASH : n1(v) + (r.dist_trusted === false ? "?" : "")) },
+    { key: "dur_s", label: "Elapsed", num: true, fmt: dur },
+    { key: "moving_s", label: "Moving", num: true, fmt: dur },
+    { key: "pause_s", label: "Paused", num: true, fmt: dur },
+    { key: "n_pauses", label: "Pauses", num: true, fmt: n0 },
+    { key: "speed", label: "km/h", num: true, fmt: n1 },
+  ];
+  const pname = place ? `<a href="${groupsHref("")}">All places</a> / ${esc(place)}` : "";
+  return `<section><div class="head"><h1 style="margin:0">Places & routes</h1><span class="count">${n0(acts.length)} of ${n0(all.length)} sessions</span><div class="tools">${sportSel}</div></div>
+    ${chips("grp", countBy(bySport, (g) => g.type), stype)}
+    <p class="note" style="margin-bottom:var(--space-2)">Places are clusters of start points (400 m), routes are sessions with ≥ 60 % shared track. Click a place to narrow the routes and sessions, a route to compare its legs and stops, a session to open it.</p></section>
+    <section><div class="cols" style="grid-template-columns: minmax(0, 2fr) minmax(0, 3fr)">
+      <div><div class="head"><h2>Places</h2><span class="count">${n0(places.length)}</span></div>${table("gplaces", placeCols, places, { rowKey: "key", selected: st.item, mid: true })}</div>
+      <div><div class="head"><h2>Routes ${place ? "from " + esc(place) : ""}</h2><span class="count">${n0(routes.length)}</span></div>${table("groutes", routeCols, routes, { rowKey: "id", mid: true })}</div>
+    </div></section>
+    <section><div class="head"><h2>Sessions</h2>${pname ? `<span class="count">${pname}</span>` : ""}<span class="count">${n0(sess.length)}</span></div>${table("gsess", sessCols, sess, { rowLink: (r) => sessionHref(r.id) })}</section>`;
+}
+
+function pageRoute(rid) {
+  const R = G.routes[rid];
+  const mem = R.members.map(String);
+  const dates = mem.map((m) => GA[m]?.date).filter(Boolean).sort();
+  const kv = `<dl class="kv">
+    <dt>Place</dt><dd><a href="${groupsHref("place:" + R.place)}">${esc(R.place)}</a></dd><dt>Sport</dt><dd>${esc(SPORT_LABEL[R.sport] || R.sport)}</dd>
+    <dt>Shape</dt><dd>${esc(SHAPE_LABEL[R.shape] || R.shape)}</dd><dt>Distance</dt><dd>${n2(R.dist_km)} km</dd>
+    <dt>Sessions</dt><dd>${n0(R.n)}</dd><dt>First / last</dt><dd>${esc(dates[0] || DASH)} / ${esc(dates[dates.length - 1] || DASH)}</dd>
+    <dt>Reference</dt><dd><a href="${sessionHref(R.medoid)}">${esc(GA[R.medoid]?.date || R.medoid)}</a> (medoid)</dd><dt>Legs</dt><dd>${R.legs_table ? (R.legs_mode === "stops" ? "split at common stops" : "equal ~1 km") : DASH}</dd>
+  </dl>`;
+  const head = `<section><div class="head"><h1 style="margin:0">${esc(R.name)}</h1><span class="count">${esc(rid)}</span><div class="tools"><a href="${groupsHref("place:" + R.place)}">Back to ${esc(R.place)}</a></div></div>${kv}</section>`;
+  if (!R.legs_table) {
+    const rows = mem.map((id) => ({ id, ...GA[id] }));
+    tableState.rmem ||= { key: "date", dir: -1 };
+    return head + `<section><div class="head"><h2>Sessions</h2><span class="count">${n0(rows.length)}</span><div class="tools"><a href="${compareHref(mem.slice(0, 6))}">Compare</a></div></div>${table("rmem", [
+      { key: "date", label: "Date" }, { key: "type", label: "Type", fmt: (v) => esc(stype(v)) }, { key: "sig", label: "Workout" },
+      { key: "dist_km", label: "km", num: true, fmt: n1 }, { key: "dur_s", label: "Elapsed", num: true, fmt: dur }, { key: "moving_s", label: "Moving", num: true, fmt: dur }, { key: "pause_s", label: "Paused", num: true, fmt: dur },
+    ], rows, { short: true, rowLink: (r) => sessionHref(r.id) })}<p class="note">Leg comparison needs at least 3 sessions on the route.</p></section>`;
+  }
+  const types = countBy(R.legs_table.sessions, (s) => s.type);
+  return head + `<section><div class="head"><h2>Sessions on this route</h2></div>${chips("route-" + rid, types, stype)}</section>` + routeLegs(rid, null, "r");
+}
+
+// Leg and stop comparison for a route; ids = subset of sessions (null = all, filtered by the route's type chips)
+function routeLegs(rid, ids, pfx) {
+  const R = G.routes[rid], LT = R.legs_table, legs = LT.legs, wps = R.waypoints || [];
+  const sess = LT.sessions.filter((s) => (ids ? ids.includes(String(s.id)) : chipPass("route-" + rid, s.type)));
+  if (!sess.length) return `<div class="empty">No sessions match the filter.</div>`;
+  const sport = R.sport, spd = sport === "ski" ? n1 : kmhPace, spdL = sport === "ski" ? "km/h" : "/km";
+  const xMax = Math.max(legs[legs.length - 1].to_km, R.ref ? R.ref.km[R.ref.km.length - 1] : 0);
+  const ax = { xMin: 0, xMax, xFmt: (v) => n1(v), tipX: (x) => `km ${n2(x)}` };
+  const marks = wps.map((w) => ({ x: w.km, label: w.name.startsWith("km ") ? w.name.slice(3) : w.name.length > 14 ? w.name.slice(0, 13) + "…" : w.name }));
+  // elevation of the reference
+  if (R.ref) drawChart(`${pfx}-alt`, [{ points: R.ref.km.map((k, i) => [k, R.ref.alt[i]]), color: "--chart-3", label: "Elevation", fmt: (v) => n0(v) + " m" }], { ...ax, height: 150, marks: LT && R.legs_mode === "stops" ? marks : null });
+  // best per leg among the shown sessions
+  const best = legs.map((_, i) => Math.max(...sess.map((s) => s.legs[i]?.speed_kmh ?? -1)));
+  const latest = sess.slice().sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+  const fastest = sess.filter((s) => s.legs.every((l) => l)).sort((a, b) => a.moving - b.moving)[0];
+  const pick = sess.find((s) => String(s.id) === legPick[rid]);
+  const step = (s) => s.legs.flatMap((l, i) => (l ? [[legs[i].from_km, l.speed_kmh], [legs[i].to_km, l.speed_kmh]] : [[legs[i].from_km, null], [legs[i].to_km, null]]));
+  const medLeg = legs.map((_, i) => median(sess.map((s) => s.legs[i]?.speed_kmh)));
+  const fmtS = (v) => (sport === "ski" ? n1(v) + " km/h" : kmhPace(v) + " /km");
+  const CMP_COLORS = ["--chart-1", "--chart-2", "--chart-3", "--chart-4"];
+  const cmpSess = ids ? ids.map((i) => sess.find((s) => String(s.id) === String(i))).filter(Boolean) : null;
+  const series = cmpSess ? [
+    { points: legs.flatMap((l, i) => [[l.from_km, medLeg[i]], [l.to_km, medLeg[i]]]), color: "--text-muted", label: "Median", fmt: fmtS, dash: "4 3", width: 1.2 },
+    ...cmpSess.map((s, i) => ({ points: step(s), color: CMP_COLORS[i % 4], label: s.date, fmt: fmtS, width: 2, dash: i >= 4 ? "5 3" : null })),
+  ] : [
+    { points: legs.flatMap((l, i) => [[l.from_km, medLeg[i]], [l.to_km, medLeg[i]]]), color: "--text-muted", label: "Median", fmt: fmtS, dash: "4 3", width: 1.6 },
+    ...sess.filter((s) => s !== latest && s !== fastest && s !== pick).map((s) => ({ points: step(s), color: "--chart-muted", width: 0.8, noTip: true })),
+    fastest ? { points: step(fastest), color: "--chart-3", label: `Fastest ${fastest.date}`, fmt: fmtS, width: 2 } : null,
+    latest && latest !== fastest ? { points: step(latest), color: "--chart-1", label: `Latest ${latest.date}`, fmt: fmtS, width: 2 } : null,
+    pick && pick !== latest && pick !== fastest ? { points: step(pick), color: "--chart-2", label: `${pick.date}`, fmt: fmtS, width: 2 } : null,
+  ].filter(Boolean);
+  drawChart(`${pfx}-speed`, series, { ...ax, height: 170, marks: R.legs_mode === "stops" ? marks : null });
+  const legend = cmpSess ? [{ label: "Median (dashed)", color: "--text-muted" }, ...cmpSess.map((s, i) => ({ label: s.date, color: CMP_COLORS[i % 4] }))] : [{ label: "Median (dashed)", color: "--text-muted" }, fastest && { label: `Fastest moving ${fastest.date}`, color: "--chart-3" }, latest && latest !== fastest && { label: `Latest ${latest.date}`, color: "--chart-1" }, pick && pick !== latest && pick !== fastest && { label: pick.date, color: "--chart-2" }, { label: "Others", color: "--chart-muted" }].filter(Boolean);
+  const picker = `<select id="legpick" data-route="${rid}"><option value="">Highlight a session</option>${sess.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).map((s) => `<option value="${s.id}" ${String(s.id) === legPick[rid] ? "selected" : ""}>${s.date} ${esc(stype(s.type))}</option>`).join("")}</select>`;
+  // trend
+  const byDate = sess.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (!ids) drawChart(`${pfx}-trend`, [
+    { points: byDate.map((s) => [Date.parse(s.date), s.moving / 60]), color: "--chart-1", label: "Moving", fmt: (v) => n1(v) + " min", dots: true },
+    { points: byDate.map((s) => [Date.parse(s.date), s.pause / 60]), color: "--chart-2", label: "Paused", fmt: (v) => n1(v) + " min", dots: true },
+  ], { height: 150, zero: true, tipX: (x) => ymd(x), xTicks: (x0, x1) => (x1 - x0 > 400 * 86400000 ? yearTicks(x0, x1) : niceTicks(x0, x1, 5).map((v) => [v, ymd(v).slice(0, 7)])) });
+  // per leg summary
+  const legRows = legs.map((l, i) => {
+    const v = sess.map((s) => s.legs[i]).filter(Boolean);
+    const b = sess.filter((s) => s.legs[i]).sort((x, y) => y.legs[i].speed_kmh - x.legs[i].speed_kmh)[0];
+    const stopAt = R.legs_mode === "stops" ? sess.map((s) => s.stops?.[i + 1]) : [];
+    return { n: i + 1, name: l.name, from: l.from_km, to: l.to_km, len: l.to_km - l.from_km, climb: l.climb_m, desc: l.desc_m, grade: ((l.climb_m - l.desc_m) / ((l.to_km - l.from_km) * 1000)) * 100,
+      med: median(v.map((x) => x.speed_kmh)), best: b?.legs[i].speed_kmh, bestDate: b?.date, bestId: b?.id, mov: median(v.map((x) => x.moving_s)), hr: median(v.map((x) => x.hr)), nv: v.length,
+      stop: i < legs.length - 1 ? median(stopAt) : null, share: i < legs.length - 1 && R.legs_mode === "stops" ? wps[i + 1]?.share_stopped : null };
+  });
+  tableState[pfx + "legsum"] = { key: "_", dir: 0 };
+  const legSumCols = [
+    { key: "name", label: "Leg" },
+    { key: "len", label: "km", num: true, fmt: n2, title: (v, r) => `km ${n2(r.from)} – ${n2(r.to)}` },
+    { key: "climb", label: "Climb (m)", num: true, fmt: n0 },
+    { key: "desc", label: "Descent (m)", num: true, fmt: n0 },
+    { key: "grade", label: "Net grade", num: true, fmt: (v) => n1(v) + " %" },
+    { key: "mov", label: "Median time", num: true, fmt: dur },
+    { key: "med", label: `Median ${spdL}`, num: true, fmt: spd },
+    { key: "best", label: `Best ${spdL}`, num: true, fmt: (v, r) => (v == null ? DASH : `${spd(v)} <span class="muted">${esc(r.bestDate)}</span>`) },
+    { key: "hr", label: "Median HR", num: true, fmt: n0 },
+    ...(R.legs_mode === "stops" ? [
+      { key: "stop", label: "Median stop after", num: true, fmt: (v) => (v == null ? DASH : dur(v)) },
+      { key: "share", label: "Stopping here (all on route)", num: true, fmt: (v) => (v == null ? DASH : n0(v * 100) + " %") },
+    ] : []),
+    { key: "nv", label: "Sessions", num: true, fmt: n0 },
+  ];
+  // per session x leg
+  const rows = sess.map((s) => {
+    const r = { id: s.id, date: s.date, type: s.type, dir: s.dir, elapsed: s.elapsed, moving: s.moving, pause: s.pause, s,
+      stopsT: (s.stops || []).reduce((a, b) => a + (b || 0), 0), other: s.legs.reduce((a, l) => a + (l?.pause_s || 0), 0),
+      note: s.legs_off_route ? "off route" : s.legs.some((l) => !l) ? "partial" : s.legs.some((l) => l?.partial) ? "partly covered" : "" };
+    s.legs.forEach((l, i) => { r["l" + i] = l ? l.speed_kmh : null; });
+    (s.stops || []).forEach((v, i) => { r["w" + i] = v; });
+    return r;
+  });
+  const base = [
+    { key: "date", label: "Date" },
+    { key: "type", label: "Type", fmt: (v) => esc(stype(v)) },
+    ...(new Set(sess.map((s) => s.dir)).size > 1 ? [{ key: "dir", label: "Dir" }] : []),
+  ];
+  const legCols = legs.map((l, i) => ({
+    key: "l" + i, label: R.legs_mode === "stops" ? `${n1(l.from_km)}–${n1(l.to_km)}` : `${i + 1}`, num: true, sortVal: (r) => r["l" + i],
+    fmt: (v, r) => (v == null ? DASH : v >= best[i] - 1e-9 ? `<span class="best">${spd(v)}</span>` : spd(v)),
+    title: (v, r) => { const x = r.s.legs[i]; return x ? `${l.name}: ${fmtS(x.speed_kmh)}, moving ${dur(x.moving_s)}${x.pause_s ? `, other pauses ${dur(x.pause_s)}` : ""}, HR ${n0(x.hr)}, climb ${n0(x.climb_m)} m, rank ${x.rank}${x.partial ? ", partly covered" : ""}` : `${l.name}: not covered`; },
+  }));
+  tableState[pfx + "legs"] ||= { key: "date", dir: -1 };
+  const legTable = [...base,
+    { key: "elapsed", label: "Elapsed", num: true, fmt: dur },
+    { key: "moving", label: "Moving", num: true, fmt: dur },
+    { key: "pause", label: "Paused", num: true, fmt: dur },
+    ...legCols,
+    { key: "note", label: "Note", fmt: (v) => (v ? esc(v) : "") },
+  ];
+  const stopCols = [...base,
+    ...wps.map((w, i) => ({ key: "w" + i, label: w.name, num: true, fmt: (v) => (v ? dur(v) : v === 0 ? `<span class="muted">0</span>` : DASH), title: (v) => `${w.name} (km ${n2(w.km)}): ${v == null ? "not reached" : dur(v)}${i === 0 ? " incl. standing before the start" : i === wps.length - 1 ? " incl. standing after the finish" : ""}` })),
+    { key: "stopsT", label: "At stops", num: true, fmt: dur },
+    { key: "other", label: "Other pauses", num: true, fmt: dur },
+    { key: "pause", label: "Total paused", num: true, fmt: dur },
+  ];
+  tableState[pfx + "stops"] ||= { key: "date", dir: -1 };
+  const ttl = ids ? "" : `<div class="tools"><a href="${compareHref(byDate.slice(-4).reverse().map((s) => s.id))}">Compare latest 4</a></div>`;
+  return `<section><div class="head"><h2>Profile and legs</h2><span class="count">Reference session${R.legs_mode === "stops" ? "; dashed lines = common stops" : "; legs of equal length"}</span>${ttl}</div>
+      ${R.ref ? chartBox(`${pfx}-alt`, "Elevation (m) by km") : ""}
+      <div class="head"><span class="title muted">Speed per leg (${sport === "ski" ? "km/h" : "km/h; tables show pace"})</span><div class="tools">${ids ? "" : picker}</div></div>
+      ${chartBox(`${pfx}-speed`, "", legend)}
+      ${table(pfx + "legsum", legSumCols, legRows, { short: true })}</section>
+    <section><div class="head"><h2>Leg speed per session</h2><span class="count">${n0(sess.length)} sessions; ${spdL} over the covered reference length; best per leg in green; hover for moving time</span></div>
+      ${table(pfx + "legs", legTable, rows, { short: true, rowLink: (r) => sessionHref(r.id) })}</section>
+    ${wps.length && R.legs_mode === "stops" ? `<section><div class="head"><h2>Stops</h2><span class="count">Pause at each common stop; other pauses are the rest</span></div>
+      ${table(pfx + "stops", stopCols, rows, { short: true, rowLink: (r) => sessionHref(r.id) })}</section>` : ""}
+    ${ids ? "" : `<section><div class="head"><h2>Moving time and pauses over time</h2></div>${chartBox(`${pfx}-trend`, "Minutes per session", [{ label: "Moving", color: "--chart-1" }, { label: "Paused", color: "--chart-2" }])}</section>`}`;
+}
+
+// Session page sections from groups.json
+function groupInfo(id) {
+  const g = GA[id];
+  if (!g) return `<p class="note">Not in groups.json (run scripts/session_groups.py).</p>`;
+  const R = g.route ? G.routes[g.route] : null;
+  return `<dl class="kv">
+    <dt>Place</dt><dd>${g.place ? `<a href="${groupsHref("place:" + g.place)}">${esc(g.place)}</a>` : DASH}${g.area && G.areas[g.area] ? ` <span class="muted">(area ${esc(G.areas[g.area].name)})</span>` : ""}</dd>
+    <dt>Route</dt><dd>${R ? `<a href="${groupsHref(g.route)}">${esc(g.route)} ${esc(R.name)}</a> <span class="muted">${esc(g.route_dir || "")}, ${n0(R.n)} sessions</span>` : DASH}</dd>
+    <dt>Type</dt><dd>${esc(stype(g.type))}${g.type_detail ? ` <span class="muted">${esc(g.type_detail)}</span>` : ""}${g.surface ? ` <span class="muted">· ${esc(g.surface)}</span>` : ""}</dd>
+    <dt>Workout</dt><dd>${esc(g.sig || DASH)}</dd>
+    <dt>Moving / paused</dt><dd>${dur(g.moving_s)} / ${dur(g.pause_s)} <span class="muted">${n0(g.n_pauses)} pauses, longest ${dur(g.longest_pause_s)}</span></dd>
+    <dt>Distance</dt><dd>${g.dist_km == null ? DASH : n2(g.dist_km) + " km"}${g.dist_trusted === false ? ` <span class="muted">no GPS, not trusted</span>` : ""}</dd>
+  </dl>`;
+}
+function legsPauses(id) {
+  const g = GA[id];
+  if (!g || !g.legs) return `<section><div class="head"><h2>Legs & pauses</h2></div><div class="empty">No legs for this session (no distance in the file).</div></section>`;
+  const ski = g.sport === "ski";
+  const legs = asRows("legs", g.legs), pauses = asRows("pauses", g.pauses);
+  tableState.slegs ||= { key: "n", dir: 1 };
+  tableState.spaus ||= { key: "n", dir: 1 };
+  const legCols = [
+    { key: "n", label: "Leg", num: true },
+    { key: "t", label: "Start", num: true, fmt: dur },
+    { key: "dur_s", label: "Time", num: true, fmt: dur },
+    { key: "dist_m", label: "km", num: true, fmt: (v) => n2(v / 1000) },
+    ski ? { key: "kmh", label: "km/h", num: true, fmt: n1 } : { key: "kmh", label: "Pace", num: true, fmt: kmhPace },
+    { key: "hr", label: "Avg HR", num: true, fmt: n0 },
+    { key: "hr_max", label: "Max HR", num: true, fmt: n0 },
+    { key: "climb_m", label: "Climb (m)", num: true, fmt: n0 },
+    { key: "desc_m", label: "Descent (m)", num: true, fmt: n0 },
+    { key: "grade_pct", label: "Grade", num: true, fmt: (v) => (v == null ? DASH : n1(v) + " %") },
+  ];
+  const pauseCols = [
+    { key: "n", label: "Pause", num: true },
+    { key: "t", label: "At", num: true, fmt: dur },
+    { key: "km", label: "At km", num: true, fmt: n2 },
+    { key: "dur_s", label: "Duration", num: true, fmt: dur },
+    { key: "timer", label: "Timer", fmt: (v) => (v ? "stopped" : "running") },
+  ];
+  return `<section><div class="head"><h2>Legs & pauses</h2><span class="count">${n0(legs.length)} legs, ${n0(pauses.length)} pauses ≥ 15 s, ${dur(g.pause_s)} paused</span></div>
+    <div class="cols" style="grid-template-columns: minmax(0, 3fr) minmax(0, 2fr)">
+      <div>${table("slegs", legCols, legs, { short: true })}</div>
+      <div>${pauses.length ? table("spaus", pauseCols, pauses, { short: true }) : `<div class="empty">No pauses.</div>`}</div>
+    </div></section>`;
+}
+function similarSection(id) {
+  const g = GA[id];
+  if (!g || !g.similar) return "";
+  const block = (key, title) => {
+    const list = g.similar[key] || [];
+    const rows = list.map((s) => ({ ...GA[s.id], id: s.id, score: s.score, reasons: s.reasons, name: actById(s.id)?.name }));
+    tableState["sim" + key] ||= { key: "score", dir: -1 };
+    return `<div><div class="head"><h2>${title}</h2>${list.length ? `<div class="tools"><a href="${compareHref([id, ...list.map((s) => s.id)])}">Compare</a></div>` : ""}</div>${rows.length ? table("sim" + key, [
+      { key: "date", label: "Date" },
+      { key: "type", label: "Type", fmt: (v, r) => esc(stype(v) + (r.sig ? " " + r.sig : "")) },
+      { key: "dist_km", label: "km", num: true, fmt: n1 },
+      { key: "dur_s", label: "Time", num: true, fmt: dur },
+      { key: "score", label: "Score", num: true, fmt: n2 },
+      { key: "reasons", label: "Why" },
+    ], rows, { short: true, rowLink: (r) => sessionHref(r.id) }) : `<div class="empty">No similar sessions.</div>`}</div>`;
+  };
+  return `<section><div class="head"><h2>Similar sessions</h2><span class="count">Top 5 of the same sport; score 0–1</span></div>
+    <div class="cols" style="grid-template-columns: repeat(2, minmax(0, 1fr))">${block("route", "Same route")}${block("workout", "Same workout")}</div></section>`;
+}
+function speedSeries(run, k = 1) {
+  const ix = Object.fromEntries(run.cols.map((c, i) => [c, i]));
+  const sp = run.rows.map((r) => r[ix.speed]);
+  return run.rows.map((r, i) => [r[ix.t], mean(sp.slice(Math.max(0, i - k), i + k + 1)) * 3.6]);
+}
+function pageSkiSession(id, picker) {
+  const run = runs[id], a = actById(id), g = GA[id] || {}, g0 = run.garmin || {};
+  // ski folders often lack activity.json: fall back to the activity list
+  const gm = { dist: g0.dist ?? (a.dist != null ? a.dist * 1000 : null), elapsed: g0.elapsed ?? a.dur, moving: g0.moving ?? a.moving, hr: g0.hr ?? a.hr, maxhr: g0.maxhr ?? a.maxhr };
+  const ix = Object.fromEntries(run.cols.map((c, i) => [c, i]));
+  const hrs = run.rows.map((r) => r[ix.hr]).filter((v) => v != null);
+  const last = run.rows[run.rows.length - 1];
+  const cmp = [
+    { m: "Distance", w: g.dist_km != null ? g.dist_km * 1000 : last?.[ix.dist], g: gm.dist, f: (v) => n0(v) + " m" },
+    { m: "Elapsed time", w: g.dur_s ?? last?.[ix.t], g: gm.elapsed, f: dur },
+    { m: "Moving time", w: g.moving_s, g: gm.moving, f: dur },
+    { m: "Paused", w: g.pause_s, g: gm.elapsed != null && gm.moving != null ? gm.elapsed - gm.moving : null, f: dur },
+    { m: "Average speed (moving)", w: g.dist_km && g.moving_s ? (g.dist_km * 3600) / g.moving_s : null, g: gm.dist && gm.moving ? (gm.dist * 3.6) / gm.moving : null, f: (v) => n1(v) + " km/h" },
+    { m: "Average HR", w: mean(hrs), g: gm.hr, f: n0 },
+    { m: "Max HR", w: hrs.length ? Math.max(...hrs) : null, g: gm.maxhr, f: n0 },
+    { m: "Ascent", w: null, g: a.elev, f: (v) => n0(v) + " m" },
+  ].map((r) => ({ ...r, d: diff(r.w, r.g, r.f) }));
+  tableState.skicmp = { key: "_", dir: 0 };
+  const bands = asRows("pauses", g.pauses).map((p) => [p.t, p.t + p.dur_s]);
+  const base = { xTicks: minTicks, tipX: (x) => dur(x), bands, height: 140 };
+  drawChart("k-speed", [{ points: speedSeries(run), color: "--chart-1", label: "Speed", fmt: (v) => n1(v) + " km/h" }], { ...base, zero: true, yMax: percentile(speedSeries(run).map((p) => p[1]), 0.995) });
+  drawChart("k-hr", [{ points: hrSeries(run), color: "--chart-2", label: "HR", fmt: n0 }], base);
+  drawChart("k-alt", [{ points: run.rows.map((r) => [r[ix.t], r[ix.alt]]), color: "--chart-3", label: "Elevation", fmt: (v) => n0(v) + " m" }], base);
+  return `<section><div class="head"><h1 style="margin:0">${esc(a.name)}</h1><span class="count">${esc(a.date.slice(0, 16))} · Skiing</span><div class="tools">${picker}</div></div>
+      ${groupInfo(id)}
+      ${table("skicmp", [
+        { key: "m", label: "Measure" },
+        { key: "w", label: "Watch file", num: true, fmt: (v, r) => (v == null ? DASH : r.f(v)) },
+        { key: "g", label: "Garmin activity", num: true, fmt: (v, r) => (v == null ? DASH : r.f(v)) },
+        { key: "d", label: "Difference", num: true },
+      ], cmp, { short: true })}
+      <p class="note">Ski sessions have no rep detection (every downhill would look like a rep); legs are the stretches between pauses. Moving time here = elapsed − pauses ≥ 15 s, so it differs from Garmin's. Series thinned to 10 s.</p></section>
+    <section><div class="head"><h2>Speed, heart rate, elevation</h2><span class="count">Pauses shaded</span></div>
+      ${chartBox("k-speed", "Speed (km/h)")}${chartBox("k-hr", "Heart rate (bpm)")}${chartBox("k-alt", "Elevation (m)")}</section>
+    ${legsPauses(id)}
+    ${similarSection(id)}`;
+}
+
+function pageRunCompare(st) {
+  let ids = st.item ? [...new Set(st.item.split(","))].filter((x) => runs[x] || GA[x] || actById(x)) : runIds().slice(0, 3);
+  if (!ids.length) return `<h1>Compare</h1><div class="empty">No sessions to compare. Open a session and use Compare under Similar sessions.</div>`;
+  const per = ids.map((id) => {
+    const run = runs[id], g = GA[id] || {}, a = actById(id) || {}, an = run?.analysis, T = an?.totals || {};
+    const reps = (g.reps || []).map((r) => ({ time: r[0], dist: r[1], speed: r[2], hr: r[3] }));
+    const dist = g.dist_km != null ? g.dist_km * 1000 : T.dist ?? (a.dist ? a.dist * 1000 : null);
+    const moving = g.moving_s ?? T.moving ?? a.moving;
+    return {
+      id, a, g, run, sport: sportOf(id),
+      dist, elapsed: g.dur_s ?? T.elapsed ?? a.dur, moving, pause: g.pause_s, npause: g.n_pauses, longest: g.longest_pause_s,
+      speed: dist && moving ? (dist * 3.6) / moving : null, hr: a.hr ?? T.hr, maxhr: a.maxhr ?? T.maxhr, elev: a.elev, load: a.load,
+      reps: reps.length || null, repTime: mean(reps.map((r) => r.time)), repDist: mean(reps.map((r) => r.dist)),
+      repSpeed: reps.length ? reps.reduce((x, r) => x + r.dist, 0) / reps.reduce((x, r) => x + r.time, 0) : null,
+      repHr: mean(reps.map((r) => r.hr)), brk: mean(g.breaks_s || []),
+    };
+  });
+  const anySki = per.some((p) => p.sport === "ski"), anyRun = per.some((p) => p.sport === "run");
+  const sDur = (v) => (v < 0 ? "−" : "+") + dur(Math.abs(v));
+  const sNum = (f) => (v) => (v < 0 ? "−" : "+") + f(Math.abs(v));
+  const M = [
+    { m: "Type", txt: (p) => esc(stype(p.g.type || p.a.type)) + (p.g.sig ? ` ${esc(p.g.sig)}` : "") },
+    { m: "Place", txt: (p) => (p.g.place ? `<a href="${groupsHref("place:" + p.g.place)}">${esc(p.g.place)}</a>` : DASH) },
+    { m: "Route", txt: (p) => (p.g.route ? `<a href="${groupsHref(p.g.route)}" title="${esc(G.routes[p.g.route]?.name)}">${esc(p.g.route)}</a>` : DASH) },
+    { m: "Distance", v: (p) => p.dist, f: (v) => n2(v / 1000) + " km", d: sNum((v) => n2(v / 1000)) },
+    { m: "Elapsed time", v: (p) => p.elapsed, f: dur, d: sDur },
+    { m: "Moving time", v: (p) => p.moving, f: dur, d: sDur },
+    { m: "Paused", v: (p) => p.pause, f: dur, d: sDur },
+    { m: "Pauses ≥ 15 s", v: (p) => p.npause, f: n0, d: sNum(n0) },
+    { m: "Longest pause", v: (p) => p.longest, f: dur, d: sDur },
+    anySki && { m: "Moving speed (km/h)", v: (p) => p.speed, f: n1, d: sNum(n1) },
+    anyRun && { m: "Moving pace (/km)", v: (p) => (p.speed ? 3600 / p.speed : null), f: (v) => pace(1000 / v), d: (v) => (v < 0 ? "−" : "+") + n0(Math.abs(v)) + " s" },
+    { m: "Average HR", v: (p) => p.hr, f: n0, d: sNum(n0) },
+    { m: "Max HR", v: (p) => p.maxhr, f: n0, d: sNum(n0) },
+    { m: "Ascent", v: (p) => p.elev, f: (v) => n0(v) + " m", d: sNum(n0) },
+    { m: "Training load", v: (p) => p.load, f: n0, d: sNum(n0) },
+    ...(per.some((p) => p.reps) ? [
+      { m: "Reps", v: (p) => p.reps, f: n0, d: sNum(n0) },
+      { m: "Avg rep time", v: (p) => p.repTime, f: dur, d: (v) => (v < 0 ? "−" : "+") + n1(Math.abs(v)) + " s" },
+      { m: "Avg rep distance", v: (p) => p.repDist, f: (v) => n0(v) + " m", d: sNum(n0) },
+      { m: "Avg rep pace (/km)", v: (p) => (p.repSpeed ? 1000 / p.repSpeed : null), f: (v) => pace(1000 / v), d: (v) => (v < 0 ? "−" : "+") + n1(Math.abs(v)) + " s" },
+      { m: "Avg rep HR", v: (p) => p.repHr, f: n0, d: sNum(n0) },
+      { m: "Avg break", v: (p) => p.brk, f: dur, d: sDur },
+    ] : []),
+  ].filter(Boolean);
+  const head = `<th>Measure</th>` + per.map((p, i) => `<th class="num" title="${esc(p.a.name)}"><a href="${sessionHref(p.id)}">${esc((p.a.date || p.g.date || "").slice(0, 16))}</a>${i ? "" : " (base)"}</th>`).join("");
+  const body = M.map((r) => `<tr><td>${r.m}</td>${per.map((p, i) => {
+    if (r.txt) { const v = r.txt(p); return `<td class="num${v === DASH ? " muted" : ""}">${v}</td>`; }
+    const v = r.v(p), b = r.v(per[0]);
+    if (v == null) return `<td class="num muted">${DASH}</td>`;
+    const dd = i && b != null && Math.abs(v - b) > 1e-9 ? ` <span class="muted">${r.d(v - b)}</span>` : "";
+    return `<td class="num">${r.f(v)}${dd}</td>`;
+  }).join("")}</tr>`).join("");
+  const tbl = `<div class="tablewrap short"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  // shared route: legs for just these sessions
+  const rids = new Set(per.map((p) => p.g.route));
+  const rid = rids.size === 1 ? [...rids][0] : null;
+  const R = rid && G.routes[rid];
+  const shared = R && R.legs_table ? `<section><div class="head"><h2>Same route: <a href="${groupsHref(rid)}">${esc(rid)} ${esc(R.name)}</a></h2></div></section>` + routeLegs(rid, ids, "cmpr") : rids.size > 1 && per.every((p) => p.g.route) ? `<p class="note">The sessions are on different routes (${[...rids].join(", ")}), so there is no leg comparison.</p>` : "";
+  // side by side charts (sessions with a watch file, max 4)
+  const withFit = ids.filter((id) => runs[id]).slice(0, 4);
+  let cols = "";
+  if (withFit.length) {
+    const allSki = withFit.every((id) => runs[id].sport === "ski");
+    const spS = (id) => (allSki ? speedSeries(runs[id]) : paceSeries(runs[id]));
+    const allSp = withFit.flatMap((id) => spS(id).map((p) => p[1]));
+    const allHr = withFit.flatMap((id) => hrSeries(runs[id]).map((p) => p[1]));
+    const xMax = Math.max(...withFit.map((id) => { const r = runs[id].rows; return r.length ? r[r.length - 1][0] : 0; }));
+    const py = allSki ? { yMin: 0, yMax: percentile(allSp, 0.995) } : { yMin: percentile(allSp, 0.01), yMax: Math.min(percentile(allSp, 0.97), 12) };
+    const hy = { yMin: percentile(allHr, 0.005), yMax: Math.max(...allHr.filter((v) => v != null)) };
+    withFit.forEach((id, i) => {
+      const run = runs[id], g = GA[id];
+      const bands = run.sport === "ski" ? asRows("pauses", g?.pauses).map((p) => [p.t, p.t + p.dur_s]) : isIntervals(run) ? run.analysis.reps.map((r) => [r.start, r.end]) : null;
+      const base = { xTicks: minTicks, tipX: (x) => dur(x), xMin: 0, xMax, height: 130, bands };
+      drawChart(`c-pace-${i}`, [{ points: spS(id), color: "--chart-1", label: allSki ? "Speed" : "Pace", fmt: allSki ? (v) => n1(v) + " km/h" : fmtPace }], { ...base, ...py, yFmt: allSki ? null : fmtPace });
+      drawChart(`c-hr-${i}`, [{ points: hrSeries(run), color: "--chart-2", label: "HR", fmt: n0 }], { ...base, ...hy });
+      cols += `<div><h2><a href="${sessionHref(id)}">${esc(actById(id).date.slice(0, 10))}  ${esc(actById(id).name)}</a></h2>${chartBox(`c-pace-${i}`, allSki ? "Speed (km/h)" : "Pace (min/km)")}${chartBox(`c-hr-${i}`, "Heart rate (bpm)")}</div>`;
+    });
+  }
+  return `<div class="head"><h1 style="margin:0">Compare</h1><span class="count">${n0(ids.length)} sessions; Δ vs the first column${st.item ? "" : "; latest 3 (open with item=id1,id2,… to choose)"}</span></div>${tbl}
+    ${shared}
+    ${cols ? `<section><div class="head"><h2>Side by side</h2><span class="count">Same scales; ${withFit.length < ids.length ? `first ${withFit.length} with a watch file; ` : ""}reps or pauses shaded</span></div><div class="cols" style="grid-template-columns: repeat(${withFit.length}, minmax(0, 1fr))">${cols}</div></section>` : ""}`;
+}
+
+function pageRunDistance() {
+  const C = DATA.calibration;
+  if (!C) return `<h1>Distance check</h1><div class="empty">No calibration yet. Run scripts/calibrate_distance.py.</div>`;
+  const pct = (v) => (v == null ? DASH : (v >= 0 ? "+" : "−") + nf2.format(Math.abs(v)) + " %");
+  const m = (v) => (v == null ? DASH : n0(v) + " m");
+  tableState.cal = { key: "_", dir: 0 }; tableState.bis ||= { key: "date", dir: -1 }; tableState.races ||= { key: "date", dir: -1 };
+  tableState.lag ||= { key: "ord", dir: 1 }; tableState.det = { key: "_", dir: 0 }; tableState.clu ||= { key: "n", dir: -1 }; tableState.unc = { key: "_", dir: 0 };
+  const extra = distanceExtras(C, pct, m);
+  return `<h1>Distance check</h1>
+    <section><div class="head"><h2>Bislet in track mode, against counted laps</h2><span class="count">${n0(C.sessions)} sessions</span></div>
+    ${table("cal", [
+      { key: "source", label: "Source" },
+      { key: "n", label: "Reps", num: true, fmt: n0 },
+      { key: "median", label: "Median vs track", num: true, fmt: pct },
+      { key: "p10", label: "10th percentile", num: true, fmt: pct },
+      { key: "p90", label: "90th percentile", num: true, fmt: pct },
+    ], C.sources, { short: true })}</section>
+    <section><div class="head"><h2>Bislet in normal running mode, GPS only</h2><span class="count">${n0(C.bislet.length)} runs</span></div>
+    ${table("bis", [
+      { key: "date", label: "Date" },
+      { key: "garmin_total", label: "Garmin total", num: true, fmt: m },
+      { key: "laps", label: "Laps on track", num: true, fmt: n1 },
+      { key: "lane1", label: "Lane 1 distance", num: true, fmt: m },
+      { key: "offset", label: "Outside lane 1 (m)", num: true, fmt: n1 },
+      { key: "expected", label: "Expected in that lane", num: true, fmt: m },
+      { key: "rec_on", label: "Watch on track", num: true, fmt: m },
+      { key: "vs_lane1", label: "Watch vs lane 1", num: true, fmt: pct },
+      { key: "vs_expected", label: "Watch vs expected", num: true, fmt: pct },
+    ], C.bislet, { short: true })}</section>
+    ${extra}`;
+}
+
+const GROUP_LABEL = (g) => { const [mode, dev] = g.split("/"); return mode === "all" ? "All" : `${mode === "track" ? "Track mode" : "GPS mode"} · ${DEVICE_LABEL[dev] || dev}`; };
+const GROUP_ORDER = ["gps/fr935", "gps/4315", "track/4315", "all/all"];
+function distanceExtras(C, pct, m) {
+  const sec = (v) => (v == null ? DASH : sgn(v) + " s");
+  const ok = (v, t) => Math.round(v * 100) / 100 <= t;
+  const dotFor = (ok) => `<span class="dot ${ok ? "good" : "partial"}"></span>`;
+  let html = "";
+
+  // (a) signal lag vs lap press
+  if (C.lag_table?.length) {
+    const sig = Object.keys(SIGNAL_LABEL);
+    const rows = C.lag_table.map((r) => {
+      const g = `${r.mode}/${r.device}`;
+      return { ...r, grp: GROUP_LABEL(g), sig: SIGNAL_LABEL[r.signal] || r.signal,
+        ord: GROUP_ORDER.indexOf(g) * 100 + (r.kind === "start" ? 0 : 50) + sig.indexOf(r.signal) };
+    });
+    html += `<section><div class="head"><h2>Signal lag vs lap press</h2><span class="count">How long after the lap press each watch signal shows the start or end of a rep</span></div>
+    ${table("lag", [
+      { key: "grp", label: "Mode · watch", sortVal: (r) => r.ord },
+      { key: "kind", label: "Edge", fmt: (v) => (v === "start" ? "Start" : "End") },
+      { key: "sig", label: "Signal" },
+      { key: "median", label: "Median lag", num: true, fmt: sec },
+      { key: "ci_lo", label: "90 % CI of median", num: true, fmt: (v, r) => (v == null ? DASH : `${sgn(v)} … ${sgn(r.ci_hi)} s`) },
+      { key: "p10", label: "10th–90th pct", num: true, fmt: (v, r) => (v == null ? DASH : `${sgn(v)} … ${sgn(r.p90)} s`) },
+      { key: "n", label: "Reps (sessions)", num: true, fmt: (v, r) => `${n0(v)} (${n0(r.n_sessions)})` },
+      { key: "slope_s_per_mps", label: "Slope, s per m/s", num: true, fmt: (v, r) => (v == null ? DASH : `${sgn(v)} ± ${n2(r.slope_se)}`), title: () => "Lag change per 1 m/s faster (pooled), ± standard error" },
+      { key: "slope_within_s_per_mps", label: "Within session", num: true, fmt: (v, r) => (v == null ? DASH : `${sgn(v)} ± ${n2(r.slope_within_se)}`), title: () => "Slope using only speed differences within a session, ± standard error" },
+      { key: "dist_m_median", label: "As distance", num: true, fmt: (v) => (v == null ? DASH : n1(v) + " m") },
+    ], rows, { short: true })}
+    <p class="note">Positive = the signal reacts after the press. A slope near zero (within ±2 SE) means the lag does not depend on pace.</p></section>`;
+  }
+
+  // (b) lag vs pace, binned medians
+  if (C.lag_vs_pace?.length) {
+    const show = [["dist", "--chart-1"], ["speed", "--chart-2"], ["pos", "--chart-3"]];
+    const groups = GROUP_ORDER.filter((g) => C.lag_vs_pace.some((p) => `${p.mode}/${p.device}` === g));
+    const legend = show.map(([k, c]) => ({ label: SIGNAL_LABEL[k], color: c }));
+    let cells = "";
+    for (const g of groups) for (const kind of ["start", "end"]) {
+      const id = `lvp-${g.replace("/", "-")}-${kind}`;
+      const pts = C.lag_vs_pace.filter((p) => `${p.mode}/${p.device}` === g && p.kind === kind && p.n >= 3);
+      const series = show.map(([k, c]) => ({
+        points: pts.filter((p) => p.signal === k).sort((x, y) => x.v - y.v).map((p) => [p.v, p.median]),
+        color: c, label: SIGNAL_LABEL[k], fmt: (v) => sgn(v) + " s",
+      })).filter((x) => x.points.length);
+      if (!series.length) continue;
+      drawChart(id, series, { height: 150, xFmt: (v) => nf1.format(v), tipX: (v) => `${nf2.format(v - 0.25)}–${nf2.format(v + 0.25)} m/s`, yFmt: (v) => nf1.format(v) + " s" });
+      cells += `<div>${chartBox(id, `${GROUP_LABEL(g)}, rep ${kind}: median lag (s) by speed (m/s)`, legend)}</div>`;
+    }
+    html += `<section><div class="head"><h2>Lag vs pace</h2><span class="count">Median per 0.5 m/s speed bin, bins with at least 3 reps</span></div>
+      <div class="cols" style="grid-template-columns: repeat(2, minmax(0, 1fr))">${cells}</div></section>`;
+  }
+
+  // (c) detector v1.1 vs v2
+  const E = C.detector_eval;
+  if (E) {
+    const rows = GROUP_ORDER.filter((g) => E[`${g}/v1.1`] || E[`${g}/v2 LOSO`]).map((g) => {
+      const v1 = E[`${g}/v1.1`] || {}, v2 = E[`${g}/v2 LOSO`] || {}, d1 = E[`${g}/dist/v1.1`] || {}, d2 = E[`${g}/dist/v2 (reported)`] || {}, dl = E[`${g}/dist/Garmin lap`] || {};
+      const lag = (C.detector_lags || {})[g];
+      return { g: GROUP_LABEL(g), n: v2.n ?? v1.n, f1: v1.found, f2: v2.found,
+        s1: v1.abs_start_med, s2: v2.abs_start_med, s2p: v2.abs_start_p90, u1: v1.abs_dur_med, u2: v2.abs_dur_med, u2p: v2.abs_dur_p90,
+        dlap: dl.median, d1: d1.median, d2: d2.median, d2a: d2.abs_median, w2: d2.within_0_5 ?? d2["within_0.5"], dn: d2.n,
+        comp: lag ? `${sgn(lag.start_s)} / ${sgn(lag.end_s)} s` : DASH };
+    });
+    html += `<section><div class="head"><h2>Rep detector v1.1 vs v2</h2><span class="count">Against lap presses; v2 with leave-one-session-out lag calibration</span></div>
+    ${table("det", [
+      { key: "g", label: "Mode · watch" },
+      { key: "n", label: "Reps", num: true, fmt: (v, r) => `${n0(r.f2)} / ${n0(v)}`, title: (v, r) => `v2 found ${r.f2}, v1.1 found ${r.f1} of ${v}` },
+      { key: "s2", label: "Start, v1.1 → v2 (≤ 0.5 s)", num: true, fmt: (v, r) => (v == null ? DASH : `${n2(r.s1)} → ${dotFor(ok(v, 0.5))}${n2(v)} s`), title: (v, r) => `median |error|; v2 90th percentile ${n2(r.s2p)} s` },
+      { key: "u2", label: "Duration, v1.1 → v2 (≤ 1 s)", num: true, fmt: (v, r) => (v == null ? DASH : `${n2(r.u1)} → ${dotFor(ok(v, 1))}${n2(v)} s`), title: (v, r) => `median |error|; v2 90th percentile ${n2(r.u2p)} s` },
+      { key: "d2", label: "Distance, lap / v1.1 → v2 (±0.5 %)", num: true, fmt: (v, r) => (v == null ? DASH : `${pct(r.dlap)} / ${pct(r.d1)} → ${dotFor(ok(Math.abs(v), 0.5))}${pct(v)}`), title: (v, r) => `median signed error of ${r.dn} reps: Garmin lap / v1.1 → v2` },
+      { key: "d2a", label: "v2 |dist err|", num: true, fmt: (v) => (v == null ? DASH : nf2.format(v) + " %") },
+      { key: "w2", label: "v2 within ±0.5 %", num: true, fmt: (v) => (v == null ? DASH : n0(v * 100) + " %") },
+      { key: "comp", label: "Lag comp. start / end" },
+    ], rows, { short: true })}
+    <p class="note">Errors are medians of absolute differences to the lap press (start) and to the press-to-press duration. Distances are median signed differences to the measured rep distance (track lanes or Bislet laps); v2 uses the Garmin lap distance in track mode.</p></section>`;
+  }
+
+  // (d) races, repeated routes, uncertainty model
+  if (C.route_races?.length) {
+    const rows = C.route_races.map((r) => {
+      const z = r.uncertainty_default_pct ? Math.abs(r.garmin_pct) / r.uncertainty_default_pct : null;
+      return { ...r, z };
+    });
+    html += `<section><div class="head"><h2>Races</h2><span class="count">${n0(rows.length)} races; certified courses are run ~0.1 % long by design</span></div>
+    ${table("races", [
+      { key: "date", label: "Date" },
+      { key: "race", label: "Race" },
+      { key: "nominal", label: "Nominal", num: true, fmt: m },
+      { key: "certified", label: "Certified", fmt: (v) => (v ? "yes" : "no") },
+      { key: "device", label: "Watch", fmt: (v) => esc(DEVICE_LABEL[v] || v) },
+      { key: "env", label: "Environment", fmt: (v) => esc(ENV_LABEL[v] || v || DASH) },
+      { key: "garmin_total", label: "Garmin", num: true, fmt: m },
+      { key: "garmin_pct", label: "Garmin vs nominal", num: true, fmt: pct },
+      { key: "gps_pct", label: "Raw GPS vs nominal", num: true, fmt: pct },
+      { key: "uncertainty_default_pct", label: "Model 1σ", num: true, fmt: (v) => (v == null ? DASH : "± " + n2(v) + " %") },
+      { key: "z", label: "Within", fmt: (v) => (v == null ? DASH : v <= 1 ? `<span class="dot good"></span>1σ` : v <= 2 ? `<span class="dot partial"></span>2σ` : `<span class="dot none"></span>&gt; 2σ`) },
+    ], rows, { short: true })}</section>`;
+  }
+  if (C.clusters?.length) {
+    const rows = C.clusters.map((c) => {
+      const [dev, e] = Object.entries(c.eras || {})[0] || [null, {}];
+      return { cluster: c.cluster, n: c.n, first: c.dates[0], last: c.dates[c.dates.length - 1], dev, env: c.envs.map((x) => ENV_LABEL[x] || x).join(", "),
+        median_m: e.median_m, rcv: e.robust_cv_pct, cv: e.cv_pct, gcv: e.gps_robust_cv_pct };
+    });
+    const sp = Object.entries(C.spread_by_era || {}).map(([dev, x]) => `${esc(DEVICE_LABEL[dev] || dev)}: pooled robust SD <b>${n2(x.pooled_robust_sd_pct)} %</b> over ${n0(x.runs)} runs in ${n0(x.groups_n2plus)} routes (90th percentile |deviation| ${n2(x.pooled_p90_abs_pct)} %)`).join("; ");
+    html += `<section><div class="head"><h2>Repeated routes</h2><span class="count">Same route run several times: spread of the watch distance</span></div>
+    ${table("clu", [
+      { key: "cluster", label: "Route", num: true },
+      { key: "n", label: "Runs", num: true },
+      { key: "first", label: "First" },
+      { key: "last", label: "Last" },
+      { key: "dev", label: "Watch", fmt: (v) => esc(DEVICE_LABEL[v] || v || DASH) },
+      { key: "env", label: "Environment" },
+      { key: "median_m", label: "Median distance", num: true, fmt: m },
+      { key: "rcv", label: "Robust CV", num: true, fmt: (v) => (v == null ? DASH : n2(v) + " %") },
+      { key: "gcv", label: "Raw GPS robust CV", num: true, fmt: (v) => (v == null ? DASH : n2(v) + " %") },
+    ], rows, { short: true })}
+    ${sp ? `<p class="note">${sp}.</p>` : ""}</section>`;
+  }
+  const U = C.uncertainty_model;
+  if (U?.base) {
+    const devs = Object.keys(U.base).filter((d) => d !== "default").sort((a, b) => (a === "fr935" ? -1 : b === "fr935" ? 1 : a < b ? -1 : 1));
+    const envs = ["track", "open", "urban_or_trees", "unknown", "indoor"];
+    const rows = envs.map((e) => {
+      const r = { env: ENV_LABEL[e] || e };
+      for (const d of devs) {
+        const v = e === "indoor" ? U.indoor_pct : U.base[d][e];
+        const t = (U.typical || {})[`${d}/${e}`];
+        r[d] = v; r[d + "_n"] = t ? t.n : null;
+      }
+      return r;
+    });
+    const fit = U.fitted || {};
+    const chk = U.check || {};
+    html += `<section><div class="head"><h2>Distance uncertainty model</h2><span class="count">1σ per session, by watch and GPS environment</span></div>
+    ${table("unc", [
+      { key: "env", label: "GPS environment" },
+      ...devs.flatMap((d) => [
+        { key: d, label: `${DEVICE_LABEL[d] || d} 1σ`, num: true, fmt: (v) => (v == null ? DASH : "± " + n2(v) + " %") },
+        { key: d + "_n", label: `${DEVICE_LABEL[d] || d} runs`, num: true, fmt: n0 },
+      ]),
+    ], rows, { short: true })}
+    <p class="note">σ = <span class="mono">${esc(U.form)}</span>, end effect ${n0(U.end_m)} m. Track scale ${n2(fit.scale_pct)} % from ${esc(fit.scale_source || "?")}.${chk.cluster_runs ? ` Check: ${n0(chk.within_1sigma_share * 100)} % of ${n0(chk.cluster_runs)} repeated-route runs fall within 1σ of their route median (expected 68 %).` : ""}</p></section>`;
+  }
+  return html;
+}
+
+// ---------- activity panel ----------
+function panelActivity(id) {
+  const a = A.find((x) => String(x.id) === id);
+  if (!a) return null;
+  const run = runs[id];
+  let html = `<dl class="kv">
+    <dt>Date</dt><dd>${esc(a.date)}</dd><dt>Type</dt><dd>${esc(typeLabel(a.type))}</dd>
+    <dt>Distance</dt><dd>${n2(a.dist)} km</dd><dt>Time</dt><dd>${dur(a.dur)}</dd>
+    <dt>Moving time</dt><dd>${dur(a.moving)}</dd><dt>Pace</dt><dd>${a.dist && a.moving ? pace((a.dist * 1000) / a.moving) + " /km" : DASH}</dd>
+    <dt>Avg HR</dt><dd>${n0(a.hr)}</dd><dt>Max HR</dt><dd>${n0(a.maxhr)}</dd>
+    <dt>Ascent</dt><dd>${a.elev == null ? DASH : n0(a.elev) + " m"}</dd><dt>Cadence</dt><dd>${n0(a.cad)}</dd>
+    <dt>Avg power</dt><dd>${a.power == null ? DASH : n0(a.power) + " W"}</dd><dt>Training load</dt><dd>${n0(a.load)}</dd>
+    <dt>Activity ID</dt><dd class="mono">${esc(a.id)}</dd><dt>Watch file</dt><dd>${run ? `<span class="dot good"></span>Downloaded` : "Not downloaded"}</dd>
+  </dl>`;
+  if (!run) return html + `<div class="empty">No watch file downloaded. Run scripts/fetch_activities.py to fetch it.</div>`;
+  const ix = Object.fromEntries(run.cols.map((c, i) => [c, i]));
+  const col = (k, f = (v) => v) => run.rows.map((r) => [r[ix.t], r[ix[k]] == null ? null : f(r[ix[k]])]);
+  // smooth speed over 10 s to pace (min/km)
+  const sp = run.rows.map((r) => r[ix.speed]);
+  const paceMin = run.rows.map((r, i) => {
+    const w = sp.slice(Math.max(0, i - 5), i + 5).filter((v) => v != null);
+    const m = w.length ? w.reduce((a, b) => a + b, 0) / w.length : null;
+    return [r[ix.t], m && m > 1.2 ? 1000 / m / 60 : null];
+  });
+  const base = { xTicks: minTicks, tipX: (x) => dur(x), height: 120 };
+  html += `<dl class="kv"><dt>Records</dt><dd>${n0(run.rows.length)}</dd><dt>Interval</dt><dd>${run.interval} s</dd><dt>File</dt><dd class="mono">${esc(run.file)}</dd><dt>Size</dt><dd>${n0(run.kb)} KB</dd></dl>`;
+  html += chartBox("p-hr", "Heart rate (bpm)") + chartBox("p-pace", "Pace (min/km), 10 s smoothing") + chartBox("p-cad", "Cadence (spm)") + chartBox("p-alt", "Elevation (m)");
+  const hasPower = run.rows.some((r) => r[ix.power] != null);
+  if (hasPower) html += chartBox("p-pow", "Power (W)");
+  drawChart("p-hr", [{ points: col("hr"), color: "--chart-2", label: "HR", fmt: n0 }], base);
+  drawChart("p-pace", [{ points: paceMin, color: "--chart-1", label: "Pace", fmt: fmtPace }], { ...base, yFmt: fmtPace, clip: 0.02 });
+  drawChart("p-cad", [{ points: col("cad"), color: "--chart-4", label: "Cadence", fmt: n0 }], base);
+  drawChart("p-alt", [{ points: col("alt"), color: "--chart-3", label: "Elevation", fmt: n1 }], base);
+  if (hasPower) drawChart("p-pow", [{ points: col("power"), color: "--chart-1", label: "Power", fmt: n0 }], base);
+  if (run.laps.length > 1) {
+    const laps = run.laps.map((l, i) => ({ ...l, n: i + 1 }));
+    html += `<section><div class="head"><h2>Laps</h2></div>${table("laps", [
+      { key: "n", label: "Lap", num: true },
+      { key: "dist", label: "Distance (km)", num: true, fmt: n2 },
+      { key: "time", label: "Time", num: true, fmt: dur },
+      { key: "speed", label: "Pace (/km)", num: true, fmt: (v) => pace(v), sortVal: (r) => (r.speed ? -r.speed : null) },
+      { key: "hr", label: "Avg HR", num: true, fmt: n0 },
+      { key: "maxhr", label: "Max HR", num: true, fmt: n0 },
+    ], laps, { sort: "n", dir: 1, short: true })}</section>`;
+  }
+  return html;
+}
+
+// ---------- render ----------
+function renderNav(st) {
+  let h = `<div class="who">${esc(DATA.person)}</div>`;
+  for (const s of STEPS) {
+    h += `<a class="step ${s.id === st.step && !s.tabs.length ? "current" : ""}" href="${href({ step: s.id, tab: s.tabs[0]?.id || "" })}">${s.label}</a>`;
+    for (const t of s.tabs) h += `<a class="tab ${s.id === st.step ? "visible" : ""} ${s.id === st.step && t.id === st.tab ? "current" : ""}" href="${href({ step: s.id, tab: t.id })}">${t.label}</a>`;
+  }
+  h += `<div class="built">Built ${esc(DATA.built)}</div>`;
+  document.getElementById("nav").innerHTML = h;
+}
+function render(keepScroll) {
+  const st = getState();
+  const main = document.getElementById("main");
+  const wrap = main.querySelector(".tablewrap");
+  const scroll = keepScroll ? [main.scrollTop, wrap?.scrollTop || 0] : [0, 0];
+  charts.length = 0;
+  renderNav(st);
+  const pages = {
+    coverage: pageCoverage,
+    "activities/list": pageActivitiesList,
+    "activities/years": pageActivitiesYears,
+    "runs/session": pageRunSession,
+    "runs/compare": pageRunCompare,
+    "runs/groups": pageGroups,
+    "runs/distance": pageRunDistance,
+    "health/days": pageHealthDays,
+    "health/trends": pageHealthTrends,
+    "health/heart": pageHealthHeart,
+    "health/sleep": pageHealthSleep,
+  };
+  const key = st.tab ? `${st.step}/${st.tab}` : st.step;
+  main.innerHTML = (pages[key] || pageCoverage)(st);
+  main.scrollTop = scroll[0];
+  const w2 = main.querySelector(".tablewrap");
+  if (w2) w2.scrollTop = scroll[1];
+  // panel
+  const panel = document.getElementById("panel");
+  const body = st.step === "activities" && st.item ? panelActivity(st.item) : null;
+  if (body != null) {
+    const a = A.find((x) => String(x.id) === st.item);
+    document.getElementById("panel-title").textContent = a.name || typeLabel(a.type);
+    document.getElementById("panel-body").innerHTML = body;
+    panel.classList.add("open");
+  } else panel.classList.remove("open");
+  paintCharts();
+  bindInputs();
+}
+function bindInputs() {
+  const q = document.getElementById("q");
+  if (q) q.oninput = () => { actFilter.q = q.value; const pos = q.selectionStart; render(true); const n = document.getElementById("q"); n.focus(); n.setSelectionRange(pos, pos); };
+  const ty = document.getElementById("type");
+  if (ty) ty.onchange = () => { actFilter.type = ty.value; render(true); };
+  const gs = document.getElementById("grpsport");
+  if (gs) gs.onchange = () => { grpFilter.sport = gs.value; chipSets.grp = new Set(); render(true); };
+  const lp = document.getElementById("legpick");
+  if (lp) lp.onchange = () => { legPick[lp.dataset.route] = lp.value; render(true); };
+  const rp = document.getElementById("runpick");
+  if (rp) rp.onchange = () => go({ item: rp.value });
+  const yr = document.getElementById("year");
+  if (yr) yr.onchange = () => { dayFilter.year = yr.value; render(); };
+}
+document.getElementById("panel-close").onclick = () => go({ item: "" });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && getState().item) go({ item: "" }); });
+(() => {
+  const grip = document.getElementById("grip"), panel = document.getElementById("panel");
+  grip.onmousedown = (e) => {
+    e.preventDefault();
+    const move = (ev) => { panel.style.width = Math.max(380, window.innerWidth - ev.clientX) + "px"; };
+    const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); paintCharts(); };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
+})();
+let rt;
+window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(paintCharts, 120); });
+window.addEventListener("hashchange", () => render(true));
+render();
+</script>
+</body>
+</html>

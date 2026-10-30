@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+
+# Personal health data
+data/
+.venv/
+__pycache__/
