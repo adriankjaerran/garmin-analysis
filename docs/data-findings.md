@@ -4,9 +4,14 @@ All findings below come from real calls with `GARMIN_ADRIAN_API_KEY`. Raw respon
 `data/adrian/` (gitignored). See `endpoints-tested.md` for per-endpoint behaviour and
 [garmin-api-guide.md](garmin-api-guide.md) for how to fetch it.
 
-**Downloaded so far (2026-10-30):** the activity list (717), daily summaries 2018-12-20 → 2026-10-29,
-watch files for 100 activities (all 16 track sessions, all 69 runs starting/ending near Bislet,
-5 likely races, a sample per year), and 14 days of intraday HR, sleep, SpO2 etc.
+**Downloaded so far (2026-10-31):** the activity list (717, newest 2026-10-27), daily summaries
+2018-12-20 → 2026-10-30, the watch's FIT file for **all 717 activities**, and 14 days of intraday HR,
+sleep, SpO2 etc. The 2026-10-31 backfill fetched activity+details+FIT for the 90 non-run activities
+that were missing (hiking 64, stop_watch 8, cycling 6, lap_swimming 5, rowing_v2 3, multi_sport,
+kayaking_v2, other, open_water_swimming 1 each) in 271 requests at 1 req/2 s, with no failures and
+no 429s. All 8 stop_watch FITs are ~0.5 KB (summary only, no per-second records), and the 2021
+open-water swim is 1 KB. **No all-day location data:** the API (OpenAPI spec) has no location or
+position-history endpoint; GPS exists only inside activities (FIT, `/details`, start/end lat-lon).
 
 ## Summary
 
