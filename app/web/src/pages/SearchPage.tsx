@@ -4,8 +4,8 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { qs, useApi } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
-import { SPORT_LABEL, dur, km, num, pace, kmh, sportColor } from "../lib/format";
-import { FILTER_KEYS, compareUrl, filterQuery, repLen, mmss, type Group, type SearchOptions, type SearchResult, type SearchRow, type TreeNode } from "../lib/search";
+import { SPORTS, SPORT_LABEL, dur, km, num, pace, pace100, kmh, sportColor } from "../lib/format";
+import { FILTER_KEYS, compareUrl, coreBBox, filterQuery, placeCount, repLen, mmss, type Group, type SearchOptions, type SearchResult, type SearchRow, type TreeNode } from "../lib/search";
 import { Table, type Col } from "../components/Table";
 import { TracksMap } from "../components/TracksMap";
 import { GroupsMap, type GLine } from "../components/GroupsMap";
@@ -47,6 +47,15 @@ function Seg2({ k, value, a, b, title }: { k: string; value: string; a: [string,
   );
 }
 
+/** date filter: an empty text box ("from" / "to") until focused, so an unset filter doesn't show today's date */
+function DateIn({ k, value, placeholder }: { k: string; value: string; placeholder: string }) {
+  const [edit, setEdit] = useState(false);
+  const props: any = { type: value || edit ? "date" : "text" };
+  return <input {...props} value={value} placeholder={placeholder} style={{ width: "128px" }}
+    onFocus={() => setEdit(true)} onBlur={() => setEdit(false)}
+    onChange={(e) => setQuery({ [k]: (e.target as HTMLInputElement).value })} />;
+}
+
 const Fld = ({ label, children, title }: { label: string; children: any; title?: string }) => (
   <label class="fld" title={title}><span>{label}</span>{children}</label>
 );
@@ -59,14 +68,14 @@ function FilterBar({ query, opts }: { query: URLSearchParams; opts: SearchOption
   const active = FILTER_KEYS.filter((k) => k !== "q" && k !== "sport" && query.get(k)).length;
   return (
     <div class="fbar">
-      <Fld label="Place" title="Main place, start, end or any touched place (≥ 5 % of the time or 3 min); 'main' = ≥ 40 % of the time">
+      <Fld label="Place" title="Touched = starts, ends or spends ≥ 5 % of the time (or 3 min) there; main = ≥ 40 % of the time (one per activity). Counts: main · touched">
         <Sel k="place" value={g("place")} all="Any" width={140}
-          opts={(opts?.places ?? []).map((p) => ({ id: p.id, label: `${p.id} (${p.n})` }))} />
+          opts={(opts?.places ?? []).map((p) => ({ id: p.id, label: `${p.name ?? p.id} (${placeCount(p.n_main, p.n)})` }))} />
         <Seg2 k="place_mode" value={g("place_mode")} a={["", "touched"]} b={["main", "main"]} />
       </Fld>
       <Fld label="Region" title="Marka / Østmarka / Bymarka polygons, else the Garmin municipality">
         <Sel k="region" value={g("region")} all="Any" width={130}
-          opts={(opts?.regions ?? []).map((p) => ({ id: p.id, label: `${p.id} (${p.n})` }))} />
+          opts={(opts?.regions ?? []).map((p) => ({ id: p.id, label: `${p.name ?? p.id} (${placeCount(p.n_main, p.n)})` }))} />
         <Seg2 k="region_mode" value={g("region_mode")} a={["", "touched"]} b={["main", "main"]} />
       </Fld>
       <Fld label="Route">
@@ -103,9 +112,9 @@ function FilterBar({ query, opts }: { query: URLSearchParams; opts: SearchOption
         <QInput k="distance_km" value={g("distance_km")} placeholder="8-12" width={64} />
       </Fld>
       <Fld label="Dates">
-        <input type="date" value={g("from")} style={{ width: "128px" }} onChange={(e) => setQuery({ from: (e.target as HTMLInputElement).value })} />
+        <DateIn k="from" value={g("from")} placeholder="from" />
         <span class="muted">–</span>
-        <input type="date" value={g("to")} style={{ width: "128px" }} onChange={(e) => setQuery({ to: (e.target as HTMLInputElement).value })} />
+        <DateIn k="to" value={g("to")} placeholder="to" />
       </Fld>
       {active > 0 && <button onClick={() => { const p: Record<string, null> = {}; for (const k of FILTER_KEYS) p[k] = null; setQuery(p); }}>Clear filters</button>}
     </div>
@@ -113,8 +122,17 @@ function FilterBar({ query, opts }: { query: URLSearchParams; opts: SearchOption
 }
 
 // ------------------------------------------------------------------ results
-const speed = (r: SearchRow) => (r.sport === "run" || r.sport === "hike" ? (r.speed_ms ? pace(r.speed_ms) + " /km" : "—") : r.speed_ms ? kmh(r.speed_ms) + " km/h" : "—");
-const workoutText = (r: SearchRow) => r.rep_count ? (r.exact_key ?? r.signature) : (r.signature ?? r.family_label);
+const usesPace = (s: string) => s === "run" || s === "hike";
+/** session or rep speed in the unit of the sport: run / hike min/km, swim /100 m, else km/h */
+function speedCell(sport: string, ms: number | null | undefined) {
+  if (!ms) return "—";
+  if (usesPace(sport)) return pace(ms);
+  if (sport === "swim") return <>{pace100(ms)}<span class="muted"> /100</span></>;
+  return <>{kmh(ms)}<span class="muted"> km/h</span></>;
+}
+const speedTitle = "Moving pace (min/km) for runs and hikes, /100 m for swims, else km/h";
+const workoutText = (r: SearchRow) => r.rep_count ? (r.exact_label ?? r.exact_key ?? r.signature) : (r.signature ?? r.family_label);
+const placeText = (r: SearchRow) => r.place_name ?? r.place;
 
 function resultCols(picked: Set<string>, togglePick: (id: string) => void): Col<SearchRow>[] {
   return [
@@ -122,18 +140,25 @@ function resultCols(picked: Set<string>, togglePick: (id: string) => void): Col<
       render: (r) => <input type="checkbox" checked={picked.has(r.id)} style={{ height: "auto" }} title="Select for Compare"
         onClick={(e) => { e.stopPropagation(); togglePick(r.id); }} /> },
     { key: "date", label: "Date", render: (r) => <span>{r.date} <span class="muted">{r.start?.slice(11, 16)}</span></span> },
-    { key: "workout", label: "Workout", sort: (r) => workoutText(r) ?? "", render: (r) => <span title={r.name ?? ""}><SportDot sport={r.sport} />{workoutText(r)}</span> },
-    { key: "rep_count", label: "Reps", num: true, render: (r) => num(r.rep_count) },
-    { key: "rep_len", label: "Rep", num: true, sort: (r) => r.rep_dist_m, render: (r) => (r.rep_count ? repLen(r) : "—") },
-    { key: "rest_s", label: "Rest", num: true, render: (r) => (r.rest_s ? mmss(r.rest_s) : "—") },
+    { key: "workout", label: "Workout", sort: (r) => workoutText(r) ?? "",
+      render: (r) => <span class="wk" title={[r.sport_label, r.name].filter(Boolean).join(" · ")}><SportDot sport={r.sport} />{workoutText(r)}</span> },
+    { key: "rep_count", label: "Main reps", num: true, title: "Reps × measured median rep length (distance or time) of the main part",
+      sort: (r) => r.rep_count, render: (r) => (r.rep_count ? `${r.rep_count} × ${repLen(r)}` : "—") },
+    { key: "rep_speed_ms", label: "Rep pace", num: true, title: "Mean pace (runs) / speed of the main reps; hover for the mean rep time",
+      sort: (r) => (r.rep_speed_ms ? (usesPace(r.sport) ? 1000 / r.rep_speed_ms : -r.rep_speed_ms) : null),
+      render: (r) => (r.rep_count ? <span title={r.rep_time_s ? `mean rep time ${mmss(r.rep_time_s)}` : ""}>{speedCell(r.sport, r.rep_speed_ms)}</span> : "—") },
+    { key: "rest_s", label: "Rest", num: true, title: "This activity's median rest between reps (the same-workout group's median in the tooltip; “rest ~2:30” in the workout name is that group's bin)",
+      render: (r) => (r.rest_s ? <span title={r.rest_group_s ? `this activity ${mmss(r.rest_s)} · its same-workout group ${mmss(r.rest_group_s)}` : ""}>{mmss(r.rest_s)}</span> : "—") },
     { key: "dist_km", label: "km", num: true, render: (r) => km(r.dist_km) },
-    { key: "moving_s", label: "Moving", num: true, render: (r) => dur(r.moving_s) },
-    { key: "speed_ms", label: "Pace / speed", num: true, render: speed },
-    { key: "avg_hr", label: "HR", num: true, render: (r) => num(r.avg_hr) },
+    { key: "moving_s", label: "Time", num: true, title: "Moving time", render: (r) => dur(r.moving_s) },
+    { key: "speed_ms", label: "Pace", num: true, title: speedTitle,
+      sort: (r) => (r.speed_ms ? (usesPace(r.sport) ? 1000 / r.speed_ms : -r.speed_ms) : null), render: (r) => speedCell(r.sport, r.speed_ms) },
+    { key: "avg_hr", label: "HR", num: true, title: "Average HR of the whole activity", render: (r) => num(r.avg_hr) },
     { key: "climb_m", label: "Climb", num: true, render: (r) => num(r.climb_m) },
-    { key: "place", label: "Place", render: (r) => <span title={r.places.length ? "touches " + r.places.join(", ") : ""}>{r.place ?? "—"}</span> },
-    { key: "region", label: "Region" },
+    { key: "place", label: "Place", sort: (r) => placeText(r) ?? "",
+      render: (r) => <span title={(r.place_names ?? r.places).length ? "touches " + (r.place_names ?? r.places).join(", ") : ""}>{placeText(r) ?? "—"}</span> },
     { key: "route", label: "Route", sort: (r) => (r.route ? +r.route.slice(1) : null), render: (r) => <span title={r.route_name ?? ""}>{r.route ?? "—"}</span> },
+    { key: "region", label: "Region" },
   ];
 }
 
@@ -141,21 +166,33 @@ function Results({ data, error, picked, togglePick }: { data: SearchResult | nul
   const [hover, setHover] = useState<string | null>(null);
   const rows = data?.rows ?? [];
   const anyReps = rows.some((r) => r.rep_count);
-  const cols = useMemo(() => resultCols(picked, togglePick).filter((c) => anyReps || !["rep_count", "rep_len", "rest_s"].includes(c.key)), [picked, anyReps]);
+  const cols = useMemo(() => resultCols(picked, togglePick).filter((c) => anyReps || !["rep_count", "rep_speed_ms", "rest_s"].includes(c.key)), [picked, anyReps]);
   const tracks = useMemo(() => rows.filter((r) => r.poly).map((r) => ({ id: r.id, sport: r.sport, poly: r.poly, width: picked.has(r.id) ? 4 : 2.5 })), [rows, picked]);
   const noGps = rows.length - tracks.length;
+  // fit the home cluster, not the whole world (trips abroad): "show all" widens it
+  const [all, setAll] = useState(false);
+  const core = useMemo(() => {
+    const boxes = rows.filter((r) => r.poly && r.bbox).map((r) => r.bbox!);
+    return { ...coreBBox(boxes), whole: boxes.length ? coreBBox(boxes, 1e6).fit : null };
+  }, [rows]);
   return (
     <div class="split">
       <div class="left">
         {error ? <div class="err pane">{error}</div> :
-          <Table cols={cols} rows={rows} rowKey={(r) => r.id} highlight={hover} maxHeight="100%" defaultSort={["date", -1]}
+          <Table cols={cols} rows={rows} rowKey={(r) => r.id} highlight={hover} maxHeight="100%" defaultSort={["date", -1]} stickyCols={2}
             onRow={(r) => navigate(`/activities/${r.id}`)} onHover={(r) => setHover(r?.id ?? null)}
             empty={data ? "No activities match these filters." : "Loading…"} />}
       </div>
       <div class="right" style={{ width: "38%" }}>
         <TracksMap tracks={tracks} highlight={hover} onHover={setHover} onClick={(id) => navigate(`/activities/${id}`)}
-          style={{ flex: 1, minHeight: "300px" }} markers={false} empty={data ? "No GPS tracks in the result" : "Loading…"}>
-          {noGps > 0 && tracks.length > 0 && <div class="overlay bl">{noGps} without GPS not shown</div>}
+          style={{ flex: 1, minHeight: "300px" }} markers={false} empty={data ? "No GPS tracks in the result" : "Loading…"}
+          fit={all ? core.whole : core.fit} defaultBasemap="grey">
+          {tracks.length > 0 && (noGps > 0 || core.out > 0) && <div class="overlay bl">
+            {noGps > 0 && `${noGps} without GPS not shown`}
+            {noGps > 0 && core.out > 0 ? " · " : ""}
+            {core.out > 0 && (all ? <a href="#" onClick={(e) => { e.preventDefault(); setAll(false); }}>zoom to the main area</a>
+              : <>{core.out} elsewhere · <a href="#" onClick={(e) => { e.preventDefault(); setAll(true); }}>show all</a></>)}
+          </div>}
         </TracksMap>
       </div>
     </div>
@@ -221,7 +258,7 @@ function Groups({ query, fq, rowsById }: { query: URLSearchParams; fq: string; r
     gk === "regions" ? { region: g.key, region_mode: touched ? null : "main" } : { route: g.key };
   const pick = (key: string) => setQuery({ g: key === sel ? null : key });
 
-  const groups: Group[] = gk !== "workouts" ? (data?.groups ?? []) : [];
+  const groups: Group[] = useMemo(() => (gk !== "workouts" ? (data?.groups ?? []) : []), [data, gk]);
   const flat = useMemo(() => (gk === "workouts" && data ? flatten(data.groups as TreeNode[], open) : []), [data, open, gk]);
   const active = hover ?? sel;
   const activeIds: string[] = useMemo(() => {
@@ -242,9 +279,9 @@ function Groups({ query, fq, rowsById }: { query: URLSearchParams; fq: string; r
     const rs = selIds.map((id) => rowsById.get(id)?.bbox).filter((b): b is [number, number, number, number] => !!b);
     if (!rs.length) {
       const g = selGroup as Group | undefined;
-      return g?.lat !== undefined && g?.lon !== undefined ? [g.lon - 0.01, g.lat - 0.005, g.lon + 0.01, g.lat + 0.005] as [number, number, number, number] : null;
+      return { fit: g?.lat !== undefined && g?.lon !== undefined ? [g.lon - 0.01, g.lat - 0.005, g.lon + 0.01, g.lat + 0.005] as [number, number, number, number] : null, out: 0 };
     }
-    return rs.reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]);
+    return coreBBox(rs);   // members abroad / in other towns: fit the main cluster, say how many are elsewhere
   }, [sel, data, rowsById]);
 
   let table: any;
@@ -260,7 +297,7 @@ function Groups({ query, fq, rowsById }: { query: URLSearchParams; fq: string; r
               <span style={f.depth === 0 ? { fontWeight: 600 } : undefined}>{f.label}</span>
             </span>) },
           { key: "go", label: "", sort: () => null, render: (f) => <a href="#" onClick={(e) => { e.preventDefault(); e.stopPropagation(); apply(f.patch); }}>list →</a> },
-          { key: "n", label: "Sessions", num: true, sort: () => null, render: (f) => f.node.n },
+          { key: "n", label: "Activities", num: true, sort: () => null, render: (f) => f.node.n },
           { key: "first", label: "First", sort: () => null, render: (f) => f.node.first ?? "—" },
           { key: "last", label: "Last", sort: () => null, render: (f) => f.node.last ?? "—" },
           { key: "places", label: "Main places", sort: () => null, render: (f) => <span class="muted">{Object.entries(f.node.places).map(([k, n]) => `${k} ${n}`).join(", ")}</span> },
@@ -269,12 +306,15 @@ function Groups({ query, fq, rowsById }: { query: URLSearchParams; fq: string; r
   } else {
     const cols: Col<Group>[] = [
       { key: "label", label: gk === "places" ? "Place" : gk === "regions" ? "Region" : "Route", render: (g) => (
-        <span title={g.label}>{gk === "routes" ? <><span class="mono">{g.key}</span> {g.label}</> : g.label}</span>) },
+        <span title={g.label + (gk === "places" && g.n_start ? ` · ${g.n_start} start here` : "")}>{gk === "routes" ? <><span class="mono">{g.key}</span> {g.label}</> : (g.name ?? g.label)}</span>) },
     ];
     cols.push({ key: "go", label: "", sort: () => null, render: (g) => <a href="#" onClick={(e) => { e.preventDefault(); e.stopPropagation(); apply(groupPatch(g)); }}>list →</a> });
     if (gk !== "routes") cols.push({ key: "kind", label: "Kind", render: (g) => <span class="muted">{g.kind ?? "—"}</span> });
-    cols.push({ key: "n", label: touched ? "Touched" : "Sessions", num: true });
-    if (gk === "places" || gk === "regions") cols.push({ key: touched ? "n_main" : "n_touched", label: touched ? "Main" : "Touched", num: true, render: (g) => num(touched ? g.n_main : g.n_touched) });
+    if (gk === "places" || gk === "regions") cols.push({ key: "n", label: "Activities", num: true,
+      title: "main place · every touched (an activity counts in one main place, but can touch several)",
+      sort: (g) => (touched ? g.n_touched ?? g.n : g.n_main ?? g.n),
+      render: (g) => placeCount(g.n_main ?? g.n, g.n_touched) });
+    else cols.push({ key: "n", label: "Activities", num: true });
     if (gk === "routes") cols.push(
       { key: "dist_km", label: "km", num: true, render: (g) => km(g.dist_km) },
       { key: "climb_m", label: "Climb", num: true, render: (g) => num(g.climb_m) },
@@ -290,10 +330,10 @@ function Groups({ query, fq, rowsById }: { query: URLSearchParams; fq: string; r
     );
   }
 
-  const points = gk === "places" ? groups.filter((g) => g.lat !== undefined && g.lat !== null).map((g) => ({ key: g.key, lat: g.lat!, lon: g.lon!, n: g.n,
-    color: g.src === "named" ? "#2f5fd0" : "#8a9199" })) : [];
-  const shapes = (gk === "places" || gk === "regions") ? groups.filter((g) => g.shape?.circle || g.shape?.poly).map((g) => ({ key: g.key, ...g.shape! })) : [];
-  const lines: GLine[] = gk === "routes" ? groups.filter((g) => g.poly).map((g) => ({ id: g.key, key: g.key, sport: Object.keys(g.sports)[0] ?? "other", poly: g.poly })) : [];
+  const points = useMemo(() => gk === "places" ? groups.filter((g) => g.lat !== undefined && g.lat !== null).map((g) => ({ key: g.key, lat: g.lat!, lon: g.lon!, n: g.n,
+    color: g.src === "named" ? "#2f5fd0" : "#8a9199" })) : [], [groups, gk]);
+  const shapes = useMemo(() => (gk === "places" || gk === "regions") ? groups.filter((g) => g.shape?.circle || g.shape?.poly).map((g) => ({ key: g.key, ...g.shape! })) : [], [groups, gk]);
+  const lines: GLine[] = useMemo(() => gk === "routes" ? groups.filter((g) => g.poly).map((g) => ({ id: g.key, key: g.key, sport: Object.keys(g.sports)[0] ?? "other", poly: g.poly })) : [], [groups, gk]);
 
   const n = gk === "workouts" ? (data?.groups ?? []).length : groups.length;
   return (
@@ -312,7 +352,7 @@ function Groups({ query, fq, rowsById }: { query: URLSearchParams; fq: string; r
       <div class="split">
         <div class="left">{table}</div>
         <div class="right" style={{ width: "38%" }}>
-          <GroupsMap points={points} shapes={shapes} lines={lines} members={members} highlight={hover} selected={sel} fit={sel ? fitSel : null}
+          <GroupsMap points={points} shapes={shapes} lines={lines} members={members} highlight={hover} selected={sel} fit={sel ? fitSel.fit : null} fitOut={sel ? fitSel.out : 0}
             onHover={(k) => setHover(k)} onClick={(k) => pick(k)} style={{ flex: 1, minHeight: "300px" }}
             empty={gk === "workouts" ? "Hover or select a group to see its tracks" : data ? "No shapes" : "Loading…"} />
         </div>
@@ -342,7 +382,8 @@ export function SearchPage() {
   const rowsById = useMemo(() => new Map((res.data?.rows ?? []).map((r) => [r.id, r])), [res.data]);
   useEffect(() => { document.title = "Find & group"; }, []);
   const d = res.data;
-  const sports = opts?.sports ?? [];
+  // one sport order everywhere (lib/format SPORTS: Run Ski Hike Bike Swim Other), not the API's count order
+  const sports = useMemo(() => [...(opts?.sports ?? [])].sort((a, b) => SPORTS.indexOf(a.id as any) - SPORTS.indexOf(b.id as any)), [opts]);
 
   return (
     <main class="full">
@@ -356,8 +397,8 @@ export function SearchPage() {
         <div class="chips">
           <button class={"chip" + (!sport ? " on" : "")} onClick={() => setQuery({ sport: null })}>All</button>
           {sports.map((s) => (
-            <button key={s.id} class={"chip" + (sport === s.id ? " on" : "")} onClick={() => setQuery({ sport: sport === s.id ? null : s.id })}>
-              <span class="dot" style={{ background: sportColor(s.id) }} />{SPORT_LABEL[s.id] ?? s.id}
+            <button key={s.id} class={"chip" + (sport === s.id ? " on" : "")} onClick={() => setQuery({ sport: sport === s.id ? null : s.id })} title={`${s.n} activities`}>
+              <span class="dot" style={{ background: sportColor(s.id) }} />{s.label ?? SPORT_LABEL[s.id] ?? s.id}
             </button>
           ))}
         </div>

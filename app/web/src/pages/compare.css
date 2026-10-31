@@ -34,6 +34,27 @@ i.sw { margin-right: 6px; vertical-align: -1px; }
 .head.sm { margin-bottom: var(--space-1); }
 .best { color: var(--state-good); font-weight: var(--fw-semibold); }
 .partial { opacity: 0.55; }
+/* rep matrix: value + small difference to the reference, tinted green / red */
+.mcell { display: inline-block; padding: 1px 5px; border-radius: 3px; min-width: 44px; }
+.mcell small { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
+/* rep ladder (pace per rep, one line per session) + ranking */
+.ladder { margin-bottom: var(--space-3); }
+.ladder .title { font-size: var(--fs-12); margin-bottom: var(--space-1); }
+.ladder svg { display: block; }
+.ladder svg .grid { stroke: var(--hairline); stroke-width: 1; }
+.ladder svg .ax { font-size: 12px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ladder svg .med { fill: none; stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.ladder-rank table { width: 100%; font-size: var(--fs-12); }
+.ladder-rank td { height: 24px; padding: 0 var(--space-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ladder-rank tr { cursor: pointer; }
+.ladder-rank tr:hover, .ladder-rank tr.hl { background: var(--surface-hover); }
+.ladder-rank td.bar { width: 90px; position: relative; padding: 0; }
+.ladder-rank td.bar::before { content: ""; position: absolute; left: 50%; top: 4px; bottom: 4px; border-left: 1px solid var(--hairline); }
+.ladder-rank td.bar span { position: absolute; top: 7px; height: 10px; border-radius: 2px; }
+.ladder-rank td.bar span.f { left: 50%; background: var(--state-good); }
+.ladder-rank td.bar span.s { right: 50%; background: var(--state-duplicate); }
+.ladder-rank .note { margin: var(--space-1) 0 0; font-size: var(--fs-12); }
+.cmp-warn { color: var(--state-version); }
 @media (max-width: 1100px) {
   .cmp-top { grid-template-columns: 1fr; }
   .cmp-left { position: relative; }

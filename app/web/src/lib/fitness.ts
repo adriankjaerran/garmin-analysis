@@ -1,11 +1,14 @@
 // Types + helpers for /api/fitness (scripts/fitness_model.py -> fitness.json; docs/fitness-model.md).
 import { cssVar, dur } from "./format";
+import "../fitness.css";   // --disc-* tokens used by discColor()
 
 export type Disc = "interval" | "long" | "ski";
 export type Kind = "race" | "hard" | "bound" | "implausible";
 export const DISCS: Disc[] = ["interval", "long", "ski"];
 export const DISC_LABEL: Record<string, string> = { interval: "Interval", long: "Long distance", ski: "Ski", overall: "Overall" };
-export const DISC_COLOR: Record<string, string> = { interval: "--chart-1", long: "--chart-3", ski: "--chart-2", overall: "--chart-4" };
+/** own palette (tokens in fitness.css), distinct from the sport colours (run blue, ski red, hike green, bike ochre,
+ *  swim teal): a discipline is a model quantity, not a sport */
+export const DISC_COLOR: Record<string, string> = { interval: "--disc-interval", long: "--disc-long", ski: "--disc-ski", overall: "--disc-overall" };
 export const discColor = (d: string) => cssVar(DISC_COLOR[d] ?? "--chart-muted");
 export const KIND_LABEL: Record<Kind, string> = { race: "race", hard: "hard session", bound: "lower bound", implausible: "implausible" };
 export const KIND_HELP: Record<Kind, string> = {

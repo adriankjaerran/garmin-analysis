@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { MapView, setData, fitBBox, EMPTY } from "./MapView";
 import { bboxOfCoords, decodePolyline, unionBBox, type BBox } from "../lib/geo";
 import { sportColor } from "../lib/format";
+import { coreBBox } from "../lib/search";
 
 export interface GPoint { key: string; lat: number; lon: number; n: number; color?: string }
 export interface GShape { key: string; circle?: [number, number, number]; poly?: [number, number][] }
@@ -17,6 +18,8 @@ interface Props {
   highlight?: string | null; selected?: string | null;
   onHover?: (key: string | null) => void; onClick?: (key: string) => void;
   fit?: BBox | null; style?: any; empty?: string;
+  /** members outside `fit` (e.g. a group's sessions abroad) */
+  fitOut?: number;
 }
 
 function ring(s: GShape): [number, number][] {
@@ -30,7 +33,7 @@ function ring(s: GShape): [number, number][] {
   return out;
 }
 
-export function GroupsMap({ points = [], shapes = [], lines = [], members = [], highlight, selected, onHover, onClick, fit, style, empty }: Props) {
+export function GroupsMap({ points = [], shapes = [], lines = [], members = [], highlight, selected, onHover, onClick, fit, style, empty, fitOut = 0 }: Props) {
   const [map, setMap] = useState<MLMap | null>(null);
   const cb = useMemo(() => ({ onHover, onClick }), []);
   cb.onHover = onHover; cb.onClick = onClick;
@@ -90,19 +93,31 @@ export function GroupsMap({ points = [], shapes = [], lines = [], members = [], 
       properties: { key: l.key, color: sportColor(l.sport) }, geometry: { type: "LineString", coordinates: l.coords } })) });
   }, [map, M]);
 
-  useEffect(() => {
-    if (!map) return;
-    const b = fit ?? unionBBox([
+  // default view: the home cluster (densest group of places / routes), not the whole world; "show all" widens it
+  const [all, setAll] = useState(false);
+  const core = useMemo(() => {
+    const boxes = [
       ...points.map((p) => [p.lon, p.lat, p.lon, p.lat] as BBox),
       ...S.map((s) => bboxOfCoords(s.ring)), ...L.map((l) => bboxOfCoords(l.coords)),
-    ].filter((x): x is BBox => !!x));
+    ].filter((x): x is BBox => !!x);
+    return { ...coreBBox(boxes), whole: unionBBox(boxes) };
+    // keyed on the content, not the array identities (parents rebuild them on every hover)
+  }, [`${points.length}|${S.length}|${L.length}|${points[0]?.key}|${L[0]?.key}|${S[0]?.key}`]);
+  useEffect(() => {
+    if (!map) return;
+    const b = fit ?? (all ? core.whole : core.fit);
     if (b) fitBBox(map, b, { padding: 40, maxZoom: 15 });
-  }, [map, fit, points.length, S.length, L.length]);
+  }, [map, fit, core, all]);
 
   const nothing = !points.length && !shapes.length && !lines.length && !members.length;
   return (
-    <MapView style={style} onReady={onReady}>
+    <MapView style={style} onReady={onReady} defaultBasemap="grey">
       {nothing && <div class="msg">{empty ?? "Nothing to show on the map"}</div>}
+      {fit && fitOut > 0 && <div class="overlay bl">{fitOut} more of this group elsewhere (not in view)</div>}
+      {!fit && core.out > 0 && <div class="overlay bl">
+        {all ? <a href="#" onClick={(e) => { e.preventDefault(); setAll(false); }}>Zoom to the main area</a>
+          : <>{core.out} more elsewhere · <a href="#" onClick={(e) => { e.preventDefault(); setAll(true); }}>show all</a></>}
+      </div>}
     </MapView>
   );
 }

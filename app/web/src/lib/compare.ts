@@ -17,6 +17,8 @@ export interface CmpSession {
   id: number; date: string; sport: string; type: string | null; sig: string | null; route: string | null; place: string | null;
   elapsed_s: number; moving_s: number; pause_s: number; n_pauses: number; dist_m: number; moving_kmh: N; moving_pace_s_km: N;
   gap_pace_s_km: N; hr_avg: N; hr_max: N; climb_m: N; eff_m_per_beat: N; delta: Record<string, N>;
+  /** hr_avg = moving seconds only (= hr_avg_moving); hr_avg_activity = whole activity (Garmin, the activity header) */
+  hr_avg_moving?: N; hr_avg_activity?: N;
 }
 export interface LegRow { moving_s: number; pause_s: number; speed_kmh: number; hr: N; delta_moving_s: N; d_moving_s: N; rank: number; partial?: number }
 export interface Leg { from_m: number; to_m: number; name: string; climb_m: N; sessions: Record<string, LegRow | null> }
@@ -42,7 +44,9 @@ export interface CmpResult {
   activities: Record<string, Activity | null>; tracks?: Record<string, Track>; compute_s: number;
 }
 export interface SuggestSet { key: string; label: string; n_total: number; ids: string[]; mode: Mode; why: string }
-export interface Suggest { id: string; date: string; mode: Mode; sets: SuggestSet[]; activities: Record<string, Activity | null> }
+export interface Suggest { id: string; date: string; mode: Mode; sets: SuggestSet[]; activities: Record<string, Activity | null>;
+  /** modes the engine can run for this session ("distance" = Route position); sessions without distance: time / HR modes only */
+  modes?: Mode[]; no_distance?: boolean; comparable?: boolean; why_not?: string | null }
 
 // ---------------------------------------------------------------- grid + interpolation
 /** common x grid: the distance bins as they are, else n evenly spaced points over the union of x ranges */
@@ -128,6 +132,14 @@ export function sgn(v: N | undefined, f: (x: number) => string = (x) => String(M
 }
 export const kmhToPace = (v: N) => (v !== null && v >= 3 ? Math.min(3600 / v, 900) : null);
 
+/** rep slot label: anchor slots "Rep 3"; extra reps (a session had more reps than the anchor) "extra after R1" */
+export function slotName(s: { label: string; anchor: boolean }, short = false): string {
+  if (s.anchor) return short ? `R${s.label}` : `Rep ${s.label}`;
+  const [a, j] = s.label.split("+");
+  if (a === "0") return short ? `pre-R1${j === "1" ? "" : " " + j}` : `extra${j === "1" ? "" : " " + j} before R1`;
+  return short ? `R${a}+${j === "1" ? "" : j}` : `extra${j === "1" ? "" : " " + j} after R${a}`;
+}
+
 /** x value -> readable position for the cursor label */
 export function xLabel(r: CmpResult, x: number): string {
   const a = r.axis || {};
@@ -138,8 +150,8 @@ export function xLabel(r: CmpResult, x: number): string {
     const x0: number[] = a.slot_x0, w: number[] = a.slot_width, norm = a.rep_axis === "normalized";
     if (x < x0[0]) return `before rep ${slots[0]?.label}`;
     for (let k = 0; k < x0.length; k++) {
-      if (x >= x0[k] && x <= x0[k] + w[k]) return `Rep ${slots[k].label} · ${norm ? Math.round(x - x0[k]) + " %" : dur(x - x0[k])}`;
-      if (x > x0[k] + w[k] && (k + 1 >= x0.length || x < x0[k + 1])) return `break after rep ${slots[k].label} (squeezed)`;
+      if (x >= x0[k] && x <= x0[k] + w[k]) return `${slotName(slots[k])} · ${norm ? Math.round(x - x0[k]) + " %" : dur(x - x0[k])}`;
+      if (x > x0[k] + w[k] && (k + 1 >= x0.length || x < x0[k + 1])) return `break after ${slotName(slots[k], true)} (squeezed)`;
     }
     return "";
   }
@@ -154,11 +166,12 @@ export function xLabel(r: CmpResult, x: number): string {
 /** custom ticks for the aligned modes: [x, label] */
 export function alignedTicks(r: CmpResult): [number, string][] | null {
   const a = r.axis || {}, slots = r.slots ?? [];
-  if (r.mode === "intervals") return (a.slot_x0 as number[]).map((x, k) => [x, `Rep ${slots[k].label}`]);
+  if (r.mode === "intervals") return (a.slot_x0 as number[]).map((x, k) => [x, slotName(slots[k])]);
   if (r.mode === "breaks") {
     const t: [number, string][] = [];
     (a.break_x0 as number[]).forEach((x, k) => {
-      t.push([x, `B${slots[k].label}`]);
+      const sn = slotName(slots[k], true);
+      t.push([x, sn.startsWith("R") ? `B${sn.slice(1)}` : `B ${sn}`]);
       for (let s = 60; s < a.break_width[k] - 20; s += 60) t.push([x + s, dur(s)]);
     });
     return t;
@@ -191,4 +204,50 @@ export function posAt(tr: Track | undefined, t: N): [number, number] | null {
   const f = (t - tr.t[i]) / Math.max(1e-9, tr.t[i + 1] - tr.t[i]);
   if (tr.t[i + 1] - tr.t[i] > 120) return [tr.lon[i], tr.lat[i]];
   return [tr.lon[i] + (tr.lon[i + 1] - tr.lon[i]) * f, tr.lat[i] + (tr.lat[i + 1] - tr.lat[i]) * f];
+}
+
+/** Time gap inside each rep (intervals view, rep axis in seconds): for every grid point of a rep slot, the time
+ *  this session needed to cover the distance the reference had covered at that second, minus that second
+ *  (+ = behind). Distances are integrated from the speed series from the rep start, so every rep starts at 0
+ *  and the value at the rep end ≈ the rep time difference. `refSpeed` = the reference's (or the median's)
+ *  speed on the grid (km/h). Null outside reps, where either session has no data, or once a session's rep
+ *  is over before it reached the reference's distance. */
+export function repGap(X: number[], x0: number[], w: number[], speed: N[], refSpeed: N[]): N[] {
+  const out: N[] = new Array(X.length).fill(null);
+  for (let k = 0; k < x0.length; k++) {
+    const idx: number[] = [];
+    for (let i = 0; i < X.length; i++) if (X[i] >= x0[k] && X[i] <= x0[k] + w[k]) idx.push(i);
+    if (idx.length < 2) continue;
+    const cum = (v: N[]) => {
+      const D: N[] = [];
+      let d = 0, started = false, ended = false;
+      for (let n = 0; n < idx.length; n++) {
+        const i = idx[n], a = v[i];
+        if (a === null) { if (started) ended = true; D.push(null); continue; }
+        if (ended) { D.push(null); continue; }
+        if (started) { const p = v[idx[n - 1]]; d += ((((p ?? a) + a) / 2) / 3.6) * (X[i] - X[idx[n - 1]]); }
+        started = true;
+        D.push(d);
+      }
+      return D;
+    };
+    const Ds = cum(speed), Dr = cum(refSpeed);
+    let j = 0;
+    for (let n = 0; n < idx.length; n++) {
+      const d = Dr[n];
+      if (d === null) continue;
+      while (j < idx.length && (Ds[j] === null || Ds[j]! < d)) {
+        if (Ds[j] === null && j > 0 && Ds[j - 1] !== null) break;   // session's rep over
+        j++;
+      }
+      if (j >= idx.length || Ds[j] === null) continue;
+      let t = X[idx[j]] - x0[k];
+      if (j > 0 && Ds[j - 1] !== null && Ds[j]! > Ds[j - 1]!) {
+        const f = (d - Ds[j - 1]!) / (Ds[j]! - Ds[j - 1]!);
+        t = X[idx[j - 1]] - x0[k] + f * (X[idx[j]] - X[idx[j - 1]]);
+      }
+      out[idx[n]] = t - (X[idx[n]] - x0[k]);
+    }
+  }
+  return out;
 }

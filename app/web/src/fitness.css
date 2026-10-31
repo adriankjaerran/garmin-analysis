@@ -1,4 +1,11 @@
 /* Fitness page + activity "Shape" section (imported by pages/FitnessPage.tsx and components/ShapeSection.tsx) */
+/* discipline colours (lib/fitness.ts DISC_COLOR): deliberately not the --sport-* hues */
+:root {
+  --disc-interval: #7b3fc4;   /* violet */
+  --disc-long: #e0761b;       /* orange */
+  --disc-ski: #e0407f;        /* pink */
+  --disc-overall: #3d4650;    /* slate */
+}
 .shape-chart .readout { display: flex; gap: var(--space-4); flex-wrap: wrap; font-variant-numeric: tabular-nums; min-height: 20px; margin-bottom: var(--space-1); }
 .shape-chart .readout .dot { margin-right: 4px; }
 .shape-chart .plotwrap { position: relative; }
