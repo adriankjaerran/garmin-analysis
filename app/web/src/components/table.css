@@ -1,0 +1,15 @@
+/* Table.tsx: horizontal overflow affordance. The wrapper scrolls; when the table is wider than it, the
+   leading `stickyCols` columns (.stk, left offsets set inline) stay put and shadows mark the clipped edge(s). */
+.tablewrap.hx { overscroll-behavior-x: contain; }
+.tablewrap.hx table { width: max-content; min-width: 100%; }
+.tablewrap .stk { position: sticky; z-index: 1; background: var(--surface); }
+.tablewrap th.stk { z-index: 2; background: var(--surface-tint); }
+.tablewrap tbody tr:hover td.stk, .tablewrap tbody tr.hl td.stk { background: var(--surface-hover); }
+.tablewrap tbody tr.selected td.stk { background: var(--accent-surface); }
+.tablewrap.fade-l .stk-last { box-shadow: 6px 0 6px -6px rgba(20, 24, 28, 0.3); }
+.tablewrap.fade-r { background: linear-gradient(to left, rgba(20, 24, 28, 0.18), rgba(20, 24, 28, 0)) right / 16px 100% no-repeat scroll; }
+/* always-visible thin scrollbars (macOS overlay scrollbars hide that a table scrolls) */
+.tablewrap::-webkit-scrollbar { width: 8px; height: 8px; }
+.tablewrap::-webkit-scrollbar-thumb { background: var(--chart-muted); border-radius: 4px; border: 1px solid var(--surface); }
+.tablewrap::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+.tablewrap::-webkit-scrollbar-track, .tablewrap::-webkit-scrollbar-corner { background: var(--surface-tint); }

@@ -6,6 +6,7 @@ import "uplot/dist/uPlot.min.css";
 import { useEffect, useRef } from "preact/hooks";
 import { navigate } from "../lib/router";
 import { cssVar } from "../lib/format";
+import { dateAxis } from "../lib/chartAxes";
 import { DISC_LABEL, KIND_LABEL, discColor, pm, unitShort, type Disc, type FitSession, type FitnessDoc } from "../lib/fitness";
 
 const ts = (d: string) => Date.parse(d + "T12:00:00Z") / 1000;
@@ -84,15 +85,18 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, o
     let ov: (number | null)[][] | null = null;
     if (overall && D.overall) {
       const m: (number | null)[] = xs.map(() => null), up = [...m], dn = [...m];
-      for (const w of D.overall.weekly) { const i = pos.get(w.date); if (i !== undefined) { m[i] = w.mean; up[i] = w.mean + w.sd; dn[i] = w.mean - w.sd; } }
-      ov = [x, m, up, dn];
+      // the overall % jumps while disciplines join the model (first weeks); start it once all have data
+      const start = Object.entries(D).filter(([k, d]) => k !== "overall" && d?.weekly?.length).map(([, d]) => d.weekly[0].date).sort().pop() ?? "";
+      for (const w of D.overall.weekly) { const i = pos.get(w.date); if (i !== undefined && w.date >= start) { m[i] = w.mean; up[i] = w.mean + w.sd; dn[i] = w.mean - w.sd; } }
+      if (m.some((v) => v !== null)) ov = [x, m, up, dn];
     }
     const pts: (FitSession & { t: number })[] = doc.sessions
       .filter((s) => discs.includes(s.discipline) && inr(s.date) && (bounds || s.kind !== "bound"))
       .map((s) => ({ ...s, t: ts(s.date) }));
-    // hard evidence widens the y range, but at most 6 VDOT below the bands (keeps the trend readable)
-    const wlo = lo;
-    for (const p of pts) if (p.kind === "race" || p.kind === "hard") { lo = Math.min(lo, Math.max(p.score, wlo - 6)); hi = Math.max(hi, p.score); }
+    // races / hard sessions widen the y range, but at most 3 VDOT beyond the ±1 sd bands; markers further
+    // out (and lower bounds) are clipped at the edge, so the trend lines keep the height
+    const wlo = lo, whi = hi;
+    for (const p of pts) if (p.kind === "race" || p.kind === "hard") { lo = Math.min(lo, Math.max(p.score, wlo - 3)); hi = Math.max(hi, Math.min(p.score, whi + 3)); }
     if (!isFinite(lo)) { lo = 40; hi = 60; }
     const vRange: [number, number] = [Math.floor(lo - 1.5), Math.ceil(hi + 1.5)];
 
@@ -158,7 +162,7 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, o
       scales: { x: { time: true }, v: { range: () => vRange } },
       bands: bandsCfg,
       axes: [
-        { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 26, space: 70 },
+        { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 26, ...dateAxis(56) },
         { scale: "v", stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 48, label: "VDOT", labelFont: font, labelSize: 16 },
       ],
       series,
@@ -180,7 +184,7 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, o
     if (ov) {
       const c = discColor("overall");
       const vals = (ov[1].filter((v) => v !== null) as number[]);
-      const pr: [number, number] = [Math.floor(Math.min(...vals) - 2), Math.min(102, Math.ceil(Math.max(...vals) + 2))];
+      const pr: [number, number] = [Math.floor(Math.min(...vals)) - 4, Math.min(102, Math.ceil(Math.max(...vals) + 2))];
       const lab = document.createElement("div");
       lab.className = "subtitle";
       lab.textContent = "Overall, % of personal best (precision-weighted across disciplines)";
@@ -191,7 +195,7 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, o
         scales: { x: { time: true }, y: { range: () => pr } },
         bands: [{ series: [2, 3], fill: rgba(c, 0.15) }],
         axes: [
-          { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 24, space: 70 },
+          { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 24, ...dateAxis(56) },
           { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 48, space: 28, label: "%", labelFont: font, labelSize: 16 },
         ],
         series: [{}, { stroke: c, width: 1.5, points: { show: false } },

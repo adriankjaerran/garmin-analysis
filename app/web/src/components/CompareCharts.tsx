@@ -5,6 +5,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { useEffect, useRef } from "preact/hooks";
 import { cssVar } from "../lib/format";
+import { PACE_INCRS, TIME_INCRS, categoryAxis, paceRange, speedRange } from "../lib/chartAxes";
 
 type N = number | null;
 export interface CPanel {
@@ -22,6 +23,10 @@ export interface CPanel {
   single?: N[];
   /** only these grid points set the y range (e.g. reps, not breaks) */
   rangeMask?: boolean[] | null;
+  /** y axis kind: "pace" (s/km, robust moving range, m:ss steps), "time" (m:ss steps), "num" (default).
+   *  "speed" = robust moving range. Without it, a "speed" panel counts as pace when reversed (dir -1), else as
+   *  speed, and a fmt that prints m:ss as time. */
+  axis?: "pace" | "speed" | "time" | "num";
 }
 
 interface Props {
@@ -86,7 +91,11 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
       wrap.appendChild(title);
       root.appendChild(wrap);
       const rd = P.band ? [...data, P.band.lo, P.band.hi] : data;
-      const [lo, hi] = range(P.rangeMask ? rd.map((c) => c.map((v, i) => (P.rangeMask![i] ? v : null))) : rd);
+      const masked = P.rangeMask ? rd.map((c) => c.map((v, i) => (P.rangeMask![i] ? v : null))) : rd;
+      const kind = P.axis ?? (P.key === "speed" ? (P.dir === -1 ? "pace" : "speed") : /\d:\d\d/.test(P.fmt(61)) ? "time" : "num");
+      // pace / speed: robust range of the moving samples (stops, walks and dropouts would stretch it to 15:00 / 0)
+      const mv = P.rangeMask ? { moveFrac: 0.5, hi: 0.98 } : {};
+      const [lo, hi] = (kind === "pace" && paceRange(masked.flat(), mv)) || (kind === "speed" && speedRange(masked.flat(), mv)) || range(masked);
       const yr: [number, number] = P.zero ? [Math.min(lo, 0), Math.max(hi, 0)] : [lo, hi];
       const isLast = pi === panels.length - 1;
       const setTitle = (i: number | null) => {
@@ -118,12 +127,10 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
         axes: [
           {
             show: isLast, stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, font, size: 22, space: 70,
-            ...(ticks ? {
-              splits: (u: uPlot) => ticks.map((t) => t[0]).filter((x) => x >= u.scales.x.min! && x <= u.scales.x.max!),
-              values: (_u: uPlot, ts: number[]) => ts.map((x) => ticks.find((t) => t[0] === x)?.[1] ?? ""),
-            } : { values: (_u: uPlot, ts: number[]) => ts.map(xFmt), ...(xIncrs ? { incrs: xIncrs } : {}) }),
+            ...(ticks ? categoryAxis(ticks) : { values: (_u: uPlot, ts: number[]) => ts.map(xFmt), ...(xIncrs ? { incrs: xIncrs } : {}) }),
           },
-          { stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, values: (_u, ts) => ts.map((v) => P.fmt(v)), font, size: 58, space: 28 },
+          { stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, values: (_u, ts) => ts.map((v) => P.fmt(v)), font, size: 58, space: 28,
+            ...(kind === "pace" ? { incrs: PACE_INCRS } : kind === "time" ? { incrs: TIME_INCRS } : {}) },
         ],
         series,
         hooks: {

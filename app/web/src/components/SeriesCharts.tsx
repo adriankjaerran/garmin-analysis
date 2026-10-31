@@ -6,6 +6,7 @@ import "uplot/dist/uPlot.min.css";
 import { useEffect, useRef } from "preact/hooks";
 import type { Series } from "../lib/api";
 import { cssVar, dur } from "../lib/format";
+import { PACE_INCRS, TIME_INCRS, paceRange, speedRange } from "../lib/chartAxes";
 
 export type PanelKey = "pace" | "speed" | "hr" | "alt" | "cad" | "power";
 export interface Band { a: number; b: number; kind: "rep" | "pause" | "lap" }
@@ -21,19 +22,48 @@ const PANELS: Record<PanelKey, { label: string; color: string; fmt: (v: number) 
 
 function values(s: Series, k: PanelKey): (number | null)[] | null {
   const sp = s.speed;
-  if (k === "pace") return sp ? sp.map((v) => (v && v > 0.8 ? Math.min(1000 / v, 900) : null)) : null;
-  if (k === "speed") return sp ? sp.map((v) => (v === null ? null : v * 3.6)) : null;
-  const v = (s as any)[k] as (number | null)[] | undefined;
-  if (!v || !v.some((x) => x !== null && x !== 0)) return null;
-  return v;
+  const v = k === "pace" ? sp?.map((v) => (v && v > 0.8 ? Math.min(1000 / v, 900) : null))
+    : k === "speed" ? sp?.map((v) => (v === null ? null : v * 3.6))
+    : ((s as any)[k] as (number | null)[] | undefined);
+  return v && hasData(v) ? v : null;
 }
+
+/** a panel is worth drawing with ≥ 10 non-zero samples covering ≥ 5 % of the record (pool swims have a
+ *  handful of speed samples -> no near-empty chart) */
+function hasData(v: (number | null)[]) {
+  let n = 0;
+  for (const x of v) if (x !== null && x !== 0 && isFinite(x)) n++;
+  return n >= 10 && n >= 0.05 * v.length;
+}
+
+/** panels of `panels` that SeriesCharts will actually draw for this series (lets a page hide the chart
+ *  column or its colour toggle when nothing is left) */
+export const drawablePanels = (s: Series, panels: PanelKey[]) => panels.filter((k) => values(s, k) !== null);
 
 function pct(xs: (number | null)[], q: number) {
   const a = xs.filter((x): x is number => x !== null).sort((x, y) => x - y);
   return a.length ? a[Math.floor(q * (a.length - 1))] : 0;
 }
 
-export const tLabel = (t: number) => (t >= 3600 ? dur(t).slice(0, -3) : `${Math.round(t / 60)} min`);
+/** Pace y range: with reps, the fast end comes from the rep samples (p2 − 20 s) and the slow end from the
+ *  moving samples but at most 2 min slower than the reps (p98 + 2:00), so breaks / walking don't squash the
+ *  reps while warm-up and jogs stay visible; without reps from the moving samples (stops, walks excluded). */
+function paceAxisRange(x: number[], ys: (number | null)[], bands: Band[]): [number, number] {
+  const all = paceRange(ys);
+  const reps = bands.filter((b) => b.kind === "rep");
+  if (reps.length) {
+    const inRep: (number | null)[] = [];
+    ys.forEach((v, i) => { if (reps.some((b) => x[i] >= b.a + 10 && x[i] <= b.b - 3)) inRep.push(v); });
+    const r = paceRange(inRep, { moveFrac: 0.75, hi: 0.98, minPad: 0 });
+    if (r) return [Math.max(120, r[0] - 20), Math.min(Math.max(r[1] + 30, Math.min(all?.[1] ?? 0, r[1] + 120)), 900)];
+  }
+  return all ? [Math.max(120, all[0]), Math.min(all[1], 900)] : [180, 600];
+}
+
+export const tLabel = (t: number) => (t >= 3600 ? dur(t).slice(0, -3) : t % 60 ? dur(t) : `${Math.round(t / 60)} min`);
+/** elapsed-time ticks: "10 min" steps below an hour, "h:mm" for every tick once the axis passes 1 h */
+const tTicks = (ts: number[]) => (ts.some((t) => t >= 3600) ? ts.map((t) => (t % 60 ? dur(t) : hmm(t))) : ts.map(tLabel));
+const hmm = (t: number) => `${Math.floor(t / 3600)}:${String(Math.round((t % 3600) / 60)).padStart(2, "0")}`;
 
 interface Props {
   series: Series;
@@ -45,10 +75,11 @@ interface Props {
   cursorRef?: { current: ((i: number | null) => void) | null };
   /** x tick / hover label (default: elapsed time) */
   xFmt?: (t: number) => string;
+  /** x tick steps in x units (default: whole minutes / hours, see TIME_INCRS) */
+  xIncrs?: number[];
 }
 
-export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, xFmt }: Props) {
-  const xf = xFmt ?? tLabel;
+export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, xFmt, xIncrs = TIME_INCRS }: Props) {
   const xh = xFmt ?? dur;
   const box = useRef<HTMLDivElement>(null);
   const hoverRef = useRef(onHover);
@@ -76,8 +107,9 @@ export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, x
       wrap.appendChild(title);
       root.appendChild(wrap);
       const lo = pct(ys, 0.01), hi = pct(ys, 0.99);
-      const range: uPlot.Range.MinMax = k === "pace" ? [Math.max(120, lo - 15), Math.min(hi + 15, 720)] :
-        k === "hr" ? [Math.max(40, lo - 5), hi + 5] :
+      const range: uPlot.Range.MinMax = k === "pace" ? paceAxisRange(x, ys, bands) :
+        k === "speed" ? speedRange(ys, { lo: 0.01, hi: 0.99 }) ?? [0, 20] :
+        k === "hr" ? [Math.max(40, lo - 5), pct(ys, 1) + 5] :   // HR peaks matter: up to the max
         k === "alt" && hi - lo < 20 ? [(hi + lo) / 2 - 10, (hi + lo) / 2 + 10] : [lo - (hi - lo) * 0.05, hi + (hi - lo) * 0.05 || hi + 1];
       const color = cssVar(P.color);
       const isLast = pi === active.length - 1;
@@ -94,9 +126,10 @@ export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, x
         scales: { x: { time: false }, y: { range: () => range, dir: k === "pace" ? -1 : 1 } },
         axes: [
           { show: isLast, stroke: cssVar("--text-muted"), grid: { stroke: cssVar("--hairline"), width: 1 }, ticks: { show: false },
-            values: (_u, ts) => ts.map(xf), font: `12px ${cssVar("--font")}`, size: 22, space: 80 },
+            values: (_u, ts) => (xFmt ? ts.map(xFmt) : tTicks(ts)), font: `12px ${cssVar("--font")}`, size: 22, space: 80, incrs: xIncrs },
           { stroke: cssVar("--text-muted"), grid: { stroke: cssVar("--hairline"), width: 1 }, ticks: { show: false },
-            values: (_u, ts) => ts.map((v) => P.fmt(v)), font: `12px ${cssVar("--font")}`, size: 48, space: 30 },
+            values: (_u, ts) => ts.map((v) => P.fmt(v)), font: `12px ${cssVar("--font")}`, size: 48, space: 30,
+            ...(k === "pace" ? { incrs: PACE_INCRS } : {}) },
         ],
         series: [{}, { stroke: color, width: 1.25, points: { show: false }, spanGaps: false }],
         hooks: {
