@@ -24,10 +24,22 @@ route (default: the largest ski route, i.e. the Holmenkollen rollerski climb).
   places / regions by time share) is in [similarity.md](similarity.md). User overrides:
   `data/adrian/places.json` `{"Oslo-3": "Bogstad"}` (place id or old generic id) or
   `{"59.933,10.719": "name"}` (any place whose centre is within 400 m).
+  All naming is one function, `name_places(cens, sizes, locs, over, geocode)`, priority **user override >
+  KNOWN > LANDMARKS > cached reverse geocode > `<loc>-<rank>`**. The geocode source is optional:
+  `data/<p>/cache/geocode.json` `{"source": "...", "points": [{"lat", "lon", "name", "kind"}]}` (one point per
+  cluster centre, e.g. from a one-off OSM / Kartverket reverse geocode — not fetched yet); the nearest point within
+  400 m names a cluster that no KNOWN / LANDMARK claims; a name used twice gets " 2". Ids: known / landmark /
+  geocode name, else the generic id; an override changes only the **display name** (`name`, `name_src: override`),
+  so ids in URLs and other scripts stay stable. `DISPLAY_NAMES` fixes spellings without changing ids
+  (`Bislet` → "Bislett"). Place entries: `name, lat, lon, n, types, src` (known / landmark / geocode / generic),
+  `name_src`, `generic_id`.
 - **Areas**: single-link chaining of start points at 2 km.
 - **Routes**: track on a 75 m grid; coverage(A|B) = share of A's cells within one cell of B's;
   similarity = min of both coverages; same sport family, distance ratio ≤ 1.3; average-linkage merge
-  while ≥ 0.6. Routes with ≥ 2 sessions get ids `R1..` (by size). Shape = laps / out_and_back /
+  while ≥ 0.6. Routes with ≥ 2 sessions get ids `R1..` (by size). Route `place` = most common start place of the
+  members (ties → the medoid's start place, then the bigger place; deterministic, the similarity index reuses it),
+  `end_place` = id of the place at the end (point-to-point). The app shows the index's route names
+  ([similarity.md](similarity.md)); `name` here is the fallback. Shape = laps / out_and_back /
   point_to_point / loop_cw / loop_ccw (retrace share + start–end distance); `route_dir` = fwd/rev
   vs the reference (cw/ccw for loops).
 - **Session types** (rules): runs → intervals_track/road/treadmill (rep detector, manual laps),
@@ -40,6 +52,13 @@ route (default: the largest ski route, i.e. the Holmenkollen rollerski climb).
   `fast: part by vehicle / bike?` (moving ≥ 7.5 km/h for ≥ 30 min: 5 hikes, e.g. a 112 km "hike").
   No-GPS distances are `dist_trusted: false`. Intervals (runs and ski) get `sig` ("6×1000", "10×4:00",
   "3×1800 + 2×900"; ski: durations only, "4×4:00"), `reps` [time_s, dist_m, speed_ms, hr] and `breaks_s`.
+- **Pool swims** (`pool_swim()`, FIT sport 5 with length messages and a pool length): the records of a pool swim
+  come in bursts and their distance steps per length, so pauses / legs from records are garbage (12:40 "moving",
+  8 km/h). Instead: moving = swimming time of the active lengths, distance = valid lengths × pool length (lengths
+  faster than 2.5 m/s are lap-button glitches and dropped: 8 + 4 lengths in two 2019 swims), rests = gaps ≥ 10 s
+  between lengths, elapsed from the session; no legs / pauses. Output `swim` {pool_m, lengths, dist_m, active_s,
+  timer_s, elapsed_s, rest_s, pace_100m_s, strokes_per_length, bad_lengths, n_rests, longest_rest_s}; pool swims
+  count as trusted distance.
 - **Similar**: top 5 of the same sport family for two presets, `route` (route overlap 0.45) and
   `workout` (type 0.30, pace/intensity/structure); missing components score 0.4; `reasons` = top 3.
 

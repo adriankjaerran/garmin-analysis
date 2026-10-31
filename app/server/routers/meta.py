@@ -7,7 +7,7 @@ import collections
 from fastapi import APIRouter, Depends
 
 from ..deps import get_store
-from ..store import SPORTS, Store
+from ..store import SPORT_LABEL, SPORTS, Store, type_label
 
 router = APIRouter(tags=["meta"])
 
@@ -25,8 +25,8 @@ def meta(store: Store = Depends(get_store)):
         "n_tracks": sum(a["track"] for a in acts),
         "first": acts[-1]["date"] if acts else None, "last": acts[0]["date"] if acts else None,
         "years": years,
-        "sports": [{"id": s, "n": sports[s]} for s in SPORTS if sports[s]],
-        "types": [{"id": t, "n": n} for t, n in types.most_common()],
+        "sports": [{"id": s, "label": SPORT_LABEL[s], "n": sports[s]} for s in SPORTS if sports[s]],
+        "types": [{"id": t, "label": type_label(t), "n": n} for t, n in types.most_common()],
         "groups_built": g.get("built"),
     }
 

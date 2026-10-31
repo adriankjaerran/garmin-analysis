@@ -28,8 +28,9 @@ import numpy as np
 
 from . import ROOT  # noqa: F401  (puts scripts/ on sys.path)
 import gps_quality as gq  # noqa: E402
+import session_groups as sg  # noqa: E402  (pool_swim; also registers the length / pool-length fields)
 
-CACHE_VERSION = 2
+CACHE_VERSION = 3   # 3: pool swims from the FIT length messages (series, lap starts >= 0, meta.swim)
 FIT_EPOCH = gq.FIT_EPOCH
 SEMI = gq.SEMI
 
@@ -97,12 +98,47 @@ def simplify(lat: np.ndarray, lon: np.ndarray, tol_m: float) -> np.ndarray:
 
 
 # ---------------------------------------------------------------- FIT -> arrays
+def _swim_arrays(swim: dict, recs: list, t0: int) -> dict:
+    """Pool swim on a 1 s grid from the active lengths: speed = pool length / length time while swimming (NaN in
+    rests, so charts show gaps), distance cumulative, cad = strokes per minute; HR from the records if any.
+    The records of a pool swim come in bursts (one write per few lengths), so their own time base is unusable."""
+    T = int(max(swim.get("elapsed_s") or 0, max((a + d for a, d, *_ in swim["lengths_detail"]), default=0))) + 1
+    t = np.arange(T + 1)
+    speed = np.full(T + 1, np.nan); cad = np.full(T + 1, np.nan)
+    dist = np.full(T + 1, np.nan)
+    pool, done = swim["pool_m"], 0.0
+    dist[0] = 0.0
+    for a, d, strokes, _ in swim["lengths_detail"]:
+        a0, a1 = int(round(a)), int(round(a + d))
+        if a1 <= a0 or a0 < 0:
+            continue
+        speed[a0:a1] = pool / d
+        if strokes:
+            cad[a0:a1] = strokes / d * 60
+        dist[a0:a1 + 1] = done + pool * (np.arange(a0, a1 + 1) - a0) / max(a1 - a0, 1)
+        done += pool
+    hr = np.full(T + 1, np.nan)
+    hv = [(r["timestamp"] - t0, r["heart_rate"]) for r in recs if r.get("heart_rate") and 30 < r["heart_rate"] < 230]
+    if len(hv) >= 2:
+        ht, hh = np.array(hv, float).T
+        hr = np.interp(t, ht, hh, left=np.nan, right=np.nan)
+    nan = np.full(T + 1, np.nan)
+    return {"t": t.astype(np.int32), "lat": nan.copy(), "lon": nan.copy(), "hr": hr.astype(np.float32),
+            "speed": speed.astype(np.float32), "alt": nan.astype(np.float32), "dist": dist.astype(np.float32),
+            "cad": cad.astype(np.float32) if np.isfinite(cad).any() else np.zeros(0, np.float32),
+            "power": np.zeros(0, np.float32)}
+
+
 def read_fit(fit: Path) -> dict:
     raw = gq._read_fast(fit)
     recs = sorted((r for r in raw["record"] if "timestamp" in r), key=lambda r: r["timestamp"])
     if len(recs) < 2:
         raise ValueError("no records")
     t0 = recs[0]["timestamp"]
+    swim = sg.pool_swim(raw)
+    if swim and raw["session"][0].get("start_time"):   # time origin = session start (records start late)
+        t0 = min(t0, raw["session"][0]["start_time"])
+        swim = sg.pool_swim(raw, t0)
     cols = {k: [] for k in COLS}
     last = None
     nan = float("nan")
@@ -130,8 +166,10 @@ def read_fit(fit: Path) -> dict:
         cols["power"].append(p if p is not None else nan)
     arr = {k: np.array(v, np.float64 if k in ("lat", "lon") else np.float32) for k, v in cols.items()}
     arr["t"] = arr["t"].astype(np.int32)
+    if swim:
+        arr = _swim_arrays(swim, recs, t0)
     # speed from distance when the speed field is missing (old files, indoor)
-    if np.isnan(arr["speed"]).all() and (~np.isnan(arr["dist"])).sum() > 2:
+    elif np.isnan(arr["speed"]).all() and (~np.isnan(arr["dist"])).sum() > 2:
         d = np.interp(arr["t"], arr["t"][~np.isnan(arr["dist"])], arr["dist"][~np.isnan(arr["dist"])])
         v = np.gradient(d, np.maximum(arr["t"], 0).astype(float), edge_order=1) if len(d) > 2 else np.zeros_like(d)
         arr["speed"] = np.clip(v, 0, 15).astype(np.float32)
@@ -152,9 +190,20 @@ def read_fit(fit: Path) -> dict:
             "climb": v.get("total_ascent"), "desc": v.get("total_descent"),
             "intensity": INTENSITY.get(v.get("intensity")), "trigger": TRIGGER.get(v.get("lap_trigger")),
         })
+        if swim:   # pool: a lap without distance is a rest at the wall; pace from the swimming time of its lengths
+            L = laps[-1]
+            L["kind"] = "rest" if not L["dist"] else "swim"
+            if L["dist"] and L["start"] is not None and L["time"]:
+                sw = sum(d for a, d, *_ in swim["lengths_detail"] if L["start"] - 1 <= a < L["start"] + L["time"])
+                L["swim_s"] = round(sw, 1)
+                L["pace_100m_s"] = round(sw / L["dist"] * 100, 1) if sw else None
     sess = raw["session"][0] if raw["session"] else {}
     meta = {"start_utc": int(t0 + FIT_EPOCH), "laps": laps, "sport": sess.get("sport"),
             "sub_sport": sess.get("sub_sport"), "cache_version": CACHE_VERSION}
+    if swim:
+        meta["swim"] = {**{k: v for k, v in swim.items() if k != "lengths_detail"},
+                        "lengths": [{"start": round(a, 1), "time": d, "strokes": n, "stroke": st}
+                                    for a, d, n, st in swim["lengths_detail"]], "n_lengths": swim["lengths"]}
     return {"arr": arr, "meta": meta}
 
 
@@ -185,12 +234,28 @@ def load_npz(path: Path) -> tuple[dict, dict]:
 
 
 # ---------------------------------------------------------------- workers
+REP_KEYS = ("reps", "breaks", "mode", "reps_err")   # added by the rep pass; kept when only the format changes
+
+
+def carry_reps(meta: dict, old_npz: Path) -> dict:
+    """copy the rep analysis of an older npz of the same FIT into a freshly parsed meta"""
+    if old_npz.exists():
+        try:
+            _, om = load_npz(old_npz)
+            meta.update({k: om[k] for k in REP_KEYS if k in om})
+        except Exception:
+            pass
+    return meta
+
+
 def _parse_job(job):
-    aid, fit, out = job
+    aid, fit, out, keep_reps = job
     try:
         x = read_fit(Path(fit))
     except Exception as e:  # corrupt / empty files
         return aid, None, repr(e)[:120]
+    if keep_reps:
+        carry_reps(x["meta"], Path(out))
     save_npz(Path(out), x["arr"], x["meta"])
     return aid, tracks_of(x["arr"]), None
 
@@ -216,13 +281,15 @@ def build(person: str, force: bool = False, workers: int = 8, quiet: bool = Fals
     mpath = D / "cache" / "series_manifest.json"
     tpath = D / "cache" / "tracks.json"
     manifest = json.loads(mpath.read_text()) if mpath.exists() and not force else {}
-    if manifest.get("_v") != CACHE_VERSION:
+    old_reps = {}
+    if manifest.get("_v") != CACHE_VERSION:   # new format: re-parse everything, keep rep analyses of unchanged FITs
+        old_reps = {aid: m["reps_key"] for aid, m in manifest.items() if isinstance(m, dict) and m.get("reps_key")}
         manifest = {"_v": CACHE_VERSION}
     tracks = json.loads(tpath.read_text()) if tpath.exists() and not force and len(manifest) > 1 else {}
     fits = {p.stem: p for p in (D / "activities").glob("*/*.fit")}
     key = lambda p: f"{p.stat().st_mtime_ns}:{p.stat().st_size}"
 
-    todo = [(aid, str(p), str(sdir / f"{aid}.npz")) for aid, p in fits.items()
+    todo = [(aid, str(p), str(sdir / f"{aid}.npz"), old_reps.get(aid) == key(p)) for aid, p in fits.items()
             if (manifest.get(aid) or {}).get("key") != key(p)
             or ("err" not in manifest[aid] and not (sdir / f"{aid}.npz").exists())]
     errors = {aid: m["err"] for aid, m in manifest.items() if isinstance(m, dict) and "err" in m}
@@ -233,6 +300,8 @@ def build(person: str, force: bool = False, workers: int = 8, quiet: bool = Fals
                 manifest[aid] = {"key": key(fits[aid]), "err": err}
                 continue
             manifest[aid] = {"key": key(fits[aid])}
+            if old_reps.get(aid) == manifest[aid]["key"]:
+                manifest[aid]["reps_key"] = old_reps[aid]
             if tr:
                 tracks[aid] = tr
             else:

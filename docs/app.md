@@ -44,8 +44,8 @@ app/server/
   main.py          FastAPI app: routers under /api, serves app/web/dist with SPA fallback,
                    background cache refresh at startup
   store.py         Store(person): lazy loaders with mtime memo (activities_index.json + groups.json +
-                   tracks.json, daily summaries, sleep, intraday HR), per-activity series LRU (64),
-                   resample() / track_points() for the API
+                   similarity index (places / route names, store.index()) + tracks.json, daily summaries,
+                   sleep, intraday HR), per-activity series LRU (64), resample() / track_points() for the API
   fitcache.py      FIT -> data/<p>/cache/series/<id>.npz + cache/tracks.json (garmin-app-cache)
   deps.py          get_store() dependency (person from GARMIN_PERSON, default adrian)
   routers/         meta, activities, days, maps, places, search, compare, fitness
@@ -64,8 +64,12 @@ app/web/
 - Cache: `series/<id>.npz` holds per-record arrays `t lat lon hr speed alt dist cad power` plus a `meta`
   JSON (start time, laps, reps/breaks for interval runs). `tracks.json` holds encoded polylines per
   activity: `poly` (4 m Douglas–Peucker, day and mini maps) and `poly_lo` (20 m, overview map), plus bbox.
-  Incremental via `cache/series_manifest.json` (FIT mtime + size). A missing or stale npz is also rebuilt
-  on the fly when an activity is requested.
+  Incremental via `cache/series_manifest.json` (FIT mtime + size; a new cache format re-parses every FIT but keeps
+  the rep analyses of unchanged ones). A missing, stale or old-format npz is also rebuilt on the fly when an activity
+  is requested. **Pool swims** (FIT sport 5 with length messages): time origin = session start (the records come in
+  bursts and start late, which gave negative lap starts), the series is built from the swum lengths (speed = pool
+  length / length time, NaN in rests; distance; strokes/min as `cad`), `meta.swim` = summary + lengths, laps get
+  `kind` swim / rest and `pace_100m_s` from the swimming time of their lengths.
 - Series in `/api/activities/{id}` are resampled to a regular grid of `ceil(duration / 3600)` s
   (1 Hz up to an hour); speed, cadence and power are smoothed over 5 s; gaps longer than
   max(10 s, 3 steps) are null.
@@ -75,30 +79,47 @@ app/web/
   worker is emitted as a separate asset, see `MapView.tsx`). Colours and type come from the report's
   CSS tokens (`src/styles.css`, plus `--sport-*` colours).
 
+## Place model
+One definition for every page and endpoint (source: the similarity index, [similarity.md](similarity.md)):
+- **Place id** = stable key in URLs and filters (`Bislet`, `Marienlyst`, `Oslo-3`); **name** = what to show
+  (`Bislett`, user overrides). Filters (`place=`) accept either. Names come from one function,
+  `session_groups.name_places`: user override (`data/<p>/places.json`) > curated list (KNOWN spots, LANDMARKS) >
+  cached reverse geocode (`data/<p>/cache/geocode.json`, optional) > `<Garmin location>-<rank>`.
+- An activity's **place** is its **main place**: the named place with ≥ 40 % of its time, else its start cluster.
+  `start_place` is the start cluster (detail only).
+- Counts: `n_main` (main place; the Places page and `/api/groups?kind=place` sort by it), `n_touched` (starts,
+  ends or spends ≥ 5 % / 3 min there = what `/api/search?place=` returns by default), `n_start` (start cluster).
+  Bislett: 94 main, 108 touched, 107 start cluster. 216 places have a main-place activity (218 incl. touched-only).
+- **Route names** come from the index (start place → end place via named places, climbs): `R3 Holmenkollen climb:
+  Marienlyst → Frognerseteren via Holmenkollen 9.1 km`. groups.json route names are only a fallback.
+- **HR**: `hr` / `avg_hr` on rows = whole-activity average (Garmin); Compare's `hr_avg` = moving seconds only
+  (`hr_avg_moving`, plus `hr_avg_activity` for the header value). **Rest**: `rest_s` = this session's median rest,
+  `rest_group_s` = median of its same-workout group (the "rest ~2:30" in `exact_key`).
+
 ## Endpoints
 All GET unless noted; interactive docs at `/api/docs`.
 
 | Endpoint | Returns |
 |---|---|
 | `/api/meta` | person, counts, years, sports, types, groups.json build time |
-| `/api/activities?sport=run,ski&type=&from=&to=&q=&place=&route=` | `{n, activities: [...]}` newest first; row = index fields + groups.json place/area/route/type/sig + `fit`, `track` flags. `q` matches all words in name, type, place, route, signature, date, id |
-| `/api/activities/{id}?max_points=3600` | `activity`, `group` (groups.json entry without arrays), `legs`, `pauses` (objects), `similar`, `route`, `laps` (FIT), `reps`/`breaks` (with start/end s), `series` (columnar: t, lat, lon, hr, speed, alt, dist, cad, power), `newer`/`older` ids |
+| `/api/activities?sport=run,ski&type=&from=&to=&q=&place=&route=` | `{n, activities: [...]}` newest first; row = Garmin summary (`hr` = whole-activity average HR) + `type_label`, `place` (main place id) / `place_name`, `start_place(_name)` (start cluster), `region`, `route` / `route_name` (similarity index), groups.json area/type/sig, `workout_label`, `swim` (pool swims: pool_m, lengths, active_s, rest_s, pace_100m_s, n_rests, …) + `fit`, `track` flags. `place` = main place, id or name. `q` matches all words in name, type, place, route (name), signature, date, id |
+| `/api/activities/{id}?max_points=3600` | `activity`, `group` (groups.json entry without arrays), `legs`, `pauses` (objects), `similar`, `route` (`name` from the index), `laps` (FIT; pool swims add `kind` swim/rest, `swim_s`, `pace_100m_s`), `reps`/`breaks` (with start/end s), `series` (columnar: t, lat, lon, hr, speed, alt, dist, cad, power), `swim` (pool swims: summary + `lengths` [{start, time, strokes, stroke}]), `newer`/`older` ids |
 | `/api/activities/{id}/track?format=geojson\|columns&max_points=4000` | GPS track with per-point `t`, `speed` (m/s, 5 s smoothed), `hr`, `alt`; geojson = Feature(LineString) with the arrays in `properties` |
 | `/api/days/{date}` | that day's activities, `tracks` (4 m polylines), daily `summary`, `sleep`, intraday `hr`, `prev_active` / `next_active` |
 | `/api/calendar?from=&to=&sport=` | per active day: `n`, `km`, `s`, `sports` counts |
 | `/api/map/tracks?bbox=w,s,e,n&sport=&type=&from=&to=&q=&detail=lo\|hi` | simplified polylines (`poly`) with id, date, sport, type, name, km, bbox |
-| `/api/places` | places (id, lat/lon, n, types, area, routes, last) and areas |
-| `/api/routes?place=&sport=` | routes with ≥ 2 sessions: id, name, place, sport, shape, km, n, first/last |
+| `/api/places?touched=0\|1` | places with ≥ 1 main-place activity (touched=1: also places only started at / passed through): id, `name`, lat/lon, `n` (= `n_main`), `n_touched`, `n_start`, kind, src (named / start), name_src, types, area, routes, last; plus areas. Same set and counts as `/api/groups?kind=place` (see [Place model](#place-model)) |
+| `/api/routes?place=&sport=` | routes with ≥ 2 sessions: id, name, place / start_place / end_place / via (ids) + `*_name`, region, sport, shape, km, climb, n, first/last, has_legs (names from the similarity index) |
 | `/api/routes/{id}` | route row + reference polyline (`ref` lat/lon/km/alt), waypoints, `legs_table`, `members` (activity rows + route_dir, pause_s, `poly` 20 m) |
 | `POST /api/cache/refresh` | starts an incremental cache build in the background |
 | `/api/search?<filters>&sort=-date&limit=&poly=1` | `{n, km, truncated, filters, families, rows}`; filters = every `similarity.Index.search` filter under its own name (lists `a\|b`; ranges `lo-hi`, `lo-`, `-hi`, m:ss allowed; one number = exact for counts, ± `tol` for km/time/HR/rep length, ± 5 s for paces) plus `sport` (app families, comma list), `q` (all words in name, date, place(s), region(s), route, workout), `from`/`to`. Row = id, date, start, name, sport, distances/times/HR/climb/speed, place (+ touched `places`), region (+ `regions`), route, workout (family, label, category, signature, main_sig, exact_key, rep_count, rep_dist_m, rep_time_s, rest_s, …), bbox, `poly` (≤ 200-pt encoded polyline) |
 | `/api/nearest/{id}?k=10&preset=balanced\|workout\|route\|place&weights=route:0.5,pace:0.2&same_sport=1&<filters>` | `{query, preset, weights (used), components, presets, results}`; result = search row + `score`, `components` {c: 0..1}, `reasons` [{c, s, text}]. `weights` overrides the preset's weights (without `preset`: only those components). Search filters restrict the candidates |
 | `/api/groups?kind=place\|start_place\|region\|route\|family\|signature\|exact\|workout&touched=0\|1&min_n=1&<filters>` | `{kind, groups}`: `{key, label, n, first, last, ids, sports}` + place lat/lon/kind/src/n_main/n_touched/`shape` (circle or polygon), region kind/`shape`, route sport/shape/km/climb/`poly`; `workout` = tree `{key, label, n, first, last, places, children: [signature {…, children: [exact {…, ids}]}]}` |
-| `/api/search/options` | values for the filter controls with counts: sports, places, regions, routes, families, categories, interval signatures and exact keys, rest modes, presets |
-| `/api/compare?ids=a,b,c&mode=distance\|route_position\|moving\|elapsed\|intervals\|breaks&reference=first\|median&axis=auto\|route\|own&rep_axis=absolute\|normalized&gap_s=60&rep_gap_s=30&match=auto\|index&step_m=&smooth_s=&max_points=1500&tracks=1` | `scripts/compare.py` `compare()` output as documented in [compare.md](compare.md) (sessions + deltas, axis, series per session, legs / slots / reps / breaks / rep_summary / median), plus `activities` (app rows by id) and `tracks` (`{id: {t, lat, lon}}`, ≤ 1500 points, for the map markers). ≤ 40 ids; 422 with the engine's message for unusable input (e.g. no reps in any session). Engine calls are serialised by a lock (its in-process cache isn't thread-safe); cold rep detection runs in its process pool (4 workers) and is cached in `cache/compare.pkl`; the last 12 responses are memoised (key includes groups.json mtime). Warm: 0.02–0.1 s |
-| `/api/compare/suggest?id=&n=8` | `{id, date, mode, sets, activities}`: comparison sets for one activity from the similarity index, each `{key, label, n_total, ids, mode, why}` with this activity first, then the most recent others on or before its date (topped up with later ones): `exact` (same exact workout key), `sig_place`, `sig` (same rep signature; intervals only), `route` (all members up to 40 for non-laps routes), `nearest` (similarity, `workout` weights for intervals else `balanced`). `mode` = suggested view (intervals / distance for a non-laps route / moving) |
+| `/api/search/options` | values for the filter controls with counts: sports (+ `label`), places (`{id, name, n = n_touched, n_main, n_start}`), regions, routes, families, categories, interval signatures and exact keys, types (+ `label`), rest modes, presets |
+| `/api/compare?ids=a,b,c&mode=distance\|route_position\|moving\|elapsed\|intervals\|breaks&reference=first\|median&axis=auto\|route\|own&rep_axis=absolute\|normalized&gap_s=60&rep_gap_s=30&match=auto\|index&step_m=&smooth_s=&max_points=1500&tracks=1` | `scripts/compare.py` `compare()` output as documented in [compare.md](compare.md) (sessions + deltas, axis, series per session, legs / slots / reps / breaks / rep_summary / median), plus `sessions[].hr_avg_moving` (= the engine's `hr_avg`, moving seconds only) and `hr_avg_activity` (whole activity, as in the header), `activities` (app rows by id) and `tracks` (`{id: {t, lat, lon}}`, ≤ 1500 points, for the map markers). ≤ 40 ids; 422 with the engine's message for unusable input (e.g. no reps in any session). Engine calls are serialised by a lock (its in-process cache isn't thread-safe); cold rep detection runs in its process pool (4 workers) and is cached in `cache/compare.pkl`; the last 12 responses are memoised (key includes groups.json mtime). Warm: 0.02–0.1 s |
+| `/api/compare/suggest?id=&n=8` | `{id, date, mode, sets, activities}`: comparison sets for one activity from the similarity index, each `{key, label, n_total, ids, mode, why}` with this activity first, then the most recent others on or before its date (topped up with later ones): `exact` (same exact workout key), `sig_place`, `sig` (same rep signature; intervals only), `route` (all members up to 40 for non-laps routes), `nearest` (similarity, `workout` weights for intervals else `balanced`). `mode` = suggested view (intervals / distance for a non-laps route / moving; sessions without distance: intervals / elapsed), `modes` = modes that work for this session, `no_distance`, `comparable` + `why_not` (no FIT, or neither distance nor HR → no sets). Set members are limited to sessions the engine can read |
 | `/api/fitness?discipline=interval,long,ski,overall&from=&to=&hr=1` | fitness.json (reloaded on mtime) filtered by discipline / date: `disciplines` (current + `trend_90d`, `last_evidence`; yearly; weekly), `sessions` (+ `explain`, activity `name`, `dist_km`, `sport`), `rebuild` status; `hr=1` adds `hr_diagnostics`. 404 if fitness.json is missing |
-| `/api/fitness/session/{id}` | `{scored, sessions: [...], hr_diagnostics, hr_used_in_score}`; a session = score, kind, weight, `explain`, `components_explained` (label, text, meaning), `shape` that week (mean, sd), race equivalents of the score and of the shape, `current`. A 10k race appears twice (interval + long). `scored: false` for unscored activities |
+| `/api/fitness/session/{id}` | `{scored, sessions: [...], hr_diagnostics, hr_used_in_score}`; a session = score, kind, weight, `explain`, `components_explained` (label, text, meaning), `shape` that week (mean, sd), race equivalents of the score and of the shape, `current`. A 10k race appears twice (interval + long). `scored: false` for unscored activities, with `not_scored: {key, text}` saying why (sport, indoor / treadmill pace not trusted, no GPS distance, race distance, no ≥ 20 min stretch, …) |
 | `POST /api/fitness/rebuild`, `GET /api/fitness/rebuild` | re-run `fitness_model.build` in a background thread (≈0.1 s with cached features, ≈10 s cold) and atomically rewrite fitness.json; GET = status `{running, started, finished, seconds, error}` |
 
 ## Extension points
@@ -137,5 +158,6 @@ All GET unless noted; interactive docs at `/api/docs`.
 - The overview map draws all tracks as one GeoJSON layer (fine for ~1000 tracks; a vector-tile or
   pre-rendered heat layer would be needed for many more).
 - Kartverket tiles are blank outside Norway; switch basemap for trips abroad.
-- Reps exist only for runs that `session_groups.py` classified as intervals; skiing has pauses/legs only.
+- Reps exist only for runs that `session_groups.py` classified as intervals and for ski_intervals sessions
+  (`ski_intervals.py`: lap workouts and hard efforts such as hard Holmenkollen climbs); other skiing has pauses/legs only.
 - Sleep and intraday HR exist only for days fetched with `fetch_daily.py`.

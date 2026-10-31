@@ -235,8 +235,34 @@ def fitness_session(aid: str, store: Store = Depends(get_store)):
              if hd.get("vdot") is not None else "—",
              "meaning": f"Swain-style VO2max from {hd.get('n_chunks', 0)} chunks; test-retest sd 4.7, not used"},
         ]}
+    reason = None if items else _not_scored(store, aid)
     return {"id": aid, "scored": bool(items), "sessions": items, "hr_diagnostics": hr,
-            "hr_used_in_score": doc.get("hr_used_in_score", False), "built": doc.get("built")}
+            "not_scored": reason, "hr_used_in_score": doc.get("hr_used_in_score", False), "built": doc.get("built")}
+
+
+def _not_scored(store: Store, aid: str) -> dict:
+    """Why an activity has no shape score: {key, text}. Mirrors fitness_model.score_session's rules."""
+    ga = store.groups()["activities"].get(aid) or {}
+    a = store.activity_map().get(aid) or {}
+    sport, atype, t = ga.get("sport"), ga.get("atype") or a.get("type"), ga.get("type") or ""
+    lab = a.get("type_label") or atype or "activity"
+    if sport not in ("run", "ski"):
+        return {"key": "sport", "text": f"Only runs and ski sessions are scored; this is a {lab.lower()}."}
+    if not a.get("fit"):
+        return {"key": "no_fit", "text": "No FIT file, so there is no pace / HR series to score."}
+    if sport == "run" and atype in ("treadmill_running", "indoor_running"):
+        return {"key": "indoor", "text": f"{lab}: pace comes from the foot pod / treadmill, not GPS, and isn't trusted "
+                                         "for the score (the workout itself counts in the lists and in Compare)."}
+    if not ga.get("dist_trusted"):
+        return {"key": "distance", "text": "No trusted distance (no GPS track), so pace can't be scored."}
+    if sport == "run" and t == "race?":
+        return {"key": "race_distance", "text": "Race-like run, but not within 3.5 % of 5k / 10k / half / marathon."}
+    if sport == "run" and t.startswith("intervals"):
+        return {"key": "no_reps", "text": "Intervals without a usable rep analysis (no sustained work bouts found)."}
+    if sport == "run":
+        return {"key": "no_effort", "text": f"{t.replace('_', ' ').capitalize() or 'Run'}: no pause-free stretch of "
+                                            "≥ 20 min, so it doesn't even give a lower bound."}
+    return {"key": "no_effort", "text": "No sustained hard ski effort (climb) long enough to score."}
 
 
 def _run_rebuild(person: str):

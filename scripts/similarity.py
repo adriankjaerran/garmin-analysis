@@ -39,15 +39,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import session_groups as sg  # noqa: E402  (read-only use: FIT reader, helpers, signature logic)
 
 ROOT = Path(__file__).resolve().parent.parent
-INDEX_VERSION = 1
+INDEX_VERSION = 2   # 2: place / start_place / end_place / route places are ids, + *_name display names
 TRACK_CACHE_VERSION = 1
 
 # ---------------------------------------------------------------- geography
-# Named places: small spots, circle (lat, lon, r_m) or polygon [(lat, lon), ...]. "kind" is informative.
+# Named places: small spots, circle (lat, lon, r_m) or polygon [(lat, lon), ...]. "kind" is informative,
+# "name" = display name when it differs from the id (the id is what search filters, URLs and other scripts use).
 # Matched by time share (where the activity happens), not just the start point.
 # Extend / override per person in data/<p>/regions.json {"places": {...}, "regions": {...}} (same format).
 NAMED_PLACES = {
-    "Bislet": {"kind": "track", "circle": (59.9253, 10.7331, 130)},
+    "Bislet": {"kind": "track", "circle": (59.9253, 10.7331, 130), "name": "Bislett"},   # id stays "Bislet"
     "Frognerparken": {"kind": "park", "poly": [(59.9310, 10.6960), (59.9310, 10.7075), (59.9232, 10.7075), (59.9232, 10.6960)]},
     "St. Hanshaugen": {"kind": "park", "circle": (59.9266, 10.7408, 230)},
     "Sognsvann": {"kind": "lake", "circle": (59.9718, 10.7290, 700)},
@@ -91,7 +92,22 @@ KIND_LABEL = {"intervals": "Interval running", "tempo": "Tempo run", "race": "Ra
               "easy": "Easy run", "other": "Other run", "nogps": "Run without GPS"}
 SPORT_LABEL = {"hike": "Hike", "cycling": "Cycling", "lap_swimming": "Pool swim", "open_water_swimming": "Open water swim",
                "rowing_v2": "Rowing", "kayaking_v2": "Kayaking", "stop_watch": "Stopwatch (no GPS)",
-               "multi_sport": "Multisport", "other": "Other"}
+               "multi_sport": "Multisport", "other": "Other", "run": "Run", "ski": "Ski"}
+# readable labels per Garmin activity type (the app's sport chips are run / ski / hike / bike / swim / other)
+ATYPE_LABEL = {"running": "Run", "track_running": "Track run", "treadmill_running": "Treadmill run",
+               "indoor_running": "Indoor run", "trail_running": "Trail run", "street_running": "Road run",
+               "cross_country_skiing_ws": "Cross-country ski", "skate_skiing_ws": "Skate ski",
+               "backcountry_skiing": "Backcountry ski", "hiking": "Hike", "walking": "Walk", "cycling": "Ride",
+               "road_biking": "Road ride", "mountain_biking": "MTB ride", "indoor_cycling": "Indoor ride",
+               "lap_swimming": "Pool swim", "open_water_swimming": "Open water swim", "rowing_v2": "Rowing",
+               "kayaking_v2": "Kayaking", "stop_watch": "Stopwatch (no GPS)", "multi_sport": "Multisport", "other": "Other"}
+
+
+def atype_label(atype):
+    """readable label for a Garmin typeKey ('lap_swimming' -> 'Pool swim'); unknown keys are humanised"""
+    if not atype:
+        return None
+    return ATYPE_LABEL.get(atype) or atype.replace("_v2", "").replace("_ws", "").replace("_", " ").capitalize()
 
 
 # ---------------------------------------------------------------- small helpers
@@ -233,6 +249,17 @@ def fmt_pace(v):  # m/s -> min/km
     return mmss(1000 / v) + "/km" if v else "?"
 
 
+def fmt_speed(v, sport):
+    """runs as min/km, pool swims as /100 m, everything else (ski, hike, bike, ...) as km/h like the app"""
+    if not v:
+        return "?"
+    if sport == "run":
+        return fmt_pace(v)
+    if sport in ("lap_swimming", "open_water_swimming"):
+        return mmss(100 / v) + "/100 m"
+    return f"{v * 3.6:.1f} km/h"
+
+
 # ---------------------------------------------------------------- per-FIT track (worker)
 def track_job(fit):
     """GPS track thinned to >= 10 m steps (keeps t, alt): lat, lon, t, alt arrays"""
@@ -291,7 +318,8 @@ def rest_label(s):
 
 
 def dist_band(sport, km):
-    bands = {"run": [5, 8, 12, 16, 21, 30], "ski": [10, 20, 30, 45], "hike": [5, 10, 20]}.get(sport, [10, 30, 60])
+    bands = {"run": [5, 8, 12, 16, 21, 30], "ski": [10, 20, 30, 45], "hike": [5, 10, 20],
+             "lap_swimming": [1, 1.5, 2, 3], "open_water_swimming": [1, 2, 4]}.get(sport, [10, 30, 60])
     lo = 0
     for b in bands:
         if km < b:
@@ -400,7 +428,8 @@ def assign_rest_clusters(acts):
     for (_, sig), m in by.items():
         used = set()
         for c in rest_clusters([a["workout"]["rest_s"] for a in m]):
-            lab = rest_label(float(np.median(c)))
+            med = float(np.median(c))
+            lab = rest_label(med)
             while lab in used:
                 lab += "'"
             used.add(lab)
@@ -409,9 +438,20 @@ def assign_rest_clusters(acts):
                 if c[0] <= w["rest_s"] <= c[-1]:
                     w["exact_key"] = f"{sig} · rest ~{lab}"
                     w["rest_cluster"] = [c[0], c[-1]]
+                    w["rest_group_s"] = round(med)   # median rest of the group (label "~lab"); rest_s = this session
 
 
 # ---------------------------------------------------------------- build
+def touched_places(a):
+    """every place id an activity counts for in a place search / touched group: main, start, end, touched"""
+    return ({a.get("place"), a.get("start_place"), a.get("end_place")} | {p["name"] for p in a.get("places", [])}) - {None}
+
+
+def touched_regions(a):
+    """every region an activity counts for in a region search / touched group: main, Garmin municipality, touched"""
+    return ({a.get("region"), a.get("loc")} | {p["name"] for p in a.get("regions", [])}) - {None}
+
+
 def _geo_defs(D):
     places, regions = dict(NAMED_PLACES), dict(REGIONS)
     f = D / "regions.json"
@@ -469,6 +509,14 @@ def build(person="adrian", workers=8, quiet=False):
     P_DEF, R_DEF = _geo_defs(D)
     gplaces = G["places"]
 
+    def pname(pid):
+        """display name of a place id: start cluster name (override / landmark / ...), named place "name", else id"""
+        if not pid:
+            return None
+        if pid in gplaces:
+            return gplaces[pid].get("name") or pid
+        return (P_DEF.get(pid) or {}).get("name") or sg.display(pid)
+
     def place_at(p, defs=P_DEF, margin=150):
         best = None
         for nm, shp in defs.items():
@@ -496,7 +544,7 @@ def build(person="adrian", workers=8, quiet=False):
              "desc_m": r_(x.get("elevationLoss")), "avg_hr": r_(x.get("averageHR")), "max_hr": r_(x.get("maxHR")),
              "speed_ms": round(dist_km * 1000 / mov, 3) if mov and dist_km and o.get("dist_trusted") else None,
              "loc": x.get("locationName") or None, "area": o.get("area"),
-             "start_place": o.get("place"), "start_place_name": gplaces.get(o.get("place"), {}).get("name") if o.get("place") else None,
+             "start_place": o.get("place"), "start_place_name": pname(o.get("place")),
              "route": o.get("route"), "route_dir": o.get("route_dir"), "shape": o.get("shape")}
         r["workout"] = workout_of(o, sport, ana, dist_km)
         # ---- where: named places / regions by time share
@@ -519,9 +567,12 @@ def build(person="adrian", workers=8, quiet=False):
         elif x.get("startLatitude"):
             r["start_ll"] = [round(x["startLatitude"], 5), round(x["startLongitude"], 5)]
         main = places[0][0] if places and places[0][1] >= MAIN_SHARE else None
-        r["place"] = main or r["start_place_name"]
+        # main place (id): the named place with >= 40 % of the time, else the start cluster
+        r["place"] = main or r["start_place"]
+        r["place_name"] = pname(r["place"])
         r["place_src"] = "named" if main else ("start" if r["place"] else None)
-        r["places"] = [{"name": n_, "share": s_, "s": t_} for n_, s_, t_ in places]
+        r["end_place_name"] = pname(r.get("end_place"))
+        r["places"] = [{"name": n_, "label": pname(n_), "share": s_, "s": t_} for n_, s_, t_ in places]
         r["region"] = regions[0][0] if regions and regions[0][1] >= MAIN_SHARE else (r["loc"] or (G["areas"].get(o.get("area"), {}).get("name") if o.get("area") else None))
         r["regions"] = [{"name": n_, "share": s_, "s": t_} for n_, s_, t_ in regions]
         acts[aid] = {k: v for k, v in r.items() if v is not None}
@@ -531,50 +582,72 @@ def build(person="adrian", workers=8, quiet=False):
     for rid, R in G["routes"].items():
         m = [acts[i] for i in R["members"] if i in acts]
         med = acts.get(R["medoid"], {})
-        sp = collections.Counter(a.get("start_place_name") for a in m).most_common(1)[0][0]
-        ep = collections.Counter(a.get("end_place") or a.get("start_place_name") for a in m).most_common(1)[0][0] \
-            if R["shape"] == "point_to_point" else None
-        if R["shape"] == "point_to_point" and ep == sp:
-            ep = None
-        if R["shape"] == "point_to_point" and not ep:
-            ep = R["name"].split("→")[-1].rsplit(" ", 2)[0].strip() if "→" in R["name"] else "?"
+        # ids throughout; names via pname(). Start place = session_groups' route place (one source, ties resolved there)
+        sp = R.get("place") or collections.Counter(a.get("start_place") for a in m).most_common(1)[0][0]
+        ep = None
+        if R["shape"] == "point_to_point":
+            ec = collections.Counter(a.get("end_place") or a.get("start_place") for a in m)
+            ep = min(ec, key=lambda p: (-ec[p], str(p)))
+            if ep == sp:
+                ep = None
+        if R["shape"] == "point_to_point" and not ep:   # no named place at the end: session_groups' end place
+            ep = R.get("end_place")
+        ep_name = pname(ep) or ("?" if R["shape"] == "point_to_point" else None)
         cnt = collections.Counter(p["name"] for a in m for p in a.get("places", []))
         via = [p for p, c in cnt.most_common() if c >= 0.5 * len(m) and p not in (sp, ep)]
-        main_pl = collections.Counter(a.get("place") for a in m).most_common(1)[0][0]
+        mc = collections.Counter(a.get("place") for a in m)
+        main_pl = min(mc, key=lambda p: (-mc[p], p != sp, str(p)))
         gain = float(np.median([a.get("climb_m") or 0 for a in m])); loss = float(np.median([a.get("desc_m") or 0 for a in m]))
         climb = R["shape"] == "point_to_point" and gain >= 25 * R["dist_km"] and loss < 0.4 * gain
         shape_lab = {"laps": "laps", "out_and_back": "out & back", "point_to_point": "", "loop_cw": "loop", "loop_ccw": "loop"}[R["shape"]]
         where = main_pl if R["shape"] in ("laps",) else sp
+        vian = [pname(v) for v in via]
         if R["shape"] == "point_to_point":
-            nm = f"{sp} → {ep}" + (f" via {', '.join(via[:2])}" if via else "")
+            nm = f"{pname(sp)} → {ep_name}" + (f" via {', '.join(vian[:2])}" if via else "")
             if climb:
-                nm = f"{(via or [ep])[0]} climb: {nm}"
+                nm = f"{(vian or [ep_name])[0]} climb: {nm}"
         else:
-            nm = f"{where} {shape_lab}" + (f" via {', '.join(via[:2])}" if via and R["shape"] != "laps" else "")
+            nm = f"{pname(where)} {shape_lab}" + (f" via {', '.join(vian[:2])}" if via and R["shape"] != "laps" else "")
         nm += f" {R['dist_km']:.1f} km"
         reg = collections.Counter(a.get("region") for a in m).most_common(1)[0][0]
         routes[rid] = {"name": nm, "sport": R["sport"], "shape": R["shape"], "dist_km": R["dist_km"], "n": R["n"],
                        "start_place": sp, "end_place": ep, "via": via, "place": main_pl, "region": reg,
+                       "start_place_name": pname(sp), "end_place_name": ep_name, "via_names": vian, "place_name": pname(main_pl),
                        "climb_m": round(gain), "is_climb": climb, "medoid": R["medoid"], "members": R["members"],
                        "poly": med.get("poly")}
         for a in m:
             a["route_name"] = nm
-    places = collections.defaultdict(lambda: {"n": 0, "n_main": 0})
+    # places by id: n = touched (= what a place search matches: main, start, end or any touched place),
+    # n_main = main place, n_start = start-cluster members (session_groups)
+    places = collections.defaultdict(lambda: {"n": 0, "n_main": 0, "n_start": 0})
     for a in acts.values():
-        for p in {p["name"] for p in a.get("places", [])} | ({a["place"]} if a.get("place") else set()):
+        for p in touched_places(a):
             places[p]["n"] += 1
         if a.get("place"):
             places[a["place"]]["n_main"] += 1
-    for nm, v in places.items():
-        if nm in P_DEF:
-            v.update(kind=P_DEF[nm].get("kind"), src="named")
-            v["lat"], v["lon"] = (round(c, 5) for c in shape_centre(P_DEF[nm]))
+        if a.get("start_place"):
+            places[a["start_place"]]["n_start"] += 1
+    for pid, v in places.items():
+        v["name"] = pname(pid)
+        gp = gplaces.get(pid)
+        if pid in P_DEF:
+            v.update(kind=P_DEF[pid].get("kind"), src="named")
+            v["lat"], v["lon"] = (round(c, 5) for c in shape_centre(P_DEF[pid]))
         else:
-            gp = next((g for g in gplaces.values() if g["name"] == nm), None)
             v.update(kind="start cluster", src="start", **({"lat": gp["lat"], "lon": gp["lon"]} if gp else {}))
+        if gp:   # also a start cluster: how its id / name were made (known / landmark / geocode / generic / override)
+            v.update(start_src=gp.get("src"), name_src=gp.get("name_src", gp.get("src")),
+                     **({"generic_id": gp["generic_id"]} if gp.get("generic_id") else {}))
+    for a in acts.values():   # readable labels next to the ids
+        a["sport_label"] = atype_label(a.get("atype"))
+        w = a["workout"]
+        if w.get("exact_key"):
+            rid = a.get("route")
+            w["exact_label"] = (f"{w['family_label']} · {rid} {routes[rid]['name']}" if w["exact_key"].endswith(f" · {rid}") and rid in routes
+                                else w["exact_key"])
     regions = collections.defaultdict(lambda: {"n": 0, "n_main": 0})
     for a in acts.values():
-        for p in {p["name"] for p in a.get("regions", [])} | ({a["region"]} if a.get("region") else set()):
+        for p in touched_regions(a):
             regions[p]["n"] += 1
         if a.get("region"):
             regions[a["region"]]["n_main"] += 1
@@ -656,6 +729,12 @@ class Index:
         self.doc = doc
         self.acts = {int(k): v for k, v in doc["activities"].items()}
         self.routes = doc["routes"]; self.places = doc["places"]; self.regions = doc["regions"]
+        # place filters take an id or a display name ("Bislet" / "Bislett"), case-insensitive
+        self._pid = {}
+        for pid, v in self.places.items():
+            for k in (pid, v.get("name"), v.get("generic_id")):
+                if k:
+                    self._pid.setdefault(k.lower(), pid)
         self._cells = {}
         self._ord = {k: dt.date.fromisoformat(a["date"]).toordinal() for k, a in self.acts.items()}
         # pace reference: median speed of own runs within +-180 days (like session_groups.easy_ref)
@@ -663,6 +742,13 @@ class Index:
         self._rs = (np.array([d for d, _ in rs]), np.array([v for _, v in rs]))
 
     # ---- helpers
+    def place_id(self, x):
+        """place id for an id or display name (unknown values are returned unchanged)"""
+        return self._pid.get(str(x).lower(), x) if x is not None else None
+
+    def place_name(self, pid):
+        return (self.places.get(pid) or {}).get("name") or pid
+
     def cells(self, aid):
         if aid not in self._cells:
             c = self.acts[aid].get("cells")
@@ -685,8 +771,8 @@ class Index:
 
     def summary(self, a):
         w = a["workout"]
-        return {k: a.get(k) for k in ("id", "date", "sport", "name", "dist_km", "moving_s", "place", "region", "route",
-                                      "route_name")} | {"family": w["family"], "signature": w.get("signature"),
+        return {k: a.get(k) for k in ("id", "date", "sport", "name", "dist_km", "moving_s", "place", "place_name", "region",
+                                      "route", "route_name")} | {"family": w["family"], "signature": w.get("signature"),
                                                          "exact_key": w.get("exact_key")}
 
     # ---- search
@@ -705,6 +791,7 @@ class Index:
         L = lambda k: None if f.get(k) is None else ([f[k]] if isinstance(f[k], (str, int)) else list(f[k]))
         eq = {k: L(k) for k in ("sport", "atype", "family", "category", "exact_key", "main_sig", "route", "rest_mode")}
         sig = L("signature"); pl = L("place"); rg = L("region"); yr = L("year")
+        pl = [self.place_id(x) for x in pl] if pl else pl
         R = {k: _rng(f.get(k), tol if isinstance(f.get(k), (int, float)) else None) for k in
              ("distance_km", "duration_s", "climb_m", "avg_hr", "rep_count", "reps_total", "rep_dist_m", "rep_time_s", "rest_s")}
         pace = _rng(f.get("pace")); rpace = _rng(f.get("rep_pace"))
@@ -725,12 +812,11 @@ class Index:
             if f.get("months") and int(a["date"][5:7]) not in f["months"]:
                 continue
             if pl:
-                cand = {a.get("place")} if f.get("place_mode") == "main" else (
-                    {a.get("place"), a.get("start_place_name"), a.get("end_place")} | {p["name"] for p in a.get("places", [])})
+                cand = {a.get("place")} if f.get("place_mode") == "main" else touched_places(a)
                 if not cand & set(pl):
                     continue
             if rg:
-                cand = {a.get("region")} if f.get("region_mode") == "main" else ({a.get("region"), a.get("loc")} | {p["name"] for p in a.get("regions", [])})
+                cand = {a.get("region")} if f.get("region_mode") == "main" else touched_regions(a)
                 if not cand & set(rg):
                     continue
             for k in ("dist_trusted", "gps"):
@@ -778,24 +864,27 @@ class Index:
             s["route"] = ov
             t["route"] = (f"same route {q['route']} ({ov:.0%} overlap)" if q.get("route") and q.get("route") == c.get("route")
                           else f"{ov:.0%} track overlap")
-        qp = {q.get("place"), q.get("start_place_name")} | {p["name"] for p in q.get("places", [])}
-        cp = {c.get("place"), c.get("start_place_name")} | {p["name"] for p in c.get("places", [])}
+        qp = {q.get("place"), q.get("start_place")} | {p["name"] for p in q.get("places", [])}
+        cp = {c.get("place"), c.get("start_place")} | {p["name"] for p in c.get("places", [])}
+        N = self.place_name
         qp.discard(None); cp.discard(None)
         if qp and cp:
             jac = len(qp & cp) / len(qp | cp)
             if q.get("place") and q.get("place") == c.get("place"):
-                s["place"] = 0.8 + 0.2 * jac; t["place"] = f"both at {q['place']}"
+                s["place"] = 0.8 + 0.2 * jac; t["place"] = f"both at {N(q['place'])}"
             elif qp & cp:
-                s["place"] = 0.4 + 0.4 * jac; t["place"] = "both touch " + ", ".join(sorted(qp & cp))
+                s["place"] = 0.4 + 0.4 * jac; t["place"] = "both touch " + ", ".join(sorted(N(p) for p in qp & cp))
             elif q.get("region") and q.get("region") == c.get("region"):
                 s["place"] = 0.3; t["place"] = f"same region {q['region']}"
             elif q.get("area") and q.get("area") == c.get("area"):
                 s["place"] = 0.15; t["place"] = "same area"
             else:
-                s["place"] = 0.0; t["place"] = f"{q.get('place')} vs {c.get('place')}"
+                s["place"] = 0.0; t["place"] = f"{N(q.get('place'))} vs {N(c.get('place'))}"
         # workout
         if qw.get("exact_key") and qw["exact_key"] == cw.get("exact_key"):
             s["workout"] = 1.0; t["workout"] = f"same workout {qw['exact_key']}"
+            if qw.get("rest_s") and cw.get("rest_s") and qw.get("rest_group_s"):   # group label vs measured rests
+                t["workout"] += f" (rests {mmss(qw['rest_s'])} vs {mmss(cw['rest_s'])})"
         elif qw.get("rep_count") and cw.get("rep_count"):
             k = 2.0 if q["sport"] == "ski" and c["sport"] == "ski" else 1.0   # ski reps: terrain-defined, looser
             st = math.exp(-abs(math.log(qw["rep_count"] / cw["rep_count"])) / (0.35 * k)) * \
@@ -817,10 +906,10 @@ class Index:
         # pace: rep speed for interval pairs, else moving speed (trusted distance only; runs relative to own form)
         if qw.get("rep_speed_ms") and cw.get("rep_speed_ms"):
             a_, b_ = qw["rep_speed_ms"], cw["rep_speed_ms"]
-            s["pace"] = math.exp(-abs(math.log(a_ / b_)) / 0.1); t["pace"] = f"reps {fmt_pace(a_)} vs {fmt_pace(b_)}"
+            s["pace"] = math.exp(-abs(math.log(a_ / b_)) / 0.1); t["pace"] = f"reps {fmt_speed(a_, q['sport'])} vs {fmt_speed(b_, c['sport'])}"
         elif q.get("speed_ms") and c.get("speed_ms"):
             a_, b_ = q["speed_ms"], c["speed_ms"]
-            s["pace"] = math.exp(-abs(math.log(a_ / b_)) / 0.1); t["pace"] = f"{fmt_pace(a_)} vs {fmt_pace(b_)}"
+            s["pace"] = math.exp(-abs(math.log(a_ / b_)) / 0.1); t["pace"] = f"{fmt_speed(a_, q['sport'])} vs {fmt_speed(b_, c['sport'])}"
         if q.get("avg_hr") and c.get("avg_hr"):
             s["hr"] = math.exp(-abs(q["avg_hr"] - c["avg_hr"]) / 8); t["hr"] = f"HR {q['avg_hr']} vs {c['avg_hr']}"
         if q.get("dist_trusted") and c.get("dist_trusted") and q["dist_km"] > 0 and c["dist_km"] > 0:
@@ -881,7 +970,8 @@ class Index:
                 f["n"] += 1
                 s = f["children"].setdefault(w.get("signature"), {"key": w.get("signature"), "n": 0, "children": {}})
                 s["n"] += 1
-                e = s["children"].setdefault(w.get("exact_key"), {"key": w.get("exact_key"), "n": 0, "ids": []})
+                e = s["children"].setdefault(w.get("exact_key"), {"key": w.get("exact_key"), "label": w.get("exact_label", w.get("exact_key")),
+                                                                  "n": 0, "ids": []})
                 e["n"] += 1; e["ids"].append(a["id"])
             out = []
             for f in sorted(tree.values(), key=lambda x: -x["n"]):
@@ -893,10 +983,12 @@ class Index:
         G = collections.defaultdict(list)
         for a in acts:
             w = a["workout"]
-            if kind in ("place", "region") and touched:
-                keys = {a.get(kind)} | {p["name"] for p in a.get(kind + "s", [])}
+            if kind == "place" and touched:
+                keys = touched_places(a)
+            elif kind == "region" and touched:
+                keys = touched_regions(a)
             else:
-                keys = {{"place": a.get("place"), "start_place": a.get("start_place_name"), "region": a.get("region"),
+                keys = {{"place": a.get("place"), "start_place": a.get("start_place"), "region": a.get("region"),
                          "route": a.get("route"), "family": w["family"], "signature": w.get("signature"),
                          "exact": w.get("exact_key")}[kind]}
             for k_ in keys - {None}:
@@ -906,12 +998,15 @@ class Index:
             if len(m) < min_n:
                 continue
             m.sort(key=lambda a: a["date"])
-            g = {"key": k_, "label": self.routes[k_]["name"] if kind == "route" and k_ in self.routes else k_, "n": len(m),
+            label = (self.routes[k_]["name"] if kind == "route" and k_ in self.routes else
+                     self.place_name(k_) if kind in ("place", "start_place") else
+                     m[0]["workout"].get("exact_label", k_) if kind == "exact" else k_)
+            g = {"key": k_, "label": label, "n": len(m),
                  "first": m[0]["date"], "last": m[-1]["date"], "ids": [a["id"] for a in m],
                  "sports": dict(collections.Counter(a["sport"] for a in m).most_common())}
             if kind == "exact" or kind == "signature":
                 g["family"] = collections.Counter(a["workout"]["family"] for a in m).most_common(1)[0][0]
-                g["places"] = dict(collections.Counter(a.get("place") for a in m).most_common(3))
+                g["places"] = dict(collections.Counter(a.get("place_name") for a in m).most_common(3))
             out.append(g)
         return sorted(out, key=lambda g: (-g["n"], g["key"]))
 
@@ -953,7 +1048,7 @@ def groups(kind, person="adrian", **kw):
 # ---------------------------------------------------------------- CLI
 def _row(a):
     w = a["workout"]
-    return (f"{a['id']:>12} {a['date']} {a['sport']:<5} {a.get('dist_km', 0):5.1f} km  {(a.get('place') or '-')[:16]:<16} "
+    return (f"{a['id']:>12} {a['date']} {a['sport']:<5} {a.get('dist_km', 0):5.1f} km  {(a.get('place_name') or a.get('place') or '-')[:16]:<16} "
             f"{(a.get('region') or '-')[:10]:<10} {(a.get('route') or '-'):<4} {w.get('exact_key') or w.get('signature') or w['family']}")
 
 

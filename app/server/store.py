@@ -26,10 +26,17 @@ FAMILY = {
     "lap_swimming": "swim", "open_water_swimming": "swim",
 }
 SPORTS = ["run", "ski", "hike", "bike", "swim", "other"]
+SPORT_LABEL = {"run": "Run", "ski": "Ski", "hike": "Hike", "bike": "Bike", "swim": "Swim", "other": "Other"}
 
 
 def family(type_key: str | None) -> str:
     return FAMILY.get(type_key or "", "other")
+
+
+def type_label(type_key: str | None) -> str | None:
+    """readable Garmin activity type ('lap_swimming' -> 'Pool swim'), same labels as the similarity index"""
+    import similarity as sim
+    return sim.atype_label(type_key)
 
 
 def _r(v, n=2):
@@ -76,6 +83,16 @@ class Store:
         return self._memoize("groups", lambda: [p], lambda: _json(p) if p.exists() else
                              {"fields": {}, "places": {}, "areas": {}, "routes": {}, "activities": {}})
 
+    def index(self):
+        """similarity.Index (scripts/similarity.py): the one source for place / route names and place membership.
+        Cached in-process by similarity.load_index (reloaded on mtime, rebuilt when older than groups.json).
+        None if it can't be built (no groups.json)."""
+        import similarity as sim
+        try:
+            return sim.load_index(self.person)
+        except FileNotFoundError:
+            return None
+
     def tracks(self) -> dict:
         p = self.cache_dir / "tracks.json"
         return self._memoize("tracks", lambda: [p], lambda: _json(p) if p.exists() else {})
@@ -91,18 +108,29 @@ class Store:
         idx = self.dir / "activities_index.json"
         gp = self.dir / "groups.json"
         tp = self.cache_dir / "tracks.json"
-        return self._memoize("activities", lambda: [idx, gp, tp, self.dir / "activities"], self._build_activities)
+        sx = self.dir / "similarity_index.json"
+        return self._memoize("activities", lambda: [idx, gp, tp, sx, self.dir / "activities"], self._build_activities)
 
     def _build_activities(self) -> list[dict]:
         g = self.groups()["activities"]
         tracks = self.tracks()
         folders = self.folders()
+        ix = self.index()
+        X = ix.acts if ix else {}
+        R = ix.routes if ix else {}
+        gpl = self.groups().get("places", {})
+        pname = (lambda p: ix.place_name(p)) if ix else (lambda p: (gpl.get(p) or {}).get("name", p))
         out = []
         for a in _json(self.dir / "activities_index.json"):
             aid = str(a["activityId"])
             ga = g.get(aid) or {}
             tk = a["activityType"]["typeKey"]
             folder = folders.get(aid)
+            x = X.get(int(aid)) or {}
+            sp = ga.get("place")
+            pl = x.get("place") or sp       # main place (index); start cluster without an index entry
+            rt = ga.get("route")
+            sw = ga.get("swim")
             out.append({
                 "id": aid,
                 "start": a["startTimeLocal"],
@@ -110,18 +138,28 @@ class Store:
                 "date": a["startTimeLocal"][:10],
                 "name": a.get("activityName"),
                 "type": tk,
+                "type_label": type_label(tk),
                 "sport": family(tk),
-                "dist_km": _r((a.get("distance") or 0) / 1000, 2) or None,
+                # pool swims: valid lengths x pool length (glitch lengths dropped, see session_groups.pool_swim)
+                "dist_km": _r(sw["dist_m"] / 1000, 2) if sw and sw.get("dist_m") else _r((a.get("distance") or 0) / 1000, 2) or None,
                 "dur_s": _r(a.get("duration"), 0),
                 "moving_s": ga.get("moving_s") or _r(a.get("movingDuration"), 0),
+                # whole-activity average HR (Garmin summary, incl. pauses); Compare's hr_avg is moving-only
                 "hr": _r(a.get("averageHR"), 0), "maxhr": _r(a.get("maxHR"), 0),
                 "elev": _r(a.get("elevationGain"), 0),
                 "load": _r(a.get("activityTrainingLoad"), 0), "te": _r(a.get("aerobicTrainingEffect"), 1),
                 "kcal": _r(a.get("calories"), 0),
                 "location": a.get("locationName"),
                 "lat": a.get("startLatitude"), "lon": a.get("startLongitude"),
-                "place": ga.get("place"), "area": ga.get("area"), "route": ga.get("route"),
+                # place = main place id (where it mostly happens, similarity index), start_place = start cluster id
+                "place": pl, "place_name": pname(pl), "place_src": x.get("place_src"),
+                "start_place": sp, "start_place_name": pname(sp),
+                "region": x.get("region"), "area": ga.get("area"),
+                "route": rt, "route_name": (R.get(rt) or {}).get("name") or (self.groups()["routes"].get(rt) or {}).get("name") if rt else None,
                 "stype": ga.get("type"), "type_detail": ga.get("type_detail"), "sig": ga.get("sig"),
+                "workout_label": ((x.get("workout") or {}).get("exact_label") or (x.get("workout") or {}).get("signature")),
+                "swim": {k: sw.get(k) for k in ("pool_m", "lengths", "dist_m", "active_s", "rest_s", "pace_100m_s",
+                                                "strokes_per_length", "bad_lengths", "n_rests", "longest_rest_s")} if sw else None,
                 "fit": bool(folder and any(folder.glob("*.fit"))),
                 "track": aid in tracks,
             })
@@ -177,14 +215,18 @@ class Store:
             if hit and hit[0] == fm:
                 self._series.move_to_end(aid)
                 return hit[1], hit[2]
-        if npz.exists() and npz.stat().st_mtime_ns >= fm:
+        arr = meta = None
+        fresh = npz.exists() and npz.stat().st_mtime_ns >= fm
+        if fresh:
             arr, meta = fitcache.load_npz(npz)
-        else:
+            if meta.get("cache_version") != fitcache.CACHE_VERSION:   # older cache format: re-read the FIT
+                arr = meta = None
+        if arr is None:
             try:
                 x = fitcache.read_fit(fit)
             except Exception:
                 return None
-            arr, meta = x["arr"], x["meta"]
+            arr, meta = x["arr"], (fitcache.carry_reps(x["meta"], npz) if fresh else x["meta"])
             npz.parent.mkdir(parents=True, exist_ok=True)
             fitcache.save_npz(npz, arr, meta)
         with self._lock:

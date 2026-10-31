@@ -36,6 +36,6 @@ def map_tracks(bbox: str | None = Query(None, description="west,south,east,north
             w, s, e, n = t["bbox"]
             if e < box[0] or w > box[2] or n < box[1] or s > box[3]:
                 continue
-        out.append({"id": a["id"], "date": a["date"], "sport": a["sport"], "type": a["type"], "name": a["name"],
+        out.append({"id": a["id"], "date": a["date"], "sport": a["sport"], "type": a["type"], "type_label": a.get("type_label"), "name": a["name"],
                     "km": a["dist_km"], "bbox": t["bbox"], "poly": t[key]})
     return {"n": len(out), "tracks": out}

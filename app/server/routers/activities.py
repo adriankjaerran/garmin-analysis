@@ -26,13 +26,14 @@ def filter_activities(acts: list[dict], sport: str | None = None, type: str | No
             continue
         if date_to and a["date"] > date_to:
             continue
-        if place and a["place"] != place:
+        if place and place not in (a["place"], a.get("place_name")):   # main place, id or display name
             continue
         if route and a["route"] != route:
             continue
         if ql:
-            hay = " ".join(str(a.get(k) or "") for k in ("name", "type", "stype", "type_detail", "sig", "place",
-                                                         "route", "location", "date", "id")).lower()
+            hay = " ".join(str(a.get(k) or "") for k in ("name", "type", "type_label", "stype", "type_detail", "sig",
+                                                         "workout_label", "place", "place_name", "start_place_name",
+                                                         "region", "route", "route_name", "location", "date", "id")).lower()
             if not all(w in hay for w in ql.split()):
                 continue
         out.append(a)
@@ -43,8 +44,14 @@ def filter_activities(acts: list[dict], sport: str | None = None, type: str | No
 def list_activities(sport: str | None = Query(None, description="family: run,ski,hike,bike,swim,other (comma list)"),
                     type: str | None = Query(None, description="Garmin typeKey (comma list)"),
                     date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to"),
-                    q: str | None = None, place: str | None = None, route: str | None = None,
+                    q: str | None = None,
+                    place: str | None = Query(None, description="main place (id or display name)"), route: str | None = None,
                     store: Store = Depends(get_store)):
+    """Row: Garmin summary (dist_km, dur_s, hr = whole-activity average HR, ...) + place (main place id),
+    place_name, start_place(_name), region, route, route_name, type_label, workout_label, swim (pool swims)."""
+    if place:
+        ix = store.index()
+        place = ix.place_id(place) if ix else place
     rows = filter_activities(store.activities(), sport, type, date_from, date_to, q, place, route)
     return {"n": len(rows), "activities": rows}
 
@@ -72,11 +79,11 @@ def get_activity(aid: str, max_points: int = Query(3600, ge=100, le=20000), stor
            "legs": _rows(F.get("legs", []), ga.get("legs")),
            "pauses": _rows(F.get("pauses", []), ga.get("pauses")),
            "similar": ga.get("similar"),
-           "route": None, "laps": [], "reps": [], "breaks": [], "series": None,
+           "route": None, "laps": [], "reps": [], "breaks": [], "series": None, "swim": None,
            **_neighbours(store, aid)}
     if a.get("route") and a["route"] in g["routes"]:
         rt = g["routes"][a["route"]]
-        out["route"] = {"id": a["route"], "name": rt.get("name"), "n": rt.get("n"), "shape": rt.get("shape")}
+        out["route"] = {"id": a["route"], "name": a.get("route_name") or rt.get("name"), "n": rt.get("n"), "shape": rt.get("shape")}
     s = store.series(aid)
     if s:
         arr, meta = s
@@ -85,6 +92,8 @@ def get_activity(aid: str, max_points: int = Query(3600, ge=100, le=20000), stor
         out["laps"] = meta.get("laps") or []
         out["reps"] = meta.get("reps") or []
         out["breaks"] = meta.get("breaks") or []
+        if meta.get("swim"):   # pool swim: lengths (start s, time s, strokes), pace per 100 m, swimming vs rest time
+            out["swim"] = meta["swim"]
     elif ga.get("reps"):  # no FIT: durations only
         out["reps"] = [dict(zip(F.get("reps", []), r)) for r in ga["reps"]]
     return out

@@ -35,6 +35,12 @@ gq._WANT[20].update({2: "altitude", 3: "heart_rate", 78: "enhanced_altitude"})
 gq._WANT[21] = {0: "event", 1: "event_type"}
 gq._NAMES[21] = "event"
 gq._WANT[19][23] = "intensity"   # lap intensity (active / rest / ...), for the ski lap-workout detector
+# pool swims: session pool length / timer time and the per-length messages (the records of a pool swim are
+# written in bursts and their distance steps per length, so speed / pauses from records are garbage)
+gq._WANT[18].update({8: "total_timer_time", 44: "pool_length"})
+gq._WANT[101] = {2: "start_time", 3: "total_elapsed_time", 4: "total_timer_time", 5: "total_strokes",
+                 7: "swim_stroke", 12: "length_type"}
+gq._NAMES[101] = "length"
 
 # ---- parameters ----
 PLACE_R, AREA_R = 400, 2000          # m: place = greedy density cluster of first fix; area = single link
@@ -50,11 +56,14 @@ SPLIT_LEG_M = 3000.0                 # m: stretches between common stops longer 
 OWN_RATIO = (0.8, 1.25)              # leg dropped if own distance / reference length is outside this
 LEG_COVER = 0.8                      # a session's leg counts if it covers >= 80 % of it (speed uses covered length)
 MIN_ROUTE_N = 3
+SWIM_MAX_MS = 2.5                    # m/s: pool lengths faster than this are glitches (world record ~2.4 m/s)
 FAM = {"running": "run", "track_running": "run", "treadmill_running": "run", "indoor_running": "run",
        "trail_running": "run", "cross_country_skiing_ws": "ski", "skate_skiing_ws": "ski", "hiking": "hike"}
 KNOWN = {"Bislet": (59.9253, 10.7331), "Sognsvann": (59.9690, 10.7310), "Frognerseteren": (59.9785, 10.6800),
          "Holmenkollen": (59.9620, 10.6600), "Granåsen": (63.3800, 10.3130), "NTNU Gløshaugen": (63.4190, 10.4040)}
 BISLET = KNOWN["Bislet"]
+# display names where the id (kept stable: other scripts and saved URLs use it) is spelled differently
+DISPLAY_NAMES = {"Bislet": "Bislett"}
 # Curated landmarks (approximate centres, offline) for naming start clusters that no KNOWN spot claims:
 # the nearest cluster within LANDMARK_R gets the name, otherwise it stays "<Garmin location>-<rank>".
 # Only spots whose position is known to well within the radius. User names go in data/<p>/places.json.
@@ -180,6 +189,90 @@ def known_near(p, r):
     return n if d < r else None
 
 
+def display(pid):
+    return DISPLAY_NAMES.get(pid, pid) if pid else pid
+
+
+# ---------------------------------------------------------------- place naming
+# One function names every start cluster; priority: user override (data/<p>/places.json) > curated list
+# (KNOWN spots, then LANDMARKS) > cached reverse geocode (data/<p>/cache/geocode.json) > "<loc>-<rank>".
+# id = known / landmark / geocode name (generic ids stay as `generic_id`); a user override changes the
+# display name only, so ids (URLs, other scripts) stay stable.
+GEOCODE_R = 400   # m: a geocoded point names the cluster whose centre is within this distance
+
+
+def load_geocode(D):
+    """data/<p>/cache/geocode.json, written by a (future, one-off) reverse-geocode step:
+    {"source": "...", "points": [{"lat": .., "lon": .., "name": "Majorstuen", "kind": "suburb"}, ...]}
+    (one point per cluster centre). Missing file = no geocode names."""
+    f = D / "cache" / "geocode.json"
+    if not f.exists():
+        return []
+    try:
+        x = json.loads(f.read_text() or "{}")
+    except ValueError:
+        return []
+    pts = x.get("points") if isinstance(x, dict) else x
+    return [p for p in pts or [] if p.get("name") and p.get("lat") is not None and p.get("lon") is not None]
+
+
+def name_places(cens, sizes, locs, over=None, geocode=None):
+    """cens {label: (lat, lon)}, sizes {label: n}, locs {label: Garmin locationName or None}
+    -> {label: {"id", "name", "src", "name_src", "generic_id"}}; src (where the id comes from) = known |
+    landmark | geocode | generic; name_src = src, or override when places.json renames it"""
+    over, geocode = over or {}, geocode or []
+    known_of = {}   # a known name goes to the one cluster nearest to it (within 600 m)
+    for kn, q in KNOWN.items():
+        d, l = min((hav(c, q), l) for l, c in cens.items())
+        if d < 600:
+            known_of[l] = kn
+    land_of = {}    # curated landmarks name the nearest still unnamed cluster within LANDMARK_R
+    for kn, q in LANDMARKS.items():
+        free = [(hav(c, q), l) for l, c in cens.items() if l not in known_of]
+        if free:
+            d, l = min(free)
+            if d < LANDMARK_R and (l not in land_of or d < land_of[l][1]):
+                land_of[l] = (kn, d)
+    geo_of = {}     # nearest geocoded point within GEOCODE_R of the centre
+    for l, c in cens.items():
+        if l in known_of or l in land_of or not geocode:
+            continue
+        d, p = min(((hav(c, (p["lat"], p["lon"])), p) for p in geocode), key=lambda t: t[0])
+        if d <= GEOCODE_R:
+            geo_of[l] = p["name"]
+    out, rank, used = {}, collections.defaultdict(int), set(known_of.values()) | {v[0] for v in land_of.values()}
+    for l in sorted(cens, key=lambda l: -sizes[l]):
+        gen = None
+        if l in known_of:
+            pid, src = known_of[l], "known"
+        else:   # generic id "<loc>-<rank>" (rank counted over all clusters without a KNOWN name, so it stays stable)
+            loc = locs.get(l) or "?"
+            rank[loc] += 1; gen = f"{loc}-{rank[loc]}"
+            if l in land_of:
+                pid, src = land_of[l][0], "landmark"
+            elif l in geo_of:
+                pid, k = geo_of[l], 2
+                while pid in used:   # two clusters in the same locality: "Majorstuen", "Majorstuen 2"
+                    pid = f"{geo_of[l]} {k}"; k += 1
+                src = "geocode"
+            else:
+                pid, src = gen, "generic"
+        used.add(pid)
+        nm, nsrc = display(pid), src
+        for k, v in over.items():
+            if k == pid or (gen and k == gen):
+                nm, nsrc = v, "override"
+            elif "," in k:
+                try:
+                    q = tuple(float(x) for x in k.split(","))
+                except ValueError:
+                    continue
+                if hav(q, cens[l]) <= PLACE_R:
+                    nm, nsrc = v, "override"
+        out[l] = {"id": pid, "name": nm, "src": src, "name_src": nsrc, **({"generic_id": gen} if gen and gen != pid else {})}
+    return out
+
+
 def cum_climb(alt, thr=CLIMB_HYST):
     """cumulative climb / descent per sample with hysteresis"""
     up = np.zeros(len(alt)); dn = np.zeros(len(alt))
@@ -202,12 +295,45 @@ def r1(v, n=1):
 
 
 # ---------------------------------------------------------------- FIT -> 1 Hz series, legs, pauses
+def pool_swim(raw, t0=None) -> dict | None:
+    """Pool swim summary from the FIT length messages (None if not a pool swim). t0 = time origin for
+    `lengths` [start_s, dur_s, strokes, stroke] (active lengths only; default: session start)."""
+    ss = raw["session"][0] if raw.get("session") else {}
+    L = [x for x in raw.get("length", []) if "start_time" in x and x.get("total_timer_time") is not None]
+    pool = (ss.get("pool_length") or 0) / 100
+    if ss.get("sport") != 5 or not L or not pool:
+        return None
+    t0 = ss.get("start_time", L[0]["start_time"]) if t0 is None else t0
+    act = [x for x in L if x.get("length_type") == 1]
+    # implausible lengths (faster than SWIM_MAX_MS, e.g. 25 m in 0.8 s from a lap-button glitch) are dropped
+    bad = [x for x in act if x["total_timer_time"] <= 0 or pool / (x["total_timer_time"] / 1000) > SWIM_MAX_MS]
+    act = [x for x in act if x not in bad]
+    active = sum(x["total_timer_time"] for x in act) / 1000
+    elapsed = (ss.get("total_elapsed_time") or 0) / 1000 or None
+    timer = (ss.get("total_timer_time") or 0) / 1000 or None
+    dist = len(act) * pool
+    strokes = [x["total_strokes"] for x in act if x.get("total_strokes")]
+    # rests = gaps >= 10 s between consecutive swum lengths (idle lengths, rest laps and paused timer alike)
+    ends = [(x["start_time"], x["start_time"] + x["total_timer_time"] / 1000) for x in sorted(act, key=lambda x: x["start_time"])]
+    gaps = [b[0] - a[1] for a, b in zip(ends, ends[1:]) if b[0] - a[1] >= 10]
+    return {"pool_m": round(pool, 1), "lengths": len(act), "dist_m": round(dist), "active_s": round(active),
+            "timer_s": r1(timer, 0), "elapsed_s": r1(elapsed, 0), "rest_s": r1((timer or active) - active, 0),
+            "pace_100m_s": r1(active / dist * 100, 1) if dist else None,
+            "strokes_per_length": r1(np.mean(strokes), 1) if strokes else None, "bad_lengths": len(bad),
+            "n_rests": len(gaps), "longest_rest_s": r1(max(gaps, default=0), 0),
+            "lengths_detail": [[x["start_time"] - t0, round(x["total_timer_time"] / 1000, 1), x.get("total_strokes"),
+                                x.get("swim_stroke")] for x in act]}
+
+
 def read_series(fit: Path) -> dict:
     raw = gq._read_fast(fit)
     recs = sorted((r for r in raw["record"] if "timestamp" in r), key=lambda r: r["timestamp"])
     if len(recs) < 2:
         raise ValueError("no records")
     t0 = recs[0]["timestamp"]
+    swim = pool_swim(raw)
+    if swim and raw["session"][0].get("start_time"):   # pool swim records start late (bursts): session start
+        t0 = min(t0, raw["session"][0]["start_time"])
     t, lat, lon, dist, alt, hr = [], [], [], [], [], []
     last = None
     for r in recs:
@@ -237,6 +363,7 @@ def read_series(fit: Path) -> dict:
     s["laps"] = sorted(({"t": l["start_time"] - t0, "dur": (l.get("total_elapsed_time") or 0) / 1000,
                          "dist": (l.get("total_distance") or 0) / 100, "trigger": l.get("lap_trigger"),
                          "intensity": l.get("intensity")} for l in raw["lap"] if "start_time" in l), key=lambda l: l["t"])
+    s["swim"] = swim
     return s
 
 
@@ -380,7 +507,14 @@ def worker(job):
             hh[int(h[i])] += min(t[i + 1] - t[i], 10)
     out["hr_hist"] = dict(hh)
     G = to_grid(s)
-    if G["d"][-1] >= 200:
+    sw = s.get("swim")
+    if sw:   # pool swim: moving = swimming time of the active lengths, no legs / pauses from the records
+        sw = {k: v for k, v in sw.items() if k != "lengths_detail"}
+        el = sw["elapsed_s"] or G["T"]
+        out["swim"] = sw
+        out["summ"] = {"elapsed": el, "moving": sw["active_s"], "pause": el - sw["active_s"],
+                       "n_pauses": sw["n_rests"], "n_legs": 0, "longest": sw["longest_rest_s"]}
+    elif G["d"][-1] >= 200:
         out["legs"], out["pauses"], out["summ"], _ = legs_and_pauses(G)
     out["elapsed"] = G["T"]
     if FAM.get(typ) == "ski":   # ski interval detector (ski_intervals.py, ~10 ms on the grid)
@@ -415,6 +549,8 @@ def features(a, ZF):
     x, f = a["x"], a["f"] or {}
     dist = (x.get("distance") or 0) / 1000
     mov = x.get("movingDuration") or x.get("duration") or 0
+    if f.get("swim"):   # pool swim: distance and swimming time from the lengths
+        dist, mov = f["swim"]["dist_m"] / 1000 or dist, f["swim"]["active_s"] or mov
     r = {"dist_km": dist, "moving_s": mov, "speed": dist * 1000 / mov if mov else None,
          "elev_per_km": (x.get("elevationGain") or 0) / dist if dist > 0.3 else 0,
          "avg_hr": x.get("averageHR")}
@@ -728,7 +864,7 @@ def compare_route(rid, R, members, A, series_of, laps):
     rlat, rlon, rm = ref["lat"], ref["lon"], ref["m"]
     for k, w in enumerate(wps):
         i = int(np.clip(np.searchsorted(rm, w["m"]), 0, len(rm) - 1))
-        nm = known_near((rlat[i], rlon[i]), 400 if k in (0, len(wps) - 1) else 250)
+        nm = display(known_near((rlat[i], rlon[i]), 400 if k in (0, len(wps) - 1) else 250))
         if k == 0:
             nm = nm or R["place_name"]
         elif w["share"] is None or nm == wps[0]["name"]:
@@ -894,7 +1030,8 @@ def main():
     for a in acts:
         a["F"] = features(a, ZF)
         a["gps"] = bool(a["f"] and a["f"]["pts"])
-        a["F"]["dist_ok"] = a["F"]["dist_km"] >= 0.3 and (a["gps"] or a["type"] in ("treadmill_running", "indoor_running"))
+        a["F"]["dist_ok"] = a["F"]["dist_km"] >= 0.3 and (a["gps"] or a["type"] in ("treadmill_running", "indoor_running")
+                                                          or bool((a["f"] or {}).get("swim")))   # pool: lengths x pool length
 
     # ---- places / areas
     geo = [a for a in acts if a["start"]]
@@ -904,50 +1041,21 @@ def main():
     pj = D / "places.json"
     if pj.exists():
         over = json.loads(pj.read_text() or "{}")
-    places, rank = {}, collections.defaultdict(int)
+    places = {}
     groups = collections.defaultdict(list)
     for a, l in zip(geo, plab):
         groups[l].append(a)
     cens = {l: tuple(float(v) for v in np.median([a["start"] for a in m], 0)) for l, m in groups.items()}
-    # a known name goes to the one cluster nearest to it (within 600 m); before, every cluster within
-    # 600 m got the same id and their entries in `places` overwrote each other
-    known_of = {}
-    for kn, q in KNOWN.items():
-        d, l = min((hav(c, q), l) for l, c in cens.items())
-        if d < 600:
-            known_of[l] = kn
-    # curated landmarks name the nearest still unnamed cluster within LANDMARK_R
-    land_of = {}
-    for kn, q in LANDMARKS.items():
-        free = [(hav(c, q), l) for l, c in cens.items() if l not in known_of]
-        if free:
-            d, l = min(free)
-            if d < LANDMARK_R and (l not in land_of or d < land_of[l][1]):
-                land_of[l] = (kn, d)
+    names = name_places(cens, {l: len(m) for l, m in groups.items()},
+                        {l: (collections.Counter(a["loc"] for a in m if a["loc"]).most_common(1) or [(None, 0)])[0][0]
+                         for l, m in groups.items()}, over, load_geocode(D))
     for l, m in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        cen = cens[l]
-        nm = known_of.get(l)
-        gen = None
-        if not nm:   # generic id "<loc>-<rank>" (rank counted over all unnamed-by-KNOWN clusters, so it stays stable)
-            loc = collections.Counter(a["loc"] for a in m if a["loc"]).most_common(1)
-            loc = loc[0][0] if loc else "?"
-            rank[loc] += 1; gen = f"{loc}-{rank[loc]}"
-            nm = land_of[l][0] if l in land_of else gen
-        pid = nm
-        for k, v in over.items():
-            if k == pid or (gen and k == gen):
-                nm = v
-            elif "," in k:
-                try:
-                    q = tuple(float(s) for s in k.split(","))
-                    if hav(q, cen) <= PLACE_R:
-                        nm = v
-                except ValueError:
-                    pass
-        places[pid] = {"name": nm, "lat": round(cen[0], 5), "lon": round(cen[1], 5), "n": len(m),
+        cen, nmd = cens[l], names[l]
+        pid = nmd["id"]
+        places[pid] = {"name": nmd["name"], "lat": round(cen[0], 5), "lon": round(cen[1], 5), "n": len(m),
                        "types": dict(collections.Counter(a["type"] for a in m).most_common()),
-                       "src": "known" if l in known_of else ("landmark" if l in land_of else "generic"),
-                       **({"generic_id": gen} if gen and gen != pid else {})}
+                       "src": nmd["src"], "name_src": nmd["name_src"],
+                       **({"generic_id": nmd["generic_id"]} if "generic_id" in nmd else {})}
         for a in m:
             a["place"] = pid
     areas = {}
@@ -1003,22 +1111,24 @@ def main():
         rid = f"R{k + 1}"
         m = [tr[i] for i in c]
         shape = collections.Counter(a["shape"] for a in m).most_common(1)[0][0]
-        pl = collections.Counter(a["place"] for a in m).most_common(1)[0][0]
         dkm = float(np.median([a["F"]["dist_km"] for a in m]))
         med = c[int(np.argmax(Smin[np.ix_(c, c)].sum(1)))]
+        # most common start place; ties -> the medoid's, then the bigger place (deterministic; similarity.py reuses it)
+        pc = collections.Counter(a["place"] for a in m)
+        pl = min(pc, key=lambda p: (-pc[p], p != tr[med]["place"], -places[p]["n"], p))
         pname = places[pl]["name"]
         if shape == "point_to_point":
             ends = [a["end"] for a in m if a["end"]]
             e = tuple(np.median(ends, 0))
-            en = known_near(e, 600)
-            if not en:
-                de = [(hav(e, (p["lat"], p["lon"])), p["name"]) for p in places.values()]
-                d_, en = min(de)
-                en = en if d_ < PLACE_R else None
+            eid = known_near(e, 600)
+            if not eid:
+                d_, eid = min((hav(e, (p["lat"], p["lon"])), pid) for pid, p in places.items())
+                eid = eid if d_ < PLACE_R else None
+            en = (places[eid]["name"] if eid in places else display(eid)) if eid else None
             name = f"{pname} → {en or '?'} {dkm:.1f} km"
         else:
-            name = f"{pname} {SHAPE_LAB[shape]} {dkm:.1f} km"
-        routes[rid] = {"place": pl, "place_name": pname, "name": name, "sport": m[0]["fam"], "shape": shape,
+            eid, name = None, f"{pname} {SHAPE_LAB[shape]} {dkm:.1f} km"
+        routes[rid] = {"place": pl, "place_name": pname, "end_place": eid, "name": name, "sport": m[0]["fam"], "shape": shape,
                        "dist_km": round(dkm, 2), "n": len(m), "medoid": tr[med]["id"],
                        "members": [a["id"] for a in sorted(m, key=lambda a: a["date"])]}
         for a in m:
@@ -1125,7 +1235,7 @@ def main():
              "dur_s": sm.get("elapsed") or a["x"].get("elapsedDuration") and round(a["x"]["elapsedDuration"]),
              "moving_s": sm.get("moving") if sm else (round(a["F"]["moving_s"]) if a["F"]["moving_s"] else None),
              "pause_s": sm.get("pause"), "n_pauses": sm.get("n_pauses"), "longest_pause_s": sm.get("longest"),
-             "sig": a["sig"], "surface": a["surface"], "dist_trusted": a["F"]["dist_ok"]}
+             "sig": a["sig"], "surface": a["surface"], "dist_trusted": a["F"]["dist_ok"], "swim": f.get("swim")}
         if f.get("legs") is not None:
             o["legs"] = f["legs"]; o["pauses"] = f["pauses"]
         ana = f.get("ana")

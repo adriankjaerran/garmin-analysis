@@ -14,7 +14,7 @@ from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..deps import get_store
-from ..store import Store, family
+from ..store import SPORT_LABEL, Store, family, type_label
 
 router = APIRouter(tags=["search"])
 
@@ -69,16 +69,25 @@ def row(a: dict, poly: bool = True) -> dict:
     w = a.get("workout") or {}
     r = {
         "id": str(a["id"]), "date": a["date"], "start": a.get("start"), "name": a.get("name"),
-        "sport": family(a.get("atype")), "isport": a.get("sport"), "atype": a.get("atype"), "gps": bool(a.get("gps")),
+        "sport": family(a.get("atype")), "sport_label": a.get("sport_label"), "isport": a.get("sport"),
+        "atype": a.get("atype"), "gps": bool(a.get("gps")),
         "dist_km": a.get("dist_km"), "dist_trusted": a.get("dist_trusted"), "moving_s": a.get("moving_s"),
-        "avg_hr": a.get("avg_hr"), "climb_m": a.get("climb_m"), "speed_ms": a.get("speed_ms"),
-        "place": a.get("place"), "place_src": a.get("place_src"), "places": [p["name"] for p in a.get("places", [])],
+        "avg_hr": a.get("avg_hr"),   # whole-activity average (Garmin summary), same as the activity header
+        "climb_m": a.get("climb_m"), "speed_ms": a.get("speed_ms"),
+        # place = main place id, place_name its display name; places = touched place ids, place_names their names
+        "place": a.get("place"), "place_name": a.get("place_name"), "place_src": a.get("place_src"),
+        "start_place": a.get("start_place"), "start_place_name": a.get("start_place_name"),
+        "places": [p["name"] for p in a.get("places", [])],
+        "place_names": [p.get("label") or p["name"] for p in a.get("places", [])],
         "region": a.get("region"), "regions": [p["name"] for p in a.get("regions", [])],
         "route": a.get("route"), "route_name": a.get("route_name"),
         "family": w.get("family"), "family_label": w.get("family_label"), "category": w.get("category"),
         "signature": w.get("signature"), "main_sig": w.get("main_sig"), "exact_key": w.get("exact_key"),
+        "exact_label": w.get("exact_label"),
         "rep_count": w.get("rep_count"), "reps_total": w.get("reps_total"), "rep_dist_m": w.get("rep_dist_m"),
-        "rep_time_s": w.get("rep_time_s"), "rep_speed_ms": w.get("rep_speed_ms"), "rest_s": w.get("rest_s"),
+        "rep_time_s": w.get("rep_time_s"), "rep_speed_ms": w.get("rep_speed_ms"),
+        # rest_s = this session's median rest (main part); rest_group_s = median of its exact_key group ("rest ~2:30")
+        "rest_s": w.get("rest_s"), "rest_group_s": w.get("rest_group_s"),
         "rest_mode": w.get("rest_mode"), "bbox": _bbox(a.get("bbox")),
     }
     if poly:
@@ -134,9 +143,11 @@ def _filters(q) -> tuple[dict, dict]:
 def _text(a: dict) -> str:
     w = a.get("workout") or {}
     return " ".join(str(x) for x in (
-        a.get("name"), a.get("date"), a.get("id"), a.get("atype"), a.get("place"), a.get("region"), a.get("loc"),
+        a.get("name"), a.get("date"), a.get("id"), a.get("atype"), a.get("sport_label"), a.get("place"), a.get("place_name"),
+        a.get("start_place_name"), a.get("region"), a.get("loc"),
         a.get("route"), a.get("route_name"), w.get("family_label"), w.get("signature"), w.get("exact_key"),
-        w.get("detail"), *[p["name"] for p in a.get("places", [])], *[p["name"] for p in a.get("regions", [])]) if x).lower()
+        w.get("detail"), *[p.get("label") or p["name"] for p in a.get("places", [])], *[p["name"] for p in a.get("places", [])],
+        *[p["name"] for p in a.get("regions", [])]) if x).lower()
 
 
 def _app_ok(a: dict, app: dict) -> bool:
@@ -245,7 +256,7 @@ def _enrich_tree(ix, nodes):
         ids = ids_of(n)
         ds = sorted(ix.acts[i]["date"] for i in ids)
         n["first"], n["last"] = (ds[0], ds[-1]) if ds else (None, None)
-        n["places"] = dict(Counter(ix.acts[i].get("place") or "no place" for i in ids).most_common(3))
+        n["places"] = dict(Counter(ix.acts[i].get("place_name") or "no place" for i in ids).most_common(3))
         if "ids" in n:
             n["ids"] = [str(i) for i in n["ids"]]
         if n.get("children"):
@@ -284,8 +295,8 @@ def groups(request: Request, kind: str = "place", touched: int = 0, min_n: int =
         g["sports"] = dict(Counter(family(ix.acts[int(i)].get("atype")) for i in g["ids"]).most_common())
         if kind in ("place", "start_place"):
             p = ix.places.get(g["key"], {})
-            g |= {"lat": p.get("lat"), "lon": p.get("lon"), "kind": p.get("kind"), "src": p.get("src"),
-                  "n_main": p.get("n_main"), "n_touched": p.get("n")}
+            g |= {"name": p.get("name") or g["key"], "lat": p.get("lat"), "lon": p.get("lon"), "kind": p.get("kind"),
+                  "src": p.get("src"), "n_main": p.get("n_main"), "n_touched": p.get("n"), "n_start": p.get("n_start")}
             shp = defs.get("named_places", {}).get(g["key"])
             if shp:
                 g["shape"] = shp
@@ -298,6 +309,7 @@ def groups(request: Request, kind: str = "place", touched: int = 0, min_n: int =
         elif kind == "route":
             r = ix.routes.get(g["key"], {})
             g |= {k: r.get(k) for k in ("sport", "shape", "dist_km", "start_place", "end_place", "via", "place",
+                                        "start_place_name", "end_place_name", "via_names", "place_name",
                                         "region", "climb_m", "is_climb", "poly")}
             g["sport"] = family(ix.acts[int(g["ids"][0])].get("atype")) if g["ids"] else g.get("sport")
     return {"kind": kind, "groups": gs}
@@ -338,9 +350,11 @@ def options(store: Store = Depends(get_store)):
     W = lambda a: a.get("workout") or {}
     fam_label = {W(a)["family"]: W(a).get("family_label") for a in A}
     return {
-        "sports": cnt(lambda a: [family(a.get("atype"))]),
-        "places": [{"id": k, "n": v.get("n"), "n_main": v.get("n_main"), "kind": v.get("kind"), "src": v.get("src")}
-                   for k, v in sorted(ix.places.items(), key=lambda kv: (-kv[1].get("n", 0), kv[0]))],
+        "sports": [d | {"label": SPORT_LABEL.get(d["id"], d["id"])} for d in cnt(lambda a: [family(a.get("atype"))])],
+        # n = what the place filter returns in its default (touched) mode = n_touched; n_main = with place_mode=main
+        "places": [{"id": k, "name": v.get("name") or k, "n": v.get("n"), "n_touched": v.get("n"), "n_main": v.get("n_main"),
+                    "n_start": v.get("n_start"), "kind": v.get("kind"), "src": v.get("src")}
+                   for k, v in sorted(ix.places.items(), key=lambda kv: (-kv[1].get("n", 0), kv[0])) if v.get("n")],
         "regions": [{"id": k, "n": v.get("n"), "n_main": v.get("n_main"), "kind": v.get("kind"), "src": v.get("src")}
                     for k, v in sorted(ix.regions.items(), key=lambda kv: (-kv[1].get("n", 0), kv[0]))],
         "routes": [{"id": k, "name": r.get("name"), "n": r.get("n"), "sport": r.get("sport")}
@@ -349,6 +363,7 @@ def options(store: Store = Depends(get_store)):
         "categories": cnt(lambda a: [W(a).get("category")]),
         "signatures": cnt(lambda a: [W(a).get("signature")] if W(a).get("rep_count") else []),
         "exact": cnt(lambda a: [W(a).get("exact_key")] if W(a).get("rep_count") else []),
+        "types": [d | {"label": type_label(d["id"])} for d in cnt(lambda a: [a.get("atype")])],
         "rest_modes": cnt(lambda a: [W(a).get("rest_mode")]),
         "presets": list(__import__("similarity").PRESETS),
         "built": ix.doc.get("built"),

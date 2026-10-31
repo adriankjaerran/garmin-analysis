@@ -87,10 +87,18 @@ same sport (`same_sport=False` lifts that). `filters` limits them further using 
 - For each GPS track: the **time share** inside every named shape (point weight = time to the next
   point, capped at 30 s). A shape counts as **touched** at ≥ 5 % of the time or ≥ 3 min. One activity
   can touch several places and regions (`places`, `regions` with `share` and seconds).
-- **Main place** (`place`): the named place with ≥ 40 % of the time (`place_src: "named"`). Otherwise
+- **Main place** (`place`, an id): the named place with ≥ 40 % of the time (`place_src: "named"`). Otherwise
   it's the start cluster from session_groups (`place_src: "start"`, e.g. `Marienlyst`, `Fauske-1`; start
-  clusters are named by KNOWN spots, then curated landmarks, else `<loc>-<rank>`, see
-  [session-groups.md](session-groups.md)).
+  clusters are named by user override, KNOWN spots, curated landmarks, a cached reverse geocode, else
+  `<loc>-<rank>`, see [session-groups.md](session-groups.md)). Since index version 2 every place field is an
+  **id** (`place`, `start_place`, `end_place`, `places[].name`, route `start_place` / `end_place` / `via` /
+  `place`) with a display name next to it (`place_name`, `start_place_name`, `end_place_name`, `places[].label`,
+  route `*_name` / `via_names`, `places[id].name`): ids stay stable for filters and other scripts
+  (`fitness_model.py` and `compare.py` test `place == "Bislet"`), names can change (`Bislett`, overrides).
+  `Index.search(place=...)` accepts ids, names or old generic ids (case-insensitive).
+- **Counts** (`places[id]`): `n` = touched = activities whose main, start or end place it is or that spend ≥ 5 % /
+  3 min there — exactly what a `place` search returns (`touched_places(a)`); `n_main` = main place; `n_start` =
+  start-cluster members. Regions likewise (`touched_regions`: main, Garmin municipality, touched polygons).
   **Main region** (`region`): the polygon with ≥ 40 % of the time, else the Garmin `locationName`
   (municipality), else the area name. Activities without GPS get a place and region from the
   index start coordinates, if there are any.
@@ -98,9 +106,10 @@ same sport (`same_sport=False` lifts that). `filters` limits them further using 
   `{"places": {"Name": {"circle": [lat, lon, r_m], "kind": "park"}}, "regions": {"Name": {"poly": [[lat, lon], ...]}}}`.
   This adds new shapes or replaces existing ones; a value of `null` removes one. Start-cluster names
   still come from `places.json` (session_groups).
-- **Route names** come from where the members go: start place → end place (named place within
-  150 m of the end, otherwise the start cluster), plus `via` = named places touched by ≥ 50 % of
-  the members. A point-to-point route with ≥ 25 m/km climb and descent < 40 % of the climb is
+- **Route names** come from where the members go: start place (= session_groups' route place, so
+  groups.json and the index agree; ties resolved there) → end place (named place within 150 m of the end,
+  otherwise session_groups' end place), plus `via` = named places touched by ≥ 50 % of
+  the members. All names use display names (`Bislett laps 8.4 km`). A point-to-point route with ≥ 25 m/km climb and descent < 40 % of the climb is
   marked `is_climb` and named `"<first via> climb: …"`, for example
   `Holmenkollen climb: Marienlyst → Frognerseteren via Holmenkollen 9.1 km`.
 
@@ -137,21 +146,25 @@ same sport (`same_sport=False` lifts that). `filters` limits them further using 
   read-only).
 
 ## Artifacts
-**`data/<p>/similarity_index.json`** (~1.1 MB):
+**`data/<p>/similarity_index.json`** (~1.3 MB, version 2):
 ```
 {version, built, person, groups_built,
  params: {named_places, regions, place_min_share, main_share, presets, missing_score, cell_m, overview_pts, detail_tol_m},
- places:  {name: {n (touched or main), n_main, kind, src: named|start, lat, lon}},
- regions: {name: {n, n_main, kind, src: polygon|garmin}},
- routes:  {R1: {name, sport, shape, dist_km, n, start_place, end_place, via[], place, region, climb_m,
-                is_climb, medoid, members[], poly}},
- activities: {id: {id, date, start ("YYYY-MM-DD HH:MM" local), name, sport, atype, gps, dist_km, dist_trusted,
-                   dur_s, moving_s, climb_m, desc_m, avg_hr, max_hr, speed_ms, loc, area,
-                   start_place, start_place_name, end_place, place, place_src, places[{name, share, s}],
-                   region, regions[{name, share, s}], route, route_name, route_dir, shape,
-                   workout{...}, bbox [s, w, n, e], start_ll, end_ll,
+ places:  {id: {name, n (touched), n_main, n_start, kind, src: named|start, lat, lon[, start_src, name_src, generic_id]}},
+ regions: {name: {n (touched), n_main, kind, src: polygon|garmin}},
+ routes:  {R1: {name, sport, shape, dist_km, n, start_place, end_place, via[], place, region, start_place_name,
+                end_place_name, via_names[], place_name, climb_m, is_climb, medoid, members[], poly}},
+ activities: {id: {id, date, start ("YYYY-MM-DD HH:MM" local), name, sport, sport_label, atype, gps, dist_km,
+                   dist_trusted, dur_s, moving_s, climb_m, desc_m, avg_hr, max_hr, speed_ms, loc, area,
+                   start_place, start_place_name, end_place, end_place_name, place, place_name, place_src,
+                   places[{name (id), label, share, s}], region, regions[{name, share, s}], route, route_name,
+                   route_dir, shape, workout{..., exact_label, rest_group_s}, bbox [s, w, n, e], start_ll, end_ll,
                    poly (≤ 200 pts), cells}}}
 ```
+`workout.exact_label` = readable `exact_key` (route keys spelled out: `Ski easy · R3 Holmenkollen climb: …`);
+`rest_group_s` = median rest of the session's rest cluster (the `~2:30` of its key), `rest_s` = its own.
+`sport_label` = readable Garmin type (`atype_label()`: "Pool swim", "Treadmill run"). Distance bands for swims:
+pool 0–1 / 1–1.5 / 1.5–2 / 2–3 / 3+ km. Pace texts in `reasons` are min/km for runs, /100 m for swims, km/h otherwise.
 Keys whose value is null are left out. `poly` is a Google encoded polyline (precision 5 ≈ 1 m),
 Douglas-Peucker simplified to ≤ 200 points (tolerance 3 → 80 m, as needed). Leaflet / Mapbox
 decode it directly, and drawing hundreds of tracks is cheap. `cells` are the 75 m route-grid cells
@@ -164,8 +177,8 @@ maps and elevation profiles. Cache: `data/<p>/cache/similarity_tracks.pkl` (thin
 FIT, keyed by mtime + size).
 
 ## Validation (adrian, 717 activities, 583 with GPS; `validate`)
-- **Bislet**: 94 activities have Bislet as main place (56 intervals, 28 easy, 3 race?, …), 108 touch
-  it. The session_groups start cluster "Bislet" has 107; 14 of those actually happen elsewhere:
+- **Bislet** (shown as "Bislett"): 94 activities have Bislet as main place (56 intervals, 28 easy, 3 race?, …),
+  108 touch it (`places["Bislet"].n`, = `search place=Bislet`). The session_groups start cluster "Bislet" has 107; 14 of those actually happen elsewhere:
   St. Hanshaugen (8, a 4.8 km out & back, route R9) and Frognerparken (6).
 - **Fixed in session_groups.py**: every start cluster within 600 m of a known spot got that spot's id.
   Their `places` entries overwrote each other, so `places["Bislet"].n` was 1 while 113 activities
@@ -183,7 +196,7 @@ FIT, keyed by mtime + size).
 - **Marka**: 85 activities touch it, 61 are mostly inside it (40 ski, 20 run, starting mainly at
   Sognsvann and Oslo-3); Bymarka 12. Frognerparken is the main place of 20 activities and touched by 25
   (one more main than before: a start cluster in the park is now named Frognerparken). St. Hanshaugen
-  touched 16 / main 10 (start cluster Oslo-16 → St. Hanshaugen).
+  touched 18 / main 10 (start cluster Oslo-16 → St. Hanshaugen; touched counts now include start / end places).
 - **6×1000**: 19 sessions. 17 at Bislet (2024-11 → 2026-10, rest medians 135–194 s) form
   `6×1000 · rest ~2:30`, and two Trondheim road sessions in 2022 (rest 61 / 78 s) form
   `6×1000 · rest ~1:00` (start place Øya, was Trondheim-2). A search for 5–7 reps of 900–1100 m also finds 5×1000 (Trondheim 2020–23,

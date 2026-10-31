@@ -80,6 +80,11 @@ def compare(ids: str = Query(..., description="comma-separated activity ids; the
             _RESULTS.move_to_end(key)
     A = store.activity_map()
     out = dict(r)
+    # explicit HR fields: the engine's hr_avg is the mean over moving seconds only (stops excluded); the activity
+    # header / lists show Garmin's whole-activity average (hr_avg_activity)
+    out["sessions"] = [s | {"hr_avg_moving": s.get("hr_avg"), "hr_avg_activity": (A.get(str(s["id"])) or {}).get("hr")}
+                       for s in r["sessions"]]
+    out["hr_avg_definition"] = "hr_avg = hr_avg_moving: mean HR over moving seconds (pauses excluded); hr_avg_activity: whole activity (Garmin)"
     out["activities"] = {str(i): A.get(str(i)) for i in r["ids"]}
     if tracks:
         out["tracks"] = _tracks(store, r["ids"])
@@ -111,11 +116,29 @@ def suggest(id: int, n: int = Query(8, ge=2, le=MAX_IDS), store: Store = Depends
     reps = bool(w.get("rep_count")) and "intervals" in (w.get("family") or "")
     rt = ix.routes.get(q.get("route")) if q.get("route") else None
     route_ok = bool(rt) and q.get("shape") != "laps"
-    mode = "intervals" if reps else ("distance" if route_ok else "moving")
+    # sessions without distance (stopwatch, no-GPS lap workouts) only work in the HR / time modes of the engine
+    no_dist = (q.get("dist_km") or 0) < 0.1
+    has_fit = str(id) in store.folders() and any(store.folders()[str(id)].glob("*.fit"))
+    comparable, why_not = True, None
+    if not has_fit:
+        comparable, why_not = False, "no FIT file for this activity"
+    elif no_dist and not q.get("avg_hr"):
+        comparable, why_not = False, "no distance and no heart rate: nothing to compare"
+    if no_dist:
+        mode = "intervals" if reps else "elapsed"
+    else:
+        mode = "intervals" if reps else ("distance" if route_ok else "moving")
+    import compare as cmp
+    allowed = list(cmp.NO_DIST_MODES) if no_dist else [m for m in MODES if m != "route_position"]
     sets = []
 
+    def usable(rows):   # candidates the engine can read (FIT present; HR if there's no distance)
+        F = store.folders()
+        return [a for a in rows if a["id"] == id or (str(a["id"]) in F and (not no_dist or a.get("avg_hr")))]
+
     def add(key, label, rows, nn=n, m=mode, why=""):
-        if len(rows) < 2:
+        rows = usable(rows)
+        if len(rows) < 2 or not comparable:
             return
         ids = _ids_before(rows, id, q["date"], nn)
         if any(s["ids"] == ids for s in sets):
@@ -127,7 +150,7 @@ def suggest(id: int, n: int = Query(8, ge=2, le=MAX_IDS), store: Store = Depends
             why="same exact workout key (reps + rest, or route + effort)")
     if reps and w.get("signature"):
         if q.get("place"):
-            add("sig_place", f"{w['signature']} at {q['place']}", ix.search({"signature": w["signature"], "place": q["place"], "place_mode": "main"}),
+            add("sig_place", f"{w['signature']} at {q.get('place_name') or q['place']}", ix.search({"signature": w["signature"], "place": q["place"], "place_mode": "main"}),
                 why="same rep signature, same place, any rest")
         add("sig", f"Any {w['signature']}", ix.search({"signature": w["signature"], "sport": q["sport"]}), why="same rep signature")
     if q.get("route"):
@@ -135,11 +158,13 @@ def suggest(id: int, n: int = Query(8, ge=2, le=MAX_IDS), store: Store = Depends
         add("route", f"Route {q['route']}" + (f" {rt.get('name')}" if rt and rt.get("name") else ""), rows,
             nn=MAX_IDS if route_ok else n, m="distance" if route_ok and not reps else mode,
             why="every session on the same route" if route_ok else "same laps route")
-    near = ix.nearest(id, k=n - 1, weights="workout" if reps else "balanced")
+    near = ix.nearest(id, k=3 * n, weights="workout" if reps else "balanced") if comparable else []
+    near = usable([ix.acts[r["id"]] for r in near])[: n - 1]
     if near:
         ids = [id] + [r["id"] for r in near]
         sets.append({"key": "nearest", "label": "Most similar", "n_total": len(near) + 1, "ids": [str(i) for i in ids],
                      "mode": mode, "why": "similarity index, " + ("workout" if reps else "balanced") + " weights"})
     A = store.activity_map()
-    return {"id": str(id), "date": q["date"], "mode": mode, "sets": sets,
+    return {"id": str(id), "date": q["date"], "mode": mode, "modes": allowed, "no_distance": no_dist,
+            "comparable": comparable, "why_not": why_not, "sets": sets,
             "activities": {str(i): A.get(str(i)) for s in sets for i in s["ids"]}}
