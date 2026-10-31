@@ -1,16 +1,17 @@
 // One activity: map with the track coloured by speed / HR / elevation, stacked charts with linked hover
-// (chart <-> map), reps, laps, legs and pauses. Hovering a table row highlights that stretch on the map.
+// (chart <-> map), pool-swim summary, one "Segments" section (reps / legs & pauses / laps / lengths as tabs).
+// Hovering a table row highlights that stretch on the map.
 import type { Map as MLMap, MapMouseEvent } from "maplibre-gl";
 import { Popup } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { useApi, type ActivityDetail, type Series } from "../lib/api";
+import { useApi, type ActivityDetail, type Lap, type Leg, type Series, type SwimLength } from "../lib/api";
 import { setQuery, useLocation } from "../lib/router";
-import { dur, num, pace, kmh, stypeLabel, time, dayLabel } from "../lib/format";
+import { dur, num, pace, pace100, kmh, time, dayLabel } from "../lib/format";
 import { RAMP, quantile } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
-import { SeriesCharts, type Band, type PanelKey } from "../components/SeriesCharts";
+import { SeriesCharts, drawablePanels, type Band, type PanelKey } from "../components/SeriesCharts";
 import { Table, type Col } from "../components/Table";
-import { SportDot, speedText, what } from "../components/ActivityBits";
+import { SportDot, placeHref, speedText, typeText, what } from "../components/ActivityBits";
 import { NearestPanel } from "../components/NearestPanel";
 import { ShapeSection } from "../components/ShapeSection";
 
@@ -138,18 +139,150 @@ function ActivityMap({ track, colorBy, sport, pauses, cursor, span, onHover }: {
   );
 }
 
-const lapCols = (sport: string): Col<any>[] => [
-  { key: "n", label: "Lap", num: true, render: (_r, i) => i + 1, sort: (r) => r.start },
-  { key: "start", label: "Start", num: true, render: (r) => dur(r.start) },
-  { key: "time", label: "Time", num: true, render: (r) => dur(r.timer ?? r.time) },
-  { key: "dist", label: "Dist (m)", num: true, render: (r) => num(r.dist) },
-  { key: "speed", label: sport === "run" ? "Pace" : "km/h", num: true, render: (r) => (sport === "run" ? pace(r.speed) : kmh(r.speed)) },
-  { key: "hr", label: "Avg HR", num: true, render: (r) => num(r.hr) },
-  { key: "maxhr", label: "Max HR", num: true, render: (r) => num(r.maxhr) },
-  { key: "climb", label: "Climb", num: true, render: (r) => num(r.climb) },
-  { key: "intensity", label: "Intensity", render: (r) => r.intensity ?? "—" },
-  { key: "trigger", label: "Trigger", render: (r) => r.trigger ?? "—" },
-];
+
+const STROKE: Record<string, string> = { 0: "free", 1: "back", 2: "breast", 3: "fly", 4: "drill", 5: "mixed", 6: "IM" };
+const speedCell = (sport: string, ms: number | null | undefined) => (sport === "run" ? pace(ms) : sport === "swim" ? pace100(ms) : kmh(ms));
+const speedHead = (sport: string) => (sport === "run" ? "Pace" : sport === "swim" ? "/100 m" : "km/h");
+/** drop columns whose cells are all empty in these rows (e.g. HR on a swim, intensity on old files) */
+const nonEmpty = <T,>(cols: Col<T>[], rows: T[], keys: Record<string, (r: T) => unknown>) =>
+  cols.filter((c) => !keys[c.key] || rows.some((r) => { const v = keys[c.key](r); return v !== null && v !== undefined && v !== ""; }));
+
+function lapCols(sport: string, laps: Lap[]): Col<Lap>[] {
+  const swim = laps.some((l) => l.kind);
+  const triggers = new Set(laps.map((l) => l.trigger));
+  const cols: Col<Lap>[] = [
+    { key: "n", label: "Lap", num: true, render: (r) => laps.indexOf(r) + 1, sort: (r) => r.start },
+    ...(swim ? [{ key: "kind", label: "Kind", render: (r: Lap) => r.kind ?? "—" }] : []),
+    { key: "start", label: "Start", num: true, render: (r) => dur(r.start) },
+    { key: "time", label: "Time", num: true, render: (r) => dur(r.timer ?? r.time) },
+    ...(swim ? [{ key: "swim_s", label: "Swimming", num: true, render: (r: Lap) => dur(r.swim_s) }] : []),
+    { key: "dist", label: "Dist (m)", num: true, render: (r) => num(r.dist) },
+    swim ? { key: "pace_100m_s", label: "/100 m", num: true, render: (r: Lap) => dur(r.pace_100m_s) }
+      : { key: "speed", label: speedHead(sport), num: true, render: (r) => speedCell(sport, r.speed) },
+    { key: "hr", label: "Avg HR", num: true, render: (r) => num(r.hr) },
+    { key: "maxhr", label: "Max HR", num: true, render: (r) => num(r.maxhr) },
+    { key: "climb", label: "Climb", num: true, render: (r) => num(r.climb) },
+    { key: "intensity", label: "Intensity", render: (r) => r.intensity ?? "—" },
+    ...(triggers.size > 1 ? [{ key: "trigger", label: "Trigger", render: (r: Lap) => r.trigger ?? "—" }] : []),
+  ];
+  return nonEmpty(cols, laps, { hr: (r) => r.hr, maxhr: (r) => r.maxhr, climb: (r) => r.climb, intensity: (r) => r.intensity });
+}
+
+/** a leg as shown: legs shorter than 100 m (GPS jitter between two stops) are merged into the next leg (the
+ *  last one into the previous); `a`/`b` = time span on the track (incl. the short stop in between) */
+interface LegRow extends Leg { a: number; b: number; merged: number }
+function mergeLegs(legs: Leg[], min = 100): LegRow[] {
+  const out: LegRow[] = [];
+  let acc: LegRow | null = null;
+  const add = (x: LegRow, l: Leg): LegRow => {
+    const d = x.dur_s + l.dur_s, hr = x.hr !== null && l.hr !== null ? (x.hr * x.dur_s + l.hr * l.dur_s) / d : x.hr ?? l.hr;
+    const dist = x.dist_m + l.dist_m, climb = x.climb_m + l.climb_m;
+    return { ...x, dur_s: d, dist_m: dist, kmh: d ? (dist / d) * 3.6 : 0, hr, hr_max: Math.max(x.hr_max ?? 0, l.hr_max ?? 0) || null,
+      climb_m: climb, desc_m: x.desc_m + l.desc_m, grade_pct: dist > 50 ? ((climb - x.desc_m - l.desc_m) / dist) * 100 : null,
+      b: l.t + l.dur_s, merged: x.merged + 1 };
+  };
+  for (const l of legs) {
+    const row: LegRow = { ...l, a: l.t, b: l.t + l.dur_s, merged: 0 };
+    acc = acc ? add(acc, l) : row;
+    if (acc.dist_m >= min) { out.push(acc); acc = null; }
+  }
+  if (acc) { if (out.length) out[out.length - 1] = add(out[out.length - 1], acc); else out.push(acc); }
+  return out;
+}
+
+type SegTab = "reps" | "legs" | "laps" | "lengths";
+
+function Segments({ data, sport, setSpan, setCursor }: { data: ActivityDetail; sport: string;
+  setSpan: (s: [number, number] | null) => void; setCursor: (c: [number, number] | null) => void }) {
+  const { query } = useLocation();
+  const reps = data.reps.filter((r) => r.start !== undefined);
+  const legs = useMemo(() => mergeLegs(data.legs), [data]);
+  const lengths: SwimLength[] = data.swim?.lengths ?? [];
+  const tabs: [SegTab, string, number][] = [];
+  if (reps.length) tabs.push(["reps", "Reps", reps.length]);
+  if (lengths.length) tabs.push(["lengths", "Lengths", lengths.length]);
+  if (legs.length || data.pauses.length) tabs.push(["legs", "Legs & pauses", legs.length]);
+  if (data.laps.length > 1) tabs.push(["laps", "Watch laps", data.laps.length]);
+  if (!tabs.length) return null;
+  const want = query.get("seg") as SegTab | null;
+  const tab = tabs.find((t) => t[0] === want)?.[0] ?? tabs[0][0];
+  const nMerged = legs.reduce((s, l) => s + l.merged, 0);
+  const sub: Record<SegTab, string> = {
+    reps: "hard stretches found in the pace and HR data; Break = start of this rep to start of the next minus the rep (walk / jog / stand)",
+    lengths: "every pool length from the watch; rests are the gaps between lengths",
+    legs: `moving stretches between stops ≥ 15 s${nMerged ? `; ${nMerged} legs under 100 m merged into the next` : ""}. Stops shorter than a rep break are pauses too, so pauses ≠ breaks`,
+    laps: "as recorded by the watch (lap button, auto-lap or the workout's steps)",
+  };
+  const sw = (r: { strokes: number | null; time: number }) => (r.strokes && r.time ? (r.strokes / r.time) * 60 : null);
+  return (
+    <section>
+      <div class="head">
+        <h2>Segments</h2>
+        {tabs.length > 1 ? (
+          <div class="seg">
+            {tabs.map(([k, label, n]) => (
+              <button key={k} class={tab === k ? "on" : ""} onClick={() => setQuery({ seg: k === tabs[0][0] ? null : k })}>{label} <span class="muted">{n}</span></button>
+            ))}
+          </div>
+        ) : <span class="count">{tabs[0][1]} · {tabs[0][2]}</span>}
+        <span class="sub">{sub[tab]}{data.activity.track && tab !== "lengths" ? "; hover a row to see it on the map" : ""}</span>
+      </div>
+      {tab === "reps" && (
+        <Table rows={reps} rowKey={(_r, i) => String(i)} onHover={(r) => setSpan(r ? [r.start!, r.end!] : null)} cols={nonEmpty([
+          { key: "n", label: "Rep", num: true, render: (r) => reps.indexOf(r) + 1, sort: (r) => r.start },
+          { key: "start", label: "Start", num: true, render: (r) => dur(r.start) },
+          { key: "time", label: "Time", num: true, render: (r) => dur(r.time) },
+          { key: "dist", label: "Dist (m)", num: true, render: (r) => num(r.dist) },
+          { key: "speed", label: speedHead(sport), num: true, render: (r) => speedCell(sport, r.speed) },
+          { key: "hr", label: "Avg HR", num: true, render: (r) => num(r.hr) },
+          { key: "maxhr", label: "Max HR", num: true, render: (r) => num(r.maxhr) },
+          { key: "brk", label: "Break after", num: true, render: (r) => dur(data.breaks[reps.indexOf(r)]?.time), sort: (r) => data.breaks[reps.indexOf(r)]?.time ?? null },
+        ], reps, { hr: (r) => r.hr, maxhr: (r) => r.maxhr })} />
+      )}
+      {tab === "lengths" && (
+        <Table rows={lengths} rowKey={(_r, i) => String(i)} maxHeight="420px" cols={[
+          { key: "n", label: "Length", num: true, render: (r) => lengths.indexOf(r) + 1, sort: (r) => r.start },
+          { key: "start", label: "Start", num: true, render: (r) => dur(r.start) },
+          { key: "time", label: "Time", num: true, render: (r) => dur(r.time) },
+          { key: "pace", label: "/100 m", num: true, render: (r) => (data.swim?.pool_m ? dur((r.time / data.swim.pool_m) * 100) : "—"), sort: (r) => r.time },
+          { key: "rest", label: "Rest after", num: true, render: (r) => { const nx = lengths[lengths.indexOf(r) + 1]; const g = nx ? nx.start - r.start - r.time : null; return g !== null && g >= 5 ? dur(g) : ""; },
+            sort: (r) => { const i = lengths.indexOf(r), nx = lengths[i + 1]; return nx ? nx.start - r.start - r.time : null; } },
+          { key: "strokes", label: "Strokes", num: true, render: (r) => num(r.strokes) },
+          { key: "rate", label: "Strokes/min", num: true, render: (r) => num(sw(r)), sort: sw },
+          { key: "stroke", label: "Stroke", render: (r) => (r.stroke === null ? "—" : STROKE[String(r.stroke)] ?? String(r.stroke)) },
+        ]} />
+      )}
+      {tab === "legs" && (
+        <div class="cols" style={{ gridTemplateColumns: "3fr 2fr" }}>
+          <Table rows={legs} rowKey={(_r, i) => String(i)} maxHeight="420px" empty="No legs." onHover={(r) => setSpan(r ? [r.a, r.b] : null)} cols={nonEmpty<LegRow>([
+            { key: "n", label: "Leg", num: true, render: (r) => legs.indexOf(r) + 1, sort: (r) => r.t },
+            { key: "t", label: "Start", num: true, render: (r) => dur(r.t) },
+            { key: "dur_s", label: "Moving", num: true, render: (r) => dur(r.dur_s) },
+            { key: "dist_m", label: "km", num: true, render: (r) => (r.dist_m / 1000).toFixed(2) },
+            { key: "kmh", label: speedHead(sport), num: true, render: (r) => speedCell(sport, r.kmh / 3.6) },
+            { key: "hr", label: "HR", num: true, render: (r) => num(r.hr) },
+            { key: "climb_m", label: "Climb", num: true, render: (r) => num(r.climb_m) },
+            { key: "grade_pct", label: "Grade", num: true, render: (r) => (r.grade_pct === null ? "—" : `${r.grade_pct.toFixed(1)} %`) },
+          ], legs, { hr: (r) => r.hr })} />
+          <Table rows={data.pauses} rowKey={(_r, i) => String(i)} maxHeight="420px" empty="No pauses." onHover={(r) => {
+            if (!r || r.lat === null) { setCursor(null); return; }
+            setCursor([r.lon!, r.lat]);
+          }} cols={[
+            { key: "n", label: "Pause", num: true, render: (r) => data.pauses.indexOf(r) + 1, sort: (r) => r.t },
+            { key: "t", label: "At", num: true, render: (r) => dur(r.t) },
+            { key: "km", label: "At km", num: true, render: (r) => r.km.toFixed(2) },
+            { key: "dur_s", label: "Duration", num: true, render: (r) => dur(r.dur_s) },
+            { key: "timer", label: "Timer", render: (r) => (r.timer ? "stopped" : "running") },
+          ]} />
+        </div>
+      )}
+      {tab === "laps" && (
+        <Table rows={data.laps} rowKey={(_r, i) => String(i)} cols={lapCols(sport, data.laps)} maxHeight="420px"
+          onHover={(r) => setSpan(r && r.start !== null ? [r.start, r.start + (r.time ?? 0)] : null)} />
+      )}
+    </section>
+  );
+}
 
 export function ActivityPage({ id }: { id: string }) {
   const { query } = useLocation();
@@ -165,11 +298,17 @@ export function ActivityPage({ id }: { id: string }) {
 
   const s: Series | null = data?.series ?? null;
   const a = data?.activity;
-  const panels: PanelKey[] = a?.sport === "run" ? ["pace", "hr", "alt", "cad", "power"] : ["speed", "hr", "alt"];
+  const swim = data?.swim ?? null;
+  const panels: PanelKey[] = swim ? ["pace100", "hr", "cad"] : a?.sport === "run" ? ["pace", "hr", "alt", "cad", "power"] : ["speed", "hr", "alt"];
+  const drawable = useMemo(() => (s ? drawablePanels(s, panels) : []), [s, panels.join(",")]);
   const bands = useMemo<Band[]>(() => {
     if (!data) return [];
     const b: Band[] = data.reps.filter((r) => r.start !== undefined).map((r) => ({ a: r.start!, b: r.end!, kind: "rep" as const }));
     if (!b.length) for (const p of data.pauses) b.push({ a: p.t, b: p.t + p.dur_s, kind: "pause" });
+    if (!b.length && data.swim) {   // pool swim: rests = gaps ≥ 10 s between lengths
+      const L = data.swim.lengths;
+      for (let i = 0; i + 1 < L.length; i++) { const e = L[i].start + L[i].time; if (L[i + 1].start - e >= 10) b.push({ a: e, b: L[i + 1].start, kind: "pause" }); }
+    }
     return b;
   }, [data]);
 
@@ -190,6 +329,10 @@ export function ActivityPage({ id }: { id: string }) {
   const g = data.group;
   const sport = a.sport;
   const hasReps = data.reps.some((r) => r.start !== undefined);
+  const hasMap = a.track;
+  const hasCharts = drawable.length > 0;
+  const shaded = hasReps ? "reps shaded" : bands.length ? (swim ? "rests shaded" : "pauses shaded") : "";
+  const startDiffers = a.start_place && a.start_place !== a.place;
 
   return (
     <main>
@@ -205,96 +348,59 @@ export function ActivityPage({ id }: { id: string }) {
           </div>
         </div>
         <dl class="kv">
-          <dt>Type</dt><dd>{what(a)}{a.type_detail ? ` (${a.type_detail})` : ""}</dd>
-          <dt>Place</dt><dd>{a.place ? <a href={`/places?place=${encodeURIComponent(a.place)}`}>{a.place}</a> : a.location ?? "—"}{a.area ? <span class="muted"> area {a.area}</span> : null}</dd>
+          <dt>Type</dt><dd>{typeText(a)}{a.type_detail ? <span class="muted"> · {a.type_detail}</span> : null}</dd>
+          <dt>Place</dt><dd>{a.place ? <a href={placeHref(a.place)}>{a.place_name ?? a.place}</a> : a.location ?? "—"}
+            {startDiffers ? <span class="muted"> · start <a href={placeHref(a.start_place!)}>{a.start_place_name ?? a.start_place}</a></span> : a.region && a.region !== a.place_name ? <span class="muted"> · {a.region}</span> : null}</dd>
           <dt>Distance</dt><dd>{a.dist_km ? `${a.dist_km.toFixed(2)} km` : "—"}{g.dist_trusted === false ? <span class="muted"> (no GPS, not trusted)</span> : null}</dd>
-          <dt>Route</dt><dd>{data.route ? <><a href={`/places?route=${data.route.id}`}>{data.route.id} {data.route.name}</a> <span class="muted">{g.route_dir ?? ""}, {data.route.n} sessions</span></> : "—"}</dd>
-          <dt>Moving / paused</dt><dd>{dur(g.moving_s ?? a.moving_s)} / {dur(g.pause_s)} <span class="muted">{g.n_pauses ?? 0} pauses{g.longest_pause_s ? `, longest ${dur(g.longest_pause_s)}` : ""}</span></dd>
-          <dt>Workout</dt><dd>{a.sig ?? stypeLabel(a.stype) ?? "—"}</dd>
-          <dt>Pace / speed</dt><dd>{speedText(a)}</dd>
-          <dt>Heart rate</dt><dd>{num(a.hr)} avg, {num(a.maxhr)} max</dd>
-          <dt>Climb</dt><dd>{a.elev !== null ? `${a.elev} m` : "—"}</dd>
-          <dt>Load / TE</dt><dd>{num(a.load)} / {a.te ?? "—"}</dd>
+          <dt>Route</dt><dd title={data.route?.name}>{data.route ? <><a href={`/places?route=${data.route.id}`}>{data.route.id} {data.route.name}</a> <span class="muted">{g.route_dir ? `${g.route_dir}, ` : ""}{data.route.n} sessions</span></> : "—"}</dd>
+          {swim ? <><dt>Swimming / rest</dt><dd>{dur(swim.active_s)} / {dur(swim.rest_s)} <span class="muted">{swim.n_rests ?? 0} rests{swim.longest_rest_s ? `, longest ${dur(swim.longest_rest_s)}` : ""}; pace from swimming time</span></dd></>
+            : <><dt>Moving / paused</dt><dd>{dur(g.moving_s ?? a.moving_s)} / {dur(g.pause_s)} <span class="muted">{g.n_pauses ?? 0} pauses{g.longest_pause_s ? `, longest ${dur(g.longest_pause_s)}` : ""}</span></dd></>}
+          <dt>Workout</dt><dd>{what(a)}</dd>
+          <dt>{sport === "run" || swim ? "Pace" : "Speed"}</dt><dd>{speedText(a)}{swim ? null : <span class="muted"> moving</span>}</dd>
+          <dt>Heart rate</dt><dd>{a.hr === null ? "—" : <>{num(a.hr)} avg, {num(a.maxhr)} max <span class="muted">whole activity</span></>}</dd>
+          {swim ? <>
+            <dt>Pool</dt><dd>{swim.pool_m ? `${num(swim.pool_m)} m` : "—"} <span class="muted">{swim.n_lengths ?? swim.lengths?.length} lengths{swim.bad_lengths ? `, ${swim.bad_lengths} glitch lengths dropped` : ""}</span></dd>
+            <dt>Strokes</dt><dd>{swim.strokes_per_length ? `${num(swim.strokes_per_length, 1)} per length` : "—"} <span class="muted">timer {dur(swim.timer_s)}, elapsed {dur(swim.elapsed_s)}</span></dd>
+          </> : <>
+            <dt>Climb</dt><dd>{a.elev !== null ? `${a.elev} m` : "—"}</dd>
+            <dt>Load / TE</dt><dd>{num(a.load)} / {a.te ?? "—"}</dd>
+          </>}
         </dl>
       </section>
 
-      <section>
-        <div class="head">
-          <h2>Map and series</h2>
-          <span class="sub">{hasReps ? "Reps shaded" : bands.length ? "Pauses shaded" : ""}{a.track ? "; hover the chart or the track" : ""}</span>
-          <div class="tools">
-            <span class="muted">Colour by</span>
-            <div class="seg">
-              {(["speed", "hr", "alt"] as ColorBy[]).map((c) => (
-                <button key={c} class={colorBy === c ? "on" : ""} onClick={() => setQuery({ color: c === "speed" ? null : c })}>
-                  {c === "speed" ? (sport === "run" ? "Pace" : "Speed") : c === "hr" ? "Heart rate" : "Elevation"}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div class="act-top">
-          {a.track ? (tr.data ? <ActivityMap track={tr.data} colorBy={colorBy} sport={sport} pauses={data.pauses} cursor={cursor} span={span} onHover={onMapHover} />
-            : <div class="map bordered"><div class="msg">{tr.error ?? "Loading track…"}</div></div>)
-            : <div class="map bordered" style={{ height: "200px" }}><div class="msg">No GPS for this activity{a.fit ? "" : " (watch file not downloaded)"}</div></div>}
-          <div>{s ? <SeriesCharts series={s} panels={panels} bands={bands} onHover={onChartHover} cursorRef={chartCursor} />
-            : <div class="empty">No per-second data (watch file not downloaded).</div>}</div>
-        </div>
-      </section>
-
-      {hasReps && (
+      {(hasMap || hasCharts) ? (
         <section>
-          <div class="head"><h2>Reps</h2><span class="count">{data.reps.length}</span><span class="sub">from the rep detector (run_analysis.py); hover a row to see it on the map</span></div>
-          <Table rows={data.reps} rowKey={(_r, i) => String(i)} onHover={(r) => setSpan(r ? [r.start!, r.end!] : null)} cols={[
-            { key: "n", label: "Rep", num: true, render: (_r, i) => i + 1, sort: (r) => r.start },
-            { key: "start", label: "Start", num: true, render: (r) => dur(r.start) },
-            { key: "time", label: "Time", num: true, render: (r) => dur(r.time) },
-            { key: "dist", label: "Dist (m)", num: true, render: (r) => num(r.dist) },
-            { key: "speed", label: sport === "run" ? "Pace" : "km/h", num: true, render: (r) => (sport === "run" ? pace(r.speed) : kmh(r.speed)) },
-            { key: "hr", label: "Avg HR", num: true, render: (r) => num(r.hr) },
-            { key: "maxhr", label: "Max HR", num: true, render: (r) => num(r.maxhr) },
-            { key: "brk", label: "Break after", num: true, render: (_r, i) => dur(data.breaks[i]?.time), sort: () => null },
-          ]} />
+          <div class="head">
+            <h2>{hasMap ? "Map and series" : "Series"}</h2>
+            <span class="sub">{[shaded, hasMap && hasCharts ? "hover the chart or the track" : "", !hasMap ? "no GPS track" : ""].filter(Boolean).join("; ")}</span>
+            {hasMap && (
+              <div class="tools">
+                <span class="muted">Colour by</span>
+                <div class="seg">
+                  {(["speed", "hr", "alt"] as ColorBy[]).map((c) => (
+                    <button key={c} class={colorBy === c ? "on" : ""} onClick={() => setQuery({ color: c === "speed" ? null : c })}>
+                      {c === "speed" ? (sport === "run" ? "Pace" : "Speed") : c === "hr" ? "Heart rate" : "Elevation"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div class={hasMap && hasCharts ? "act-top" : ""}>
+            {hasMap && (tr.data ? <ActivityMap track={tr.data} colorBy={colorBy} sport={sport} pauses={data.pauses} cursor={cursor} span={span} onHover={onMapHover} />
+              : <div class="map bordered"><div class="msg">{tr.error ?? "Loading track…"}</div></div>)}
+            {hasCharts && <div><SeriesCharts series={s!} panels={drawable} bands={bands} onHover={onChartHover} cursorRef={chartCursor} /></div>}
+          </div>
+        </section>
+      ) : (
+        <section>
+          <p class="note">{a.fit ? "No GPS track and too little per-second data for charts." : "Watch file not downloaded: only Garmin's summary is available (no track, charts or segments)."}</p>
         </section>
       )}
+
+      <Segments data={data} sport={sport} setSpan={setSpan} setCursor={setCursor} />
 
       <ShapeSection id={id} />
-
-      {data.laps.length > 1 && (
-        <section>
-          <div class="head"><h2>Laps</h2><span class="count">{data.laps.length}</span><span class="sub">from the watch file</span></div>
-          <Table rows={data.laps} rowKey={(_r, i) => String(i)} cols={lapCols(sport)} maxHeight="420px"
-            onHover={(r) => setSpan(r && r.start !== null ? [r.start, r.start + (r.time ?? 0)] : null)} />
-        </section>
-      )}
-
-      {(data.legs.length > 0 || data.pauses.length > 0) && (
-        <section>
-          <div class="head"><h2>Legs & pauses</h2><span class="sub">{data.legs.length} legs, {data.pauses.length} pauses ≥ 15 s (session_groups.py)</span></div>
-          <div class="cols" style={{ gridTemplateColumns: "3fr 2fr" }}>
-            <Table rows={data.legs} rowKey={(_r, i) => String(i)} maxHeight="420px" onHover={(r) => setSpan(r ? [r.t, r.t + r.dur_s] : null)} cols={[
-              { key: "n", label: "Leg", num: true, render: (_r, i) => i + 1, sort: (r) => r.t },
-              { key: "t", label: "Start", num: true, render: (r) => dur(r.t) },
-              { key: "dur_s", label: "Time", num: true, render: (r) => dur(r.dur_s) },
-              { key: "dist_m", label: "km", num: true, render: (r) => (r.dist_m / 1000).toFixed(2) },
-              { key: "kmh", label: sport === "run" ? "Pace" : "km/h", num: true, render: (r) => (sport === "run" ? pace(r.kmh / 3.6) : r.kmh.toFixed(1)) },
-              { key: "hr", label: "HR", num: true, render: (r) => num(r.hr) },
-              { key: "climb_m", label: "Climb", num: true, render: (r) => num(r.climb_m) },
-              { key: "grade_pct", label: "Grade", num: true, render: (r) => (r.grade_pct === null ? "—" : `${r.grade_pct.toFixed(1)} %`) },
-            ]} />
-            <Table rows={data.pauses} rowKey={(_r, i) => String(i)} maxHeight="420px" empty="No pauses." onHover={(r) => {
-              if (!r || r.lat === null) { setCursor(null); return; }
-              setCursor([r.lon!, r.lat]);
-            }} cols={[
-              { key: "n", label: "Pause", num: true, render: (_r, i) => i + 1, sort: (r) => r.t },
-              { key: "t", label: "At", num: true, render: (r) => dur(r.t) },
-              { key: "km", label: "At km", num: true, render: (r) => r.km.toFixed(2) },
-              { key: "dur_s", label: "Duration", num: true, render: (r) => dur(r.dur_s) },
-              { key: "timer", label: "Timer", render: (r) => (r.timer ? "stopped" : "running") },
-            ]} />
-          </div>
-        </section>
-      )}
 
       <NearestPanel id={id} />
     </main>

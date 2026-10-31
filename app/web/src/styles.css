@@ -52,6 +52,7 @@ nav.side .who { font-size: var(--fs-15); font-weight: var(--fw-semibold); paddin
 nav.side .step { display: block; padding: 6px var(--space-4); color: var(--text); font-weight: var(--fw-semibold); }
 nav.side .tab { display: block; padding: 4px var(--space-4) 4px var(--space-5); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 nav.side .tab .soon { color: var(--text-muted); font-size: var(--fs-12); margin-left: var(--space-1); opacity: 0.7; }
+nav.side .tab.sub { padding-left: calc(var(--space-5) + var(--space-3)); font-size: var(--fs-12); }
 nav.side a:hover { background: var(--surface-hover); text-decoration: none; }
 nav.side a.current { color: var(--accent); background: var(--accent-surface); }
 nav.side .built { margin-top: auto; padding: var(--space-4); color: var(--text-muted); font-size: var(--fs-12); line-height: 1.5; }
@@ -183,7 +184,11 @@ dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow
 .btn.disabled { color: var(--text-muted); cursor: default; pointer-events: none; }
 button.caret, span.caret { width: 18px; height: 18px; padding: 0; border: 0; background: none; justify-content: center; color: var(--text-muted); display: inline-flex; }
 td:has(> .why) { max-width: none; }
-td .why { display: block; font-size: var(--fs-12); line-height: 1.35; padding: 3px 0; }
+td .why { display: block; font-size: var(--fs-12); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td .why .more { color: var(--text-faint, var(--text-muted)); }
 .cbars { display: inline-flex; gap: 2px; vertical-align: middle; }
 .cbars i { display: inline-block; height: 8px; background: var(--surface-hover); border-radius: 2px; overflow: hidden; }
 .cbars b { display: block; height: 100%; background: var(--accent); }
+/* place name labels on the Places map (HTML markers: the raster style has no glyphs) */
+.place-label { font-size: var(--fs-12); color: var(--text); background: rgba(255, 255, 255, 0.85); padding: 0 4px; border-radius: 3px;
+  white-space: nowrap; pointer-events: none; box-shadow: 0 0 0 1px rgba(20, 24, 28, 0.08); }

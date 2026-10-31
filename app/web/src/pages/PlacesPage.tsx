@@ -1,15 +1,15 @@
 // Places (start-point clusters) and routes (repeated tracks) from groups.json, on a map.
 // ?place=<id> filters routes to that place, ?route=R3 shows the route: reference line, member tracks, sessions.
 import type { Map as MLMap, MapLayerMouseEvent } from "maplibre-gl";
-import { Popup } from "maplibre-gl";
+import { Marker, Popup } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { qs, useApi, type Place, type RouteDetail, type RouteRow } from "../lib/api";
+import { qs, useApi, type Activity, type Place, type RouteDetail, type RouteRow } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
-import { SPORT_LABEL, dur, km, sportColor, stypeLabel, typeLabel } from "../lib/format";
+import { SPORT_LABEL, dur, km, num, sportColor, typeLabel } from "../lib/format";
 import { decodePolyline, type BBox } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
 import { Table, type Col } from "../components/Table";
-import { SportDot, speedText } from "../components/ActivityBits";
+import { SportDot, placeHref, speedSort, speedText, whatShort } from "../components/ActivityBits";
 
 const SHAPE: Record<string, string> = { laps: "laps", out_and_back: "out & back", point_to_point: "point to point", loop_cw: "loop ↻", loop_ccw: "loop ↺" };
 const famOf = (types: Record<string, number>) => {
@@ -17,25 +17,28 @@ const famOf = (types: Record<string, number>) => {
   return top.includes("ski") ? "ski" : top.includes("run") ? "run" : top === "hiking" || top === "walking" ? "hike" : top === "cycling" ? "bike" : top.includes("swim") ? "swim" : "other";
 };
 
+/** "94 · 108 touched": main-place activities, plus all that start, end or pass there when that's more */
+const countText = (p: Place) => (p.n_touched && p.n_touched > p.n ? <>{p.n} <span class="muted">· {p.n_touched} touched</span></> : String(p.n));
+const COUNT_HELP = "Activities with this as their main place (≥ 40 % of the time there, else the start) · activities that start, end or spend ≥ 5 % / 3 min there";
+
 const routeCols: Col<RouteRow>[] = [
   { key: "id", label: "Route", sort: (r) => Number(r.id.slice(1)) },
-  { key: "name", label: "Name", render: (r) => <span><SportDot sport={r.sport} />{r.name}</span> },
-  { key: "dist_km", label: "km", num: true, render: (r) => km(r.dist_km) },
-  { key: "n", label: "Sessions", num: true },
+  { key: "name", label: "Name", render: (r) => <span title={r.name}><SportDot sport={r.sport} />{r.name}</span> },
+  { key: "n", label: "Activities", num: true },
   { key: "last", label: "Last", render: (r) => r.last ?? "—" },
 ];
 const placeCols: Col<Place & { fam: string }>[] = [
   { key: "name", label: "Place", render: (p) => <span><SportDot sport={p.fam} />{p.name}</span> },
-  { key: "n", label: "Sessions", num: true },
+  { key: "n", label: "Activities", num: true, render: countText, title: COUNT_HELP },
   { key: "routes", label: "Routes", num: true },
-  { key: "area", label: "Area", render: (p) => p.area ?? "—" },
   { key: "last", label: "Last", render: (p) => p.last ?? "—" },
 ];
 
 export function PlacesPage() {
   const { query } = useLocation();
   const place = query.get("place"), route = query.get("route"), sport = query.get("sport") || "";
-  const tab = query.get("tab") === "places" ? "places" : "routes";
+  const tabQ = query.get("tab");
+  const tab = tabQ === "places" ? "places" : tabQ === "activities" && place ? "activities" : "routes";
   const pl = useApi<{ places: Place[] }>("/api/places").data;
   const rs = useApi<{ routes: RouteRow[] }>("/api/routes" + qs({ sport: sport || null })).data;
   const rd = useApi<RouteDetail>(route ? `/api/routes/${route}` : null);
@@ -47,6 +50,15 @@ export function PlacesPage() {
   placesRef.current = places;
   const routes = useMemo(() => (rs?.routes ?? []).filter((r) => !place || r.place === place), [rs, place]);
   const selPlace = places.find((p) => p.id === place) ?? null;
+  const placeActs = useApi<{ n: number; activities: Activity[] }>(place && tab === "activities" ? `/api/activities?place=${encodeURIComponent(place)}` : null).data;
+  const actCols = useMemo<Col<Activity>[]>(() => [
+    { key: "start", label: "Date", render: (a) => a.date },
+    { key: "type", label: "Workout", render: (a) => <span title={a.route_name ?? a.name ?? ""}><SportDot sport={a.sport} />{whatShort(a)}</span>, sort: (a) => whatShort(a) },
+    { key: "dist_km", label: "km", num: true, render: (a) => km(a.dist_km) },
+    { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s ?? a.dur_s) },
+    { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: speedSort },
+  ], []);
+  const pinRef = useRef<Marker[]>([]);
 
   const onReady = (m: MLMap) => {
     for (const s of ["members", "ref", "wps", "places", "hl"]) setData(m, s, EMPTY);
@@ -63,7 +75,7 @@ export function PlacesPage() {
       const p = placesRef.current.find((x) => x.id === e.features?.[0]?.properties?.id);
       if (!p) return;
       m.getCanvas().style.cursor = "pointer";
-      popup.setLngLat([p.lon, p.lat]).setHTML(`<b>${p.name}</b><br>${p.n} sessions, ${p.routes} routes<br>${Object.entries(p.types).map(([k, v]) => `${typeLabel(k)} ${v}`).join(", ")}`).addTo(m);
+      popup.setLngLat([p.lon, p.lat]).setHTML(`<b>${p.name}</b><br>${p.n} activities${p.n_touched && p.n_touched > p.n ? ` (${p.n_touched} touched)` : ""}, ${p.routes} routes<br>${Object.entries(p.types).map(([k, v]) => `${typeLabel(k)} ${v}`).join(", ")}`).addTo(m);
     });
     m.on("mouseleave", "places", () => { m.getCanvas().style.cursor = ""; popup.remove(); });
     m.on("click", "places", (e: MapLayerMouseEvent) => {
@@ -84,6 +96,20 @@ export function PlacesPage() {
       properties: { id: p.id, n: p.n, color: sportColor(p.fam), sel: p.id === place || (rd.data?.place === p.id && !!route) },
       geometry: { type: "Point", coordinates: [p.lon, p.lat] } })) });
   }, [map, places, place, route, rd.data]);
+
+  // name labels for the busiest places (the raster style has no glyphs, so these are HTML markers)
+  useEffect(() => {
+    if (!map) return;
+    pinRef.current.forEach((m) => m.remove());
+    pinRef.current = [...places].sort((a, b) => b.n - a.n).slice(0, 14).filter((p) => p.n >= 5).map((p) => {
+      const el = document.createElement("div");
+      el.className = "place-label";
+      el.textContent = p.name;
+      const r = 4 + ((Math.min(16, Math.sqrt(p.n)) - 1) / 15) * 12;   // = the circle radius expression
+      return new Marker({ element: el, anchor: "left", offset: [r + 4, 0] }).setLngLat([p.lon, p.lat]).addTo(map);
+    });
+    return () => pinRef.current.forEach((m) => m.remove());
+  }, [map, places]);
 
   // route on the map
   useEffect(() => {
@@ -129,7 +155,7 @@ export function PlacesPage() {
           <option value="">All sports</option>
           {["run", "ski", "hike", "bike"].map((s) => <option key={s} value={s}>{SPORT_LABEL[s]}</option>)}
         </select>
-        <span class="count">{places.length} places, {rs?.routes.length ?? 0} routes with ≥ 2 sessions</span>
+        <span class="count">{places.length} places, {rs?.routes.length ?? 0} routes with ≥ 2 activities</span>
         <div class="tools">
           {(place || route) && <button onClick={() => setQuery({ place: null, route: null })}>Show all</button>}
         </div>
@@ -141,28 +167,36 @@ export function PlacesPage() {
             <>
               <div class="pane">
                 <div class="head">
-                  <h2>{r.id} {r.name}</h2>
-                  <div class="tools"><a href={`/places?place=${encodeURIComponent(r.place)}`}>Back to {r.place}</a></div>
+                  <h2 title={r.name}>{r.id} {r.name}</h2>
+                </div>
+                <div class="head">
+                  <div class="tools" style={{ marginLeft: 0 }}>
+                    <a class="btn" href={`/compare?ids=${r.members.slice().sort((x, y) => (x.date < y.date ? 1 : -1)).slice(0, 40).map((m) => m.id).join(",")}&mode=${r.shape === "laps" ? "moving" : "distance"}`}
+                      title={r.members.length > 40 ? "The 40 most recent sessions on this route in Compare" : "Every session on this route in Compare"}>
+                      Compare {r.members.length > 40 ? "latest 40" : `all ${r.members.length}`}</a>
+                    <a class="btn" href={`/search?route=${r.id}`}>List in Find & group</a>
+                    <a class="btn" href={placeHref(r.place)}>← {r.place_name ?? r.place}</a>
+                  </div>
                 </div>
                 <dl class="kv">
-                  <dt>Place</dt><dd>{r.place}</dd>
+                  <dt>Start</dt><dd><a href={placeHref(r.place)}>{r.start_place_name ?? r.place_name ?? r.place}</a>{r.end_place_name && r.end_place_name !== (r.start_place_name ?? r.place_name) ? ` → ${r.end_place_name}` : ""}</dd>
                   <dt>Sport</dt><dd><SportDot sport={r.sport} />{SPORT_LABEL[r.sport] ?? r.sport}</dd>
-                  <dt>Shape</dt><dd>{SHAPE[r.shape] ?? r.shape}</dd>
-                  <dt>Distance</dt><dd>{km(r.dist_km)} km</dd>
-                  <dt>Sessions</dt><dd>{r.n}</dd>
+                  <dt>Shape</dt><dd>{SHAPE[r.shape] ?? r.shape}{r.via_names?.length ? <span class="muted"> via {r.via_names.join(", ")}</span> : null}</dd>
+                  <dt>Distance</dt><dd>{km(r.dist_km)} km{r.climb_m ? <span class="muted"> · {num(r.climb_m)} m climb</span> : null}</dd>
+                  <dt>Activities</dt><dd>{r.n}</dd>
                   <dt>First / last</dt><dd>{r.first} / {r.last}</dd>
                 </dl>
-                <p class="note">Dashed = reference session{r.waypoints?.length ? ", circles = common stops" : ""}. Leg-by-leg comparison: Compare (soon) and the report's route view.</p>
+                <p class="note">Dashed = reference session{r.waypoints?.length ? ", circles = common stops" : ""}. Compare lines them up along the route (gap, pace, HR, legs).</p>
               </div>
               <div class="pane" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                <div class="head"><h2>Sessions</h2><span class="count">{r.members.length}</span></div>
+                <div class="head"><h2>Activities</h2><span class="count">{r.members.length}</span></div>
                 <Table rows={r.members} rowKey={(a) => a.id} highlight={hlMember} onHover={(a) => setHlMember(a?.id ?? null)}
                   onRow={(a) => navigate(`/activities/${a.id}`)} defaultSort={["date", -1]} cols={[
                     { key: "date", label: "Date" },
-                    { key: "stype", label: "Type", render: (a) => stypeLabel(a.stype) || a.type },
+                    { key: "stype", label: "Workout", render: (a) => <span title={a.name ?? ""}>{whatShort(a)}</span>, sort: (a) => whatShort(a) },
                     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s) },
                     { key: "pause_s", label: "Paused", num: true, render: (a) => dur(a.pause_s) },
-                    { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: (a) => (a.dist_km && a.moving_s ? a.dist_km / a.moving_s : null) },
+                    { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: speedSort },
                     { key: "hr", label: "HR", num: true, render: (a) => a.hr ?? "—" },
                     { key: "route_dir", label: "Dir", render: (a) => a.route_dir ?? "—" },
                   ]} />
@@ -173,11 +207,13 @@ export function PlacesPage() {
               {selPlace && (
                 <div class="pane">
                   <div class="head"><h2><SportDot sport={selPlace.fam} />{selPlace.name}</h2>
-                    <div class="tools"><a href={`/activities?q=${encodeURIComponent(selPlace.name)}`}>Activities</a></div></div>
+                    <div class="tools">
+                      <a class="btn" href={`/search?place=${encodeURIComponent(selPlace.id)}`} title="All activities touching this place, with filters and Compare">List in Find & group</a>
+                    </div></div>
                   <dl class="kv">
-                    <dt>Sessions</dt><dd>{selPlace.n}</dd>
+                    <dt>Activities</dt><dd title={COUNT_HELP}>{countText(selPlace)}</dd>
                     <dt>Routes</dt><dd>{selPlace.routes}</dd>
-                    <dt>Area</dt><dd>{selPlace.area ?? "—"}</dd>
+                    <dt>Kind</dt><dd>{selPlace.src === "named" ? (selPlace.kind ?? "named place") : "start cluster"}</dd>
                     <dt>Last</dt><dd>{selPlace.last ?? "—"}</dd>
                   </dl>
                   <p class="note">{Object.entries(selPlace.types).map(([k, v]) => `${typeLabel(k)} ${v}`).join(", ")}</p>
@@ -187,12 +223,16 @@ export function PlacesPage() {
                 <div class="head">
                   <div class="seg">
                     <button class={tab === "routes" ? "on" : ""} onClick={() => setQuery({ tab: null })}>Routes</button>
+                    {place && <button class={tab === "activities" ? "on" : ""} onClick={() => setQuery({ tab: "activities" })}>Activities</button>}
                     <button class={tab === "places" ? "on" : ""} onClick={() => setQuery({ tab: "places" })}>Places</button>
                   </div>
-                  <span class="count">{tab === "routes" ? `${routes.length}${place ? ` at ${place}` : ""}` : places.length}</span>
+                  <span class="count">{tab === "routes" ? `${routes.length}${selPlace ? ` starting at ${selPlace.name}` : ""}` : tab === "activities" ? (placeActs ? `${placeActs.n} with ${selPlace?.name ?? place} as main place` : "") : places.length}</span>
                 </div>
                 {tab === "routes"
-                  ? <Table rows={routes} rowKey={(r) => r.id} cols={routeCols} onRow={(r) => setQuery({ route: r.id })} empty="No routes with ≥ 2 sessions here." />
+                  ? <Table rows={routes} rowKey={(r) => r.id} cols={routeCols} onRow={(r) => setQuery({ route: r.id })} empty="No routes with ≥ 2 activities here." />
+                  : tab === "activities"
+                  ? <Table rows={placeActs?.activities ?? []} rowKey={(a) => a.id} cols={actCols} defaultSort={["start", -1]} onRow={(a) => navigate(`/activities/${a.id}`)}
+                      empty={placeActs ? "No activities." : "Loading…"} />
                   : <Table rows={places} rowKey={(p) => p.id} cols={placeCols} selected={place} defaultSort={["n", -1]}
                       onRow={(p) => setQuery({ place: p.id, tab: null })} />}
               </div>

@@ -10,16 +10,24 @@ export interface Activity {
   elev: number | null; load: number | null; te: number | null; kcal: number | null; location: string | null;
   lat: number | null; lon: number | null; place: string | null; area: string | null; route: string | null;
   stype: string | null; type_detail: string | null; sig: string | null; fit: boolean; track: boolean;
+  // WP-A additions (display names / labels; `place` stays the id for links and filters)
+  type_label?: string | null; place_name?: string | null; start_place?: string | null; start_place_name?: string | null;
+  region?: string | null; route_name?: string | null; workout_label?: string | null; swim?: SwimSummary | null;
 }
+export interface SwimSummary { pool_m: number | null; lengths?: number; n_lengths?: number; dist_m: number | null; active_s: number | null;
+  rest_s: number | null; timer_s?: number | null; elapsed_s?: number | null; pace_100m_s: number | null; strokes_per_length: number | null;
+  bad_lengths?: number; n_rests: number | null; longest_rest_s: number | null }
+export interface SwimLength { start: number; time: number; strokes: number | null; stroke: number | string | null }
 export interface Meta {
   person: string; n_activities: number; n_tracks: number; first: string; last: string; years: string[];
-  sports: { id: Sport; n: number }[]; types: { id: string; n: number }[]; groups_built: string | null;
+  sports: { id: Sport; n: number; label?: string }[]; types: { id: string; n: number; label?: string }[]; groups_built: string | null;
 }
 export interface Series { cols: string[]; t: number[]; lat?: (number | null)[]; lon?: (number | null)[];
   hr?: (number | null)[]; speed?: (number | null)[]; alt?: (number | null)[]; dist?: (number | null)[];
   cad?: (number | null)[]; power?: (number | null)[]; start_utc: number }
 export interface Lap { start: number | null; time: number | null; timer: number | null; dist: number | null; speed: number | null;
-  hr: number | null; maxhr: number | null; climb: number | null; desc: number | null; intensity: string | null; trigger: string | null }
+  hr: number | null; maxhr: number | null; climb: number | null; desc: number | null; intensity: string | null; trigger: string | null;
+  kind?: "swim" | "rest" | null; swim_s?: number | null; pace_100m_s?: number | null }
 export interface Rep { start?: number; end?: number; time?: number; time_s?: number; dist?: number; dist_m?: number;
   speed?: number; speed_ms?: number; hr: number | null; maxhr?: number | null }
 export interface Leg { t: number; dur_s: number; dist_m: number; kmh: number; hr: number | null; hr_max: number | null;
@@ -31,6 +39,7 @@ export interface ActivityDetail {
   similar: { route?: Similar[]; workout?: Similar[] } | null;
   route: { id: string; name: string; n: number; shape: string } | null;
   laps: Lap[]; reps: Rep[]; breaks: any[]; series: Series | null; newer: string | null; older: string | null;
+  swim?: (SwimSummary & { lengths: SwimLength[] }) | null;
 }
 export interface TrackLite { id: string; date?: string; sport: Sport; type?: string; name?: string | null; km?: number | null;
   bbox: [number, number, number, number]; poly: string }
@@ -44,9 +53,11 @@ export interface Day { date: string; activities: Activity[]; tracks: TrackLite[]
   prev_active: string | null; next_active: string | null }
 export interface CalDay { date: string; n: number; km: number; s: number; sports: Record<string, number> }
 export interface Place { id: string; name: string; lat: number; lon: number; n: number; types: Record<string, number>;
-  area: string | null; routes: number; last: string | null }
+  area: string | null; routes: number; last: string | null; n_main?: number; n_touched?: number; n_start?: number;
+  kind?: string | null; src?: string | null }
 export interface RouteRow { id: string; name: string; place: string; sport: string; shape: string; dist_km: number;
-  n: number; first: string | null; last: string | null; has_legs: boolean }
+  n: number; first: string | null; last: string | null; has_legs: boolean; place_name?: string | null; start_place_name?: string | null;
+  end_place_name?: string | null; via_names?: string[] | null; climb_m?: number | null; region?: string | null }
 export interface RouteDetail extends RouteRow {
   medoid: number; ref: { id: number; lat: number[]; lon: number[]; km: number[]; alt: (number | null)[] } | null;
   waypoints: { km: number; name: string; lat: number; lon: number; share_stopped: number }[] | null;

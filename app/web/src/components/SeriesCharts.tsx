@@ -8,11 +8,12 @@ import type { Series } from "../lib/api";
 import { cssVar, dur } from "../lib/format";
 import { PACE_INCRS, TIME_INCRS, paceRange, speedRange } from "../lib/chartAxes";
 
-export type PanelKey = "pace" | "speed" | "hr" | "alt" | "cad" | "power";
+export type PanelKey = "pace" | "pace100" | "speed" | "hr" | "alt" | "cad" | "power";
 export interface Band { a: number; b: number; kind: "rep" | "pause" | "lap" }
 
 const PANELS: Record<PanelKey, { label: string; color: string; fmt: (v: number) => string; height: number }> = {
   pace: { label: "Pace (min/km)", color: "--chart-1", fmt: (v) => dur(v), height: 150 },
+  pace100: { label: "Pace (min/100 m)", color: "--chart-1", fmt: (v) => dur(v), height: 150 },
   speed: { label: "Speed (km/h)", color: "--chart-1", fmt: (v) => v.toFixed(1), height: 150 },
   hr: { label: "Heart rate (bpm)", color: "--chart-2", fmt: (v) => String(Math.round(v)), height: 130 },
   alt: { label: "Elevation (m)", color: "--chart-3", fmt: (v) => String(Math.round(v)), height: 110 },
@@ -23,6 +24,7 @@ const PANELS: Record<PanelKey, { label: string; color: string; fmt: (v: number) 
 function values(s: Series, k: PanelKey): (number | null)[] | null {
   const sp = s.speed;
   const v = k === "pace" ? sp?.map((v) => (v && v > 0.8 ? Math.min(1000 / v, 900) : null))
+    : k === "pace100" ? sp?.map((v) => (v && v > 0.2 ? Math.min(100 / v, 500) : null))
     : k === "speed" ? sp?.map((v) => (v === null ? null : v * 3.6))
     : ((s as any)[k] as (number | null)[] | undefined);
   return v && hasData(v) ? v : null;
@@ -108,6 +110,7 @@ export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, x
       root.appendChild(wrap);
       const lo = pct(ys, 0.01), hi = pct(ys, 0.99);
       const range: uPlot.Range.MinMax = k === "pace" ? paceAxisRange(x, ys, bands) :
+        k === "pace100" ? (() => { const r = paceRange(ys, { moveFrac: 0.5, hi: 0.98 }); return r ? [Math.max(30, r[0]), r[1]] as [number, number] : [60, 240] as [number, number]; })() :
         k === "speed" ? speedRange(ys, { lo: 0.01, hi: 0.99 }) ?? [0, 20] :
         k === "hr" ? [Math.max(40, lo - 5), pct(ys, 1) + 5] :   // HR peaks matter: up to the max
         k === "alt" && hi - lo < 20 ? [(hi + lo) / 2 - 10, (hi + lo) / 2 + 10] : [lo - (hi - lo) * 0.05, hi + (hi - lo) * 0.05 || hi + 1];
@@ -123,13 +126,13 @@ export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, x
           points: { size: 7, fill: color },
           y: false,
         },
-        scales: { x: { time: false }, y: { range: () => range, dir: k === "pace" ? -1 : 1 } },
+        scales: { x: { time: false }, y: { range: () => range, dir: k === "pace" || k === "pace100" ? -1 : 1 } },
         axes: [
           { show: isLast, stroke: cssVar("--text-muted"), grid: { stroke: cssVar("--hairline"), width: 1 }, ticks: { show: false },
             values: (_u, ts) => (xFmt ? ts.map(xFmt) : tTicks(ts)), font: `12px ${cssVar("--font")}`, size: 22, space: 80, incrs: xIncrs },
           { stroke: cssVar("--text-muted"), grid: { stroke: cssVar("--hairline"), width: 1 }, ticks: { show: false },
             values: (_u, ts) => ts.map((v) => P.fmt(v)), font: `12px ${cssVar("--font")}`, size: 48, space: 30,
-            ...(k === "pace" ? { incrs: PACE_INCRS } : {}) },
+            ...(k === "pace" || k === "pace100" ? { incrs: PACE_INCRS } : {}) },
         ],
         series: [{}, { stroke: color, width: 1.25, points: { show: false }, spanGaps: false }],
         hooks: {

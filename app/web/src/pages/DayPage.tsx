@@ -15,7 +15,16 @@ function DayHR({ day }: { day: Day }) {
   const series = useMemo<Series | null>(() => {
     if (!day.hr) return null;
     const mid = new Date(day.date + "T00:00:00").getTime();
-    return { cols: ["t", "hr"], t: day.hr.values.map((v) => Math.round((v[0] - mid) / 1000)), hr: day.hr.values.map((v) => v[1]), start_utc: 0 };
+    const ts = day.hr.values.map((v) => Math.round((v[0] - mid) / 1000)), hs = day.hr.values.map((v) => v[1] as number | null);
+    // no line across missing data: a null sample in every gap longer than 2 × the usual step
+    const steps = ts.slice(1).map((x, i) => x - ts[i]).sort((a, b) => a - b);
+    const step = steps[steps.length >> 1] || 120;
+    const t: number[] = [], hr: (number | null)[] = [];
+    ts.forEach((x, i) => {
+      if (i && x - ts[i - 1] > 2 * step) { t.push(ts[i - 1] + step); hr.push(null); }
+      t.push(x); hr.push(hs[i]);
+    });
+    return { cols: ["t", "hr"], t, hr, start_utc: 0 };
   }, [day]);
   if (!series) return null;
   return <SeriesCharts series={series} panels={["hr"]} xFmt={clock} />;
@@ -47,6 +56,10 @@ export function DayPage({ date }: { date: string | null }) {
   const go = (d: string | null) => d && navigate(`/day/${d}`);
   const sm = data?.summary, sl = data?.sleep;
   const tracks = data?.tracks ?? [];
+  // empty day: show where the last active day was (muted), not always Oslo
+  const prev = useApi<Day>(data && !tracks.length && data.prev_active ? `/api/days/${data.prev_active}` : null).data;
+  const shownTracks = useMemo(() => (tracks.length ? tracks : (prev?.tracks ?? []).map((t) => ({ ...t, muted: true }))), [tracks, prev]);
+  const emptyNote = !data ? "Loading…" : tracks.length ? "" : `${data.activities.length ? "No GPS tracks this day" : "No activities this day"}${prev?.tracks.length ? ` · showing ${prev.date}` : ""}`;
 
   return (
     <main>
@@ -78,8 +91,10 @@ export function DayPage({ date }: { date: string | null }) {
       <section>
         {error && <div class="err">{error}</div>}
         <div class="cols" style={{ gridTemplateColumns: "minmax(0, 3fr) minmax(300px, 2fr)" }}>
-          <TracksMap tracks={tracks} highlight={hl} onHover={setHl} onClick={(id) => navigate(`/activities/${id}`)} class="bordered" style={{ height: "460px" }}
-            empty={data ? (data.activities.length ? "No GPS tracks this day" : "No activities this day") : "Loading…"} />
+          <TracksMap tracks={shownTracks} highlight={hl} onHover={setHl} onClick={(id) => navigate(`/activities/${id}`)} class="bordered" style={{ height: "460px" }}
+            markers={!!tracks.length} empty="">
+            {emptyNote && <div class="overlay bl">{emptyNote}</div>}
+          </TracksMap>
           <div>
             <h2 style={{ marginBottom: "8px" }}>Day summary</h2>
             {sm ? (

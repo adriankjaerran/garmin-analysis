@@ -8,9 +8,13 @@ const HR_KEYS = ["work_hrr", "hrr"];
 const SHORT: Record<string, string> = { race: "counts fully", hard: "full weight unless far below the shape",
   bound: "lower bound: only counts when above the shape", implausible: "ignored" };
 
+/** `not_scored` (WP-A): why the model skipped this activity */
+type SessionResp = FitnessSession & { not_scored?: { key: string; text: string } | null };
+
 export function ShapeSection({ id }: { id: string }) {
-  const { data } = useApi<FitnessSession>(`/api/fitness/session/${id}`);
-  if (!data || (!data.scored && !data.hr_diagnostics)) return null;  // no fitness.json or nothing for this activity
+  const { data } = useApi<SessionResp>(`/api/fitness/session/${id}`);
+  // no fitness.json, or nothing to say (unscored sport without HR: a swim, a walk) -> no section
+  if (!data || (!data.scored && !data.hr_diagnostics)) return null;
   const hd = data.hr_diagnostics;
   // HR from the scored part (work bouts / best window) first, then the steady-chunk diagnostics
   const hrRows = [
@@ -23,11 +27,11 @@ export function ShapeSection({ id }: { id: string }) {
     <section>
       <div class="head">
         <h2>Shape</h2>
-        <span class="sub">what this session says about fitness (<a href="/fitness">Fitness</a>, model in docs/fitness-model.md)</span>
+        <span class="sub">what this session says about fitness (<a href="/fitness">Fitness</a> page)</span>
       </div>
       <div class="cols" style={{ gridTemplateColumns: "3fr 2fr" }}>
         <div>
-          {!data.scored && <div class="empty">Not scored by the fitness model (only interval, race, run and ski sessions with a watch file are).</div>}
+          {!data.scored && <div class="empty">Not scored by the fitness model: {data.not_scored?.text ?? "only interval, race, run and ski sessions with a watch file are."}</div>}
           {data.sessions.map((s) => {
             const eq = s.race_equivalents_s, sh = s.shape;
             const delta = s.shape_at !== null && s.kind !== "implausible" ? s.score - s.shape_at : null;
@@ -67,8 +71,8 @@ export function ShapeSection({ id }: { id: string }) {
             <div class="tablewrap">
               <table>
                 <tbody>
-                  {hrRows.map((c) => (
-                    <tr key={c.key}><td style={{ width: "150px" }}>{c.label}</td><td class="num" style={{ width: "90px" }}>{c.text}</td><td class="muted wrap" style={{ whiteSpace: "normal" }}>{c.meaning}</td></tr>
+                  {hrRows.map((c, i) => (
+                    <tr key={`${i}-${c.key}`}><td style={{ width: "150px" }}>{c.label}</td><td class="num" style={{ width: "90px" }}>{c.text}</td><td class="muted wrap" style={{ whiteSpace: "normal" }}>{c.meaning}</td></tr>
                   ))}
                 </tbody>
               </table>

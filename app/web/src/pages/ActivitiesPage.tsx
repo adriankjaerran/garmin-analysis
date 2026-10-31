@@ -1,4 +1,5 @@
 // Activity list: dense sortable table + side panel with a mini map of the selected activity.
+// ?place=<id> limits the list to activities with that main place (links from Places).
 import { useMemo } from "preact/hooks";
 import { qs, useApi, type Activity, type Meta } from "../lib/api";
 import { setQuery, useLocation, navigate } from "../lib/router";
@@ -19,6 +20,8 @@ function MiniPanel({ a }: { a: Activity }) {
         <div class="head" style={{ marginTop: "12px" }}>
           <a class="btn" href={`/activities/${a.id}`}>Open activity</a>
           <a class="btn" href={`/day/${a.date}`}>Day view</a>
+          {a.fit && <a class="btn" href={`/compare?suggest=${a.id}`} title="Compare with similar sessions (same workout / route)">Compare</a>}
+          <a class="btn" href={`/activities/${a.id}?go=closest`} title="Closest activities (same workout, route, place)">Closest</a>
         </div>
       </div>
     </>
@@ -28,9 +31,10 @@ function MiniPanel({ a }: { a: Activity }) {
 export function ActivitiesPage() {
   const { query } = useLocation();
   const sport = query.get("sport") || "", year = query.get("year") || "", q = query.get("q") || "", sel = query.get("sel");
+  const place = query.get("place") || "";
   const meta = useApi<Meta>("/api/meta").data;
   const { data, error } = useApi<{ n: number; activities: Activity[] }>(
-    "/api/activities" + qs({ sport, q, from: year && `${year}-01-01`, to: year && `${year}-12-31` }));
+    "/api/activities" + qs({ sport, q, place, from: year && `${year}-01-01`, to: year && `${year}-12-31` }));
   const rows = data?.activities ?? [];
   const selected = rows.find((a) => a.id === sel) ?? null;
   const cols = useMemo(() => activityCols(), []);
@@ -50,6 +54,8 @@ export function ActivitiesPage() {
             </button>
           ))}
         </div>
+        {place && <button class="chip on" onClick={() => setQuery({ place: null })} title="Remove the place filter">
+          Place: {rows[0]?.place === place ? rows[0].place_name ?? place : place} ×</button>}
         <select value={year} onChange={(e) => setQuery({ year: (e.target as HTMLSelectElement).value })}>
           <option value="">All years</option>
           {meta?.years.map((y) => <option key={y} value={y}>{y}</option>)}

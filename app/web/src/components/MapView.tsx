@@ -26,6 +26,22 @@ export const BASEMAPS = {
 } as const;
 export type BasemapId = keyof typeof BASEMAPS;
 
+/** rough outline of mainland Norway (+ ~15 km on the land side): Kartverket's cache has tiles only inside */
+const NORWAY: [number, number][] = [[4, 57.7], [7, 57.7], [8.5, 58], [10.6, 58.7], [11.2, 58.85], [11.75, 58.9], [12.1, 59.3], [12, 59.9],
+  [12.75, 60.2], [12.8, 60.7], [12.5, 61.1], [12.6, 61.6], [12.4, 62.3], [12.35, 62.9], [12.4, 63.6], [13, 64], [14.4, 64.3], [14.3, 65.1],
+  [14.8, 65.7], [15.6, 66.2], [16.6, 67], [16.8, 67.5], [18.2, 68.2], [18.4, 68.6], [20.2, 68.55], [20.4, 69], [21.3, 69.3], [22.2, 68.9],
+  [23.3, 68.6], [24.9, 68.5], [25.9, 69], [26.6, 69.6], [27.9, 70], [28.8, 69.7], [29.1, 69.2], [28.9, 69], [29.6, 69], [31.5, 69.6],
+  [31.5, 71.5], [4, 71.5]];
+export function inNorway(lon: number, lat: number): boolean {
+  let inside = false;
+  for (let i = 0, j = NORWAY.length - 1; i < NORWAY.length; j = i++) {
+    const [xi, yi] = NORWAY[i], [xj, yj] = NORWAY[j];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+const isKV = (id: BasemapId) => id === "topo" || id === "grey";
+
 const KEY = "garmin.basemap";
 const EVT = "app:basemap";
 export const getBasemap = (fallback: BasemapId = "topo"): BasemapId => {
@@ -67,6 +83,10 @@ interface Props {
 export function MapView({ class: cls = "", style, onReady, bbox, interactive = true, defaultBasemap = "topo", children, compact }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const [bm, setBm] = useState<BasemapId>(() => getBasemap(defaultBasemap));
+  // Kartverket outside Norway is blank: this map shows OSM instead while its centre is abroad (the stored
+  // choice is kept; clicking a basemap button on this map turns the automatic switch off for it)
+  const [auto, setAuto] = useState(false);
+  const pinned = useRef(false);
   const mapRef = useRef<MLMap | null>(null);
 
   useEffect(() => {
@@ -84,13 +104,21 @@ export function MapView({ class: cls = "", style, onReady, bbox, interactive = t
     if (interactive) map.addControl(new NavigationControl({ showCompass: false }), "top-right");
     if (!compact) map.addControl(new ScaleControl({ unit: "metric" }), "bottom-right");
     map.addControl(new AttributionControl({ compact: true }), "bottom-right");
-    map.on("load", () => onReady?.(map));
+    let want: BasemapId = bm, shown: BasemapId = bm, loaded = false;
+    const show = (id: BasemapId) => { if (id !== shown) { shown = id; applyBasemap(map, id); } setAuto(id !== want); };
+    const check = () => {
+      if (!loaded) return;
+      const c = map.getCenter();
+      show(isKV(want) && !pinned.current && !inNorway(c.lng, c.lat) ? "osm" : want);
+    };
+    map.on("load", () => { loaded = true; onReady?.(map); check(); });
+    map.on("moveend", check);
     const ro = new ResizeObserver(() => map.resize());
     ro.observe(el.current!);
     const onBm = (e: Event) => {
-      const id = (e as CustomEvent).detail as BasemapId;
-      setBm(id);
-      if (map.isStyleLoaded()) applyBasemap(map, id); else map.once("load", () => applyBasemap(map, id));
+      want = (e as CustomEvent).detail as BasemapId;
+      setBm(want);
+      check();
     };
     window.addEventListener(EVT, onBm);
     return () => { window.removeEventListener(EVT, onBm); ro.disconnect(); map.remove(); mapRef.current = null; };
@@ -101,8 +129,9 @@ export function MapView({ class: cls = "", style, onReady, bbox, interactive = t
       <div class="gl" ref={el} />
       <div class="seg basemap">
         {(Object.keys(BASEMAPS) as BasemapId[]).map((id) => (
-          <button key={id} class={id === bm ? "on" : ""} onClick={() => setBasemap(id)} title="Basemap (all maps)">
-            {BASEMAPS[id].label}
+          <button key={id} class={id === (auto ? "osm" : bm) ? "on" : ""} onClick={() => { pinned.current = isKV(id) && auto; setBasemap(id); }}
+            title={auto && id === "osm" ? "Shown automatically: Kartverket maps cover Norway only (click Topo / Grey to force them)" : "Basemap (all maps)"}>
+            {BASEMAPS[id].label}{auto && id === "osm" ? " (auto)" : ""}
           </button>
         ))}
       </div>

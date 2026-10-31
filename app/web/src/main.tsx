@@ -37,13 +37,12 @@ function Nav({ current, meta, activityId }: { current: string; meta: Meta | null
       <a class="step" href="/map">Explore</a>
       {tab("map", "/map", "Map")}
       {tab("day", "/day", "Calendar & day")}
+      {tab("places", "/places", "Places & routes")}
       <a class="step" href="/activities">Activities</a>
       {tab("activities", "/activities", "List")}
-      {activityId && tab("activity", `/activities/${activityId}`, "Activity")}
-      <a class="step" href="/places">Places</a>
-      {tab("places", "/places", "Places & routes")}
-      <a class="step" href="/search">Analysis</a>
       {tab("search", "/search", "Find & group")}
+      {current === "activity" && activityId && <a class="tab sub current" href={`/activities/${activityId}`}>Activity</a>}
+      <a class="step" href="/compare">Analysis</a>
       {tab("compare", "/compare", "Compare")}
       {tab("fitness", "/fitness", "Fitness")}
       {meta && (
