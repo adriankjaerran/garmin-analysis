@@ -174,7 +174,7 @@ export function PlacesPage() {
                     <a class="btn" href={`/compare?ids=${r.members.slice().sort((x, y) => (x.date < y.date ? 1 : -1)).slice(0, 40).map((m) => m.id).join(",")}&mode=${r.shape === "laps" ? "moving" : "distance"}`}
                       title={r.members.length > 40 ? "The 40 most recent sessions on this route in Compare" : "Every session on this route in Compare"}>
                       Compare {r.members.length > 40 ? "latest 40" : `all ${r.members.length}`}</a>
-                    <a class="btn" href={`/search?route=${r.id}`}>List in Find & group</a>
+                    <a class="btn" href={`/activities?route=${r.id}`}>List activities</a>
                     <a class="btn" href={placeHref(r.place)}>← {r.place_name ?? r.place}</a>
                   </div>
                 </div>
@@ -209,7 +209,7 @@ export function PlacesPage() {
                 <div class="pane">
                   <div class="head"><h2><SportDot sport={selPlace.fam} />{selPlace.name}</h2>
                     <div class="tools">
-                      <a class="btn" href={`/search?place=${encodeURIComponent(selPlace.id)}`} title="All activities touching this place, with filters and Compare">List in Find & group</a>
+                      <a class="btn" href={`/activities?place=${encodeURIComponent(selPlace.id)}&adv=1`} title="All activities touching this place, with filters and Compare">List activities</a>
                     </div></div>
                   <dl class="kv">
                     <dt>Activities</dt><dd title={COUNT_HELP}>{countText(selPlace)}</dd>

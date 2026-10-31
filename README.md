@@ -5,8 +5,9 @@ track, interval reps and breaks, places and repeated routes, similar sessions, s
 ("shape") model on the Daniels VDOT scale. Two front ends read the same data:
 
 - **Web app** (`app/`): FastAPI backend + Vite / TypeScript / Preact frontend (MapLibre maps, uPlot charts).
-  Pages: Map, Calendar & day, Places & routes, Activities (list + activity page with Closest activities and
-  Shape), Find & group, Compare (route ghost race, moving / elapsed time, rep- and break-aligned intervals), Fitness.
+  Pages: Home (latest day, 5-week training log, volume vs typical, recent workouts, shape), Activities (one list with
+  simple + advanced filters, map, preview and groups; activity page with Closest activities and Shape), Calendar & day,
+  Map, Places & routes, Compare (route ghost race, moving / elapsed time, rep- and break-aligned intervals), Fitness.
 - **HTML report** (`scripts/build_report.py` → `data/<person>/report.html`): one self-contained file.
 
 Everything runs on 127.0.0.1; health data stays in `data/` (gitignored).

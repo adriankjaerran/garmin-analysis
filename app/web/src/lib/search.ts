@@ -94,3 +94,22 @@ export function coreBBox(boxes: BB[], spanKm = 150): { fit: BB | null; out: numb
   const fit = keep.reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])] as BB);
   return { fit, out: boxes.length - keep.length };
 }
+
+/** rep pace / speed in the unit of the sport: "3:29" (run, /km), "1:52 /100" (swim), "10.7 km/h" (else) */
+export function repSpeedText(sport: string, ms: number | null | undefined): string {
+  if (!ms) return "";
+  if (sport === "run" || sport === "hike") { const s = 1000 / ms; return mmss(s); }
+  if (sport === "swim") return mmss(100 / ms) + " /100";
+  return (ms * 3.6).toFixed(1) + " km/h";
+}
+/** what a session was, in one line: "6×1000 @ 3:29" for intervals (signature @ mean rep pace of the main reps),
+ *  else the workout family ("Easy run", "Hike") */
+export function workoutLine(r: Pick<SearchRow, "sport" | "signature" | "rep_count" | "rep_speed_ms" | "family_label"> & { type_label?: string | null }): string {
+  if (r.rep_count && r.signature) {
+    const p = repSpeedText(r.sport, r.rep_speed_ms);
+    return p ? `${r.signature} @ ${p}` : r.signature;
+  }
+  return r.family_label || r.type_label || "—";
+}
+/** short label for a calendar cell: the main rep signature for intervals ("6×1000"), else "" (show km) */
+export const workoutShort = (r: Pick<SearchRow, "rep_count" | "main_sig" | "signature">) => (r.rep_count ? r.main_sig || r.signature || "" : "");

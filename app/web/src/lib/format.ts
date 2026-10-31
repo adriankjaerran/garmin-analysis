@@ -65,3 +65,14 @@ export function hm(s: number | null | undefined): string {
   const m = Math.round(Math.abs(s) / 60);
   return `${s < 0 && m ? "−" : ""}${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
 }
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Sat 31 Oct" (+ " 2025" when `year` or another year than `ref`) */
+export function shortDate(date: string, ref?: string): string {
+  const d = new Date(date + "T12:00:00");
+  const y = ref && ref.slice(0, 4) !== date.slice(0, 4) ? ` ${date.slice(0, 4)}` : "";
+  return `${WD[d.getDay()]} ${d.getDate()} ${MON[d.getMonth()]}${y}`;
+}
+/** local calendar date "YYYY-MM-DD" */
+export const isoLocal = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** whole days from a to b (dates) */
+export const daysBetween = (a: string, b: string) => Math.round((new Date(b + "T12:00:00").getTime() - new Date(a + "T12:00:00").getTime()) / 864e5);

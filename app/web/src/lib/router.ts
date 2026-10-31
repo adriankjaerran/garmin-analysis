@@ -28,6 +28,7 @@ export function useLocation(): Loc {
     const on = () => set(read());
     window.addEventListener("popstate", on);
     window.addEventListener(EVT, on);
+    set((o) => (o.path === read().path && o.query.toString() === read().query.toString() ? o : read()));   // a child may have navigated before this effect subscribed (child effects run first, e.g. a redirect)
     return () => { window.removeEventListener("popstate", on); window.removeEventListener(EVT, on); };
   }, []);
   return loc;

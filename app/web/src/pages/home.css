@@ -1,0 +1,65 @@
+/* Home page (HomePage.tsx) */
+main.home { padding-top: var(--space-3); }
+.home-top { gap: var(--space-3); margin-bottom: var(--space-3); flex-wrap: nowrap; }
+.home-top h1 { margin-right: 0; }
+/* current shape: one line, one link per discipline */
+.shape-line { font-size: var(--fs-13); margin-left: auto; display: flex; align-items: center; gap: 0; border: 1px solid var(--hairline); border-radius: var(--radius-control);
+  height: var(--control); overflow: hidden; white-space: nowrap; }
+.shape-line > a { display: inline-flex; align-items: center; gap: 6px; padding: 0 var(--space-3); height: 100%; color: var(--text);
+  border-left: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
+.shape-line > a:first-child { border-left: 0; }
+.shape-line > a:hover { background: var(--surface-hover); text-decoration: none; }
+.shape-line .lbl { color: var(--text-muted); font-weight: var(--fw-semibold); background: var(--surface-tint); }
+.shape-line .disc .dot { margin-right: 0; }
+.shape-line .disc .nm { color: var(--text-muted); }
+.shape-line .more { color: var(--accent); }
+.home .up { color: var(--state-good); }
+.home .down { color: var(--state-duplicate); }
+.spark { display: block; }
+.shape-line .spark { display: inline-block; }
+
+/* latest day: map | activities + summary */
+.home-day { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--space-4); align-items: start; }
+.home-day .day-sum { margin-top: var(--space-4); }
+.home-day .day-kv { grid-template-columns: max-content 1fr max-content 1fr max-content 1fr; }
+
+.home-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.home-two.wide-left { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.home-map { position: sticky; top: 0; }
+
+/* training log: weeks x Mon..Sun + week total */
+.tlog { border-top: 1px solid var(--hairline); }
+.tl-head, .tl-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) 92px; }
+.tl-head span { font-size: var(--fs-12); color: var(--text-muted); font-weight: var(--fw-semibold); padding: 6px var(--space-2); background: var(--surface-tint);
+  border-bottom: 1px solid var(--hairline); }
+.tl-head span.num { text-align: right; }
+.tl-week { border-bottom: 1px solid var(--hairline); min-height: 62px; }
+.tl-day { padding: 4px 6px; border-right: 1px solid var(--hairline); cursor: pointer; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tl-day:hover { background: var(--surface-hover); }
+.tl-day.future { cursor: default; background: repeating-linear-gradient(135deg, transparent 0 6px, var(--surface-tint) 6px 7px); }
+.tl-day.future:hover { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--surface-tint) 6px 7px); }
+.tl-day.old .dn { opacity: 0.6; }
+.tl-day .dn { font-size: var(--fs-12); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tl-day.today .dn { color: var(--accent); font-weight: var(--fw-semibold); }
+.tl-act { display: flex; align-items: center; font-size: var(--fs-12); color: var(--text); white-space: nowrap; overflow: hidden; border-radius: 3px; padding: 0 2px; margin: 0 -2px; }
+.tl-act .t { overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.tl-act:hover, .tl-act.hl { background: var(--accent-surface); text-decoration: none; }
+.tl-sum { padding: 4px var(--space-2); display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.tl-sum b { font-size: var(--fs-13); }
+.tl-sum .mix { display: flex; width: 64px; height: 4px; border-radius: 2px; overflow: hidden; background: var(--surface-tint); margin-top: 2px; }
+.tl-sum .mix i { display: block; height: 100%; }
+
+/* volume table */
+table.vol { border-top: 1px solid var(--hairline); }
+table.vol th { cursor: default; }
+table.vol tr.grp th { height: 24px; font-size: var(--fs-12); background: var(--surface); border-bottom: 0; }
+table.vol th.c { text-align: center; border-left: 1px solid var(--hairline); }
+table.vol tr.total td { font-weight: var(--fw-semibold); background: var(--surface-tint); }
+table.vol .vs { display: inline-flex; align-items: center; gap: var(--space-2); font-variant-numeric: tabular-nums; font-size: var(--fs-12); }
+table.vol .vs > span { min-width: 40px; text-align: right; }
+.vsbar { display: block; }
+@media (max-width: 1250px) {
+  .home-two, .home-two.wide-left, .home-day { grid-template-columns: 1fr; }
+  .home-top { flex-wrap: wrap; }
+  .shape-line { margin-left: 0; }
+}

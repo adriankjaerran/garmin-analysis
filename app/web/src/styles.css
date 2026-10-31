@@ -195,3 +195,16 @@ td .why .more { color: var(--text-faint, var(--text-muted)); }
 /* place name labels on the Places map (HTML markers: the raster style has no glyphs) */
 .place-label { font-size: var(--fs-12); color: var(--text); background: rgba(255, 255, 255, 0.85); padding: 0 4px; border-radius: 3px;
   white-space: nowrap; pointer-events: none; box-shadow: 0 0 0 1px rgba(20, 24, 28, 0.08); }
+
+/* Activities page (ActivitiesPage.tsx): simple filters always visible, Advanced panel (.fbar) below when open */
+.fsimple { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--hairline); }
+.fsimple .sep { width: 1px; height: 20px; background: var(--hairline); margin: 0 var(--space-1); }
+.fsimple .adv-toggle.on { background: var(--accent-surface); border-color: var(--accent); color: var(--accent); }
+button.link { border: 0; background: none; color: var(--accent); padding: 0 var(--space-1); }
+button.link:hover { background: none; text-decoration: underline; }
+.split > .right > .preview { flex: none; border-top: 1px solid var(--hairline); }
+.split > .right > .hint { flex: none; border-top: 1px solid var(--hairline); color: var(--text-muted); font-size: var(--fs-12); }
+.preview button.x { height: 24px; width: 24px; padding: 0; justify-content: center; color: var(--text-muted); }
+h2.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+nav.side .step.home { margin-bottom: var(--space-2); }
+nav.side span.step { color: var(--text-muted); font-size: var(--fs-12); text-transform: none; padding-top: var(--space-3); }

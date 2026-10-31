@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .deps import get_store
-from .routers import activities, compare, days, fitness, maps, meta, places, search
+from .routers import activities, compare, days, fitness, home, maps, meta, places, search
 
 DIST = Path(__file__).resolve().parents[1] / "web" / "dist"
 
@@ -47,7 +47,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Garmin analysis", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan)
     app.add_middleware(GZipMiddleware, minimum_size=2048)
     # each router owns its paths; later workers extend search/compare/fitness in their own file
-    for r in (meta, activities, days, maps, places, search, compare, fitness):
+    for r in (meta, activities, days, home, maps, places, search, compare, fitness):
         app.include_router(r.router, prefix="/api")
 
     @app.get("/api/{rest:path}", include_in_schema=False)

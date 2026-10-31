@@ -126,6 +126,6 @@ Remaining (not small): Compare's pool-swim series come from the engine's raw rec
 page's 29:36 swimming time); Find & group results still scroll sideways at 1600 px by design (sticky tick + date).
 
 ## Open questions for the user
-- Home page: keep `/map`, or start on the latest day (`/day`) — or a combined "today" page?
-- Merge the Activities list into Find & group (one list page), or keep both?
+- ✅ Home page: keep `/map`, or start on the latest day (`/day`) — or a combined "today" page? **Decided:** a Home page at `/` (latest day, 5-week log, volume vs typical, recent workouts, shape; `/api/home`).
+- ✅ Merge the Activities list into Find & group (one list page), or keep both? **Decided:** merged into `/activities` (simple filters + Advanced panel, preview pane, Groups tab); `/search?…` redirects.
 - Place naming: OK to reverse-geocode cluster names with OSM/Kartverket place names (one-off network call), or hand-maintain a `named_places` list (Majorstuen, Frognerparken, Holmenkollen…)?
