@@ -14,6 +14,7 @@ TLS version Garmin requires.
 - `scripts/calibrate_distance.py <person>`: compares distance sources with Bislet track geometry and certified races, writes `calibration.json`
 - `scripts/gps_lap_analysis.py <person>`: GPS-mode manual laps at Bislet vs track geometry (hidden lag, lap booking, lap error), writes `gps_lap_analysis.json`
 - `scripts/session_groups.py <person>`: places, routes, session types, legs, writes `groups.json` ([session-groups.md](session-groups.md))
+- `scripts/ski_intervals.py <person> <id> ...`: ski interval detector (lap workouts / hard efforts), used by session_groups and compare; the CLI prints reps and work blocks
 - `scripts/similarity.py <person> build|search|nearest|groups|validate`: similarity engine on top of `groups.json`, writes `similarity_index.json` + `tracks.json` ([similarity.md](similarity.md))
 - `scripts/build_report.py <person>`: writes `data/<person>/report.html`, a self-contained overview (template: `scripts/report_template.html`)
 

@@ -89,6 +89,9 @@ DETAIL_TOL_M = 3.0           # tracks.json: Douglas-Peucker tolerance
 
 KIND_LABEL = {"intervals": "Interval running", "tempo": "Tempo run", "race": "Race", "long": "Long run",
               "easy": "Easy run", "other": "Other run", "nogps": "Run without GPS"}
+SPORT_LABEL = {"hike": "Hike", "cycling": "Cycling", "lap_swimming": "Pool swim", "open_water_swimming": "Open water swim",
+               "rowing_v2": "Rowing", "kayaking_v2": "Kayaking", "stop_watch": "Stopwatch (no GPS)",
+               "multi_sport": "Multisport", "other": "Other"}
 
 
 # ---------------------------------------------------------------- small helpers
@@ -273,19 +276,10 @@ def load_tracks(D, fits, workers=8):
 
 
 # ---------------------------------------------------------------- workout structure
-def rep_parts(reps):
-    """reps [[time_s, dist_m, ...]] -> parts [(first_idx, last_idx)] grouped like session_groups.signature
-    (consecutive reps of similar time or distance, +-15 %); stray stride groups (<= 2 reps < 35 s) dropped"""
-    sim_ = lambda x, y: abs(math.log(max(x, 1) / max(y, 1))) < 0.15
-    groups = []
-    for i, r in enumerate(reps):
-        g = groups[-1] if groups else None
-        if g and (sim_(r[0], np.median([reps[j][0] for j in g])) or sim_(r[1], np.median([reps[j][1] for j in g]))):
-            g.append(i)
-        else:
-            groups.append([i])
-    main = [g for g in groups if not (len(g) <= 2 and max(reps[j][0] for j in g) < 35)]
-    return main or groups
+def rep_parts(reps, ski=False):
+    """reps [[time_s, dist_m, ...]] -> parts [index lists] grouped like session_groups.signature
+    (session_groups.rep_groups: runs by similar time or distance, +-15 %, strides dropped; ski by duration)"""
+    return sg.rep_groups([r[0] for r in reps], [r[1] for r in reps], ski)
 
 
 def rest_label(s):
@@ -308,9 +302,11 @@ def dist_band(sport, km):
 
 FAMILY = {"intervals_track": "intervals", "intervals_road": "intervals", "intervals_treadmill": "intervals",
           "tempo": "tempo", "race?": "race", "long": "long", "easy": "easy", "run_nogps": "nogps",
-          "run_other": "other", "ski_easy": "easy", "ski_hard": "hard", "ski_long": "long", "ski_long_race?": "long"}
+          "run_other": "other", "ski_easy": "easy", "ski_hard": "hard", "ski_long": "long", "ski_long_race?": "long",
+          "ski_intervals": "intervals"}
 RELATED_FAM = {frozenset(p) for p in [("run/intervals", "run/tempo"), ("run/tempo", "run/race"), ("run/easy", "run/long"),
-                                      ("ski/easy", "ski/long"), ("ski/hard", "ski/long"), ("run/easy", "run/nogps")]}
+                                      ("ski/easy", "ski/long"), ("ski/hard", "ski/long"), ("run/easy", "run/nogps"),
+                                      ("ski/intervals", "ski/hard")]}
 
 
 def workout_of(o, sport, ana, dist_km):
@@ -318,11 +314,13 @@ def workout_of(o, sport, ana, dist_km):
     st = o.get("type") or "?"
     kind = FAMILY.get(st)
     fam = f"{sport}/{kind}" if kind and sport in ("run", "ski") else sport
-    label = (KIND_LABEL.get(kind, kind) if sport == "run" else f"{sport.capitalize()} {kind}" if kind else sport.capitalize())
+    label = (KIND_LABEL.get(kind, kind) if sport == "run" else f"{sport.capitalize()} {kind}" if kind
+             else SPORT_LABEL.get(sport, sport.replace("_v2", "").replace("_", " ").capitalize()))
     w = {"family": fam, "family_label": label, "category": st, "detail": o.get("type_detail")}
     reps = o.get("reps")
     if o.get("sig") and reps:
-        parts = rep_parts(reps)
+        ski_mode = str((ana or {}).get("mode") or "").startswith("ski")
+        parts = rep_parts(reps, ski_mode)
         brk = o.get("breaks_s") or []
         sbrk = [b for b in (ana or {}).get("breaks", [])] if ana else []
         P = []
@@ -354,6 +352,10 @@ def workout_of(o, sport, ana, dist_km):
                  rep_speed_ms=M["speed_ms"], rep_hr=M["hr"], rest_s=M["rest_s"], rest_min_s=M["rest_min_s"],
                  rest_max_s=M["rest_max_s"], rest_label=rl, rest_mode=mode, rest_stand_share=M["rest_stand_share"], rest_dist_m=M["rest_dist_m"],
                  work_s=round(sum(r[0] for r in reps)))
+        if ski_mode and (ana or {}).get("mode") == "ski_effort" and o.get("route"):
+            # terrain-defined ski reps (climbs between the stops of a route): the route is the workout, the rep
+            # durations follow the terrain and vary between sessions -> exact_key by route like other ski sessions
+            w["exact_key"] = f"{fam} · {o['route']}"; w["exact_by"] = "route"
         for p in P:
             p.pop("total_s")
     else:
@@ -389,13 +391,13 @@ def rest_clusters(vals):
 
 
 def assign_rest_clusters(acts):
-    """exact_key for intervals = signature + rest cluster (within the signature) labelled by its median"""
+    """exact_key for intervals = signature + rest cluster (within family + signature) labelled by its median"""
     by = collections.defaultdict(list)
     for a in acts.values():
         w = a["workout"]
-        if w.get("rest_s") is not None and w.get("parts"):
-            by[w["signature"]].append(a)
-    for sig, m in by.items():
+        if w.get("rest_s") is not None and w.get("parts") and w.get("exact_by") != "route":
+            by[(w["family"], w["signature"])].append(a)   # per family: a run 4×4:00 and a ski 4×4:00 are different
+    for (_, sig), m in by.items():
         used = set()
         for c in rest_clusters([a["workout"]["rest_s"] for a in m]):
             lab = rest_label(float(np.median(c)))
@@ -795,8 +797,9 @@ class Index:
         if qw.get("exact_key") and qw["exact_key"] == cw.get("exact_key"):
             s["workout"] = 1.0; t["workout"] = f"same workout {qw['exact_key']}"
         elif qw.get("rep_count") and cw.get("rep_count"):
-            st = math.exp(-abs(math.log(qw["rep_count"] / cw["rep_count"])) / 0.35) * \
-                math.exp(-abs(math.log(qw["rep_time_s"] / max(cw["rep_time_s"], 1))) / 0.3)
+            k = 2.0 if q["sport"] == "ski" and c["sport"] == "ski" else 1.0   # ski reps: terrain-defined, looser
+            st = math.exp(-abs(math.log(qw["rep_count"] / cw["rep_count"])) / (0.35 * k)) * \
+                math.exp(-abs(math.log(qw["rep_time_s"] / max(cw["rep_time_s"], 1))) / (0.3 * k))
             if qw.get("rest_s") and cw.get("rest_s"):
                 st *= math.exp(-abs(math.log(qw["rest_s"] / max(cw["rest_s"], 1))) / 0.6)
             if qw["signature"] == cw["signature"]:

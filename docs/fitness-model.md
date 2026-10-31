@@ -74,7 +74,9 @@ inside one pause-free leg.
   rectifies barometer noise: the per-second climb on the Holmenkollen route (R3) ranged 361–568 m for
   the same ~390 m net climb. The FR935's altitude on one leg is off by up to ±40 %, so windows are
   ≥ 20 min.
-- `ski_hard` sessions are `hard`, the rest are `bound`.
+- `ski_hard` and `ski_intervals` sessions are `hard` (ski_intervals are hard sessions with detected reps,
+  [session-groups.md](session-groups.md); 7 Holmenkollen climbs moved from ski_hard to ski_intervals and
+  stay `hard`, so the scores didn't change), the rest are `bound`.
 
 ## Smoother (`smooth_series`)
 - Daily random walk θ_t = θ_{t−1} + N(0, q), Kalman filter + RTS smoother. In a gap the mean holds (or

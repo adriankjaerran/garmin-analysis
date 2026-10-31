@@ -54,3 +54,7 @@ everything into `calibration.json`) → `build_report.py`.
   model-corrected (stalls 1–3 s around lap marks, positions snapped, constant −1.1 m offset, so lane
   changes can't be seen afterwards).
 - HR lags by physiology (tens of seconds). Use it for load and recovery, not timing.
+
+Ski sessions use a separate detector (`scripts/ski_intervals.py`: programmed lap workouts, or hard
+efforts from a work-rate + HR model), because speed thresholds don't work on varying terrain; see
+[session-groups.md](session-groups.md#ski-intervals-scriptsski_intervalspy-detector-ski-10).

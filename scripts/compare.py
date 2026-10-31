@@ -12,8 +12,8 @@
 Modes: elapsed | moving | distance (= route_position) | intervals | breaks. The first id is the
 reference session; reference="median" uses a virtual median-of-the-group session instead.
 Builds on data/<p>/groups.json (session_groups.py: routes, reference polylines, waypoints, signatures)
-and re-reads FIT files with the fast reader. Rep boundaries (run_analysis.analyse, ~0.6 s per file)
-and route projections are cached in data/<p>/cache/compare.pkl (keyed by FIT mtime+size).
+and re-reads FIT files with the fast reader. Rep boundaries (run_analysis.analyse, ~0.6 s per file; ski:
+ski_intervals.analyse) and route projections are cached in data/<p>/cache/compare.pkl (keyed by FIT mtime+size).
 Docs: docs/compare.md.
 """
 
@@ -33,10 +33,12 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import session_groups as sg  # noqa: E402  (read-only: FIT reader, 1 Hz grid, pauses, route projection)
+import ski_intervals as si  # noqa: E402  (ski rep detector)
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE_VERSION = 1
 MODES = ("elapsed", "moving", "distance", "route_position", "intervals", "breaks")
+NO_DIST_MODES = ("elapsed", "intervals", "breaks")   # sessions without distance (no-GPS lap workouts): HR only
 
 # ---- parameters
 MAX_POINTS = 1500          # series points per session
@@ -46,6 +48,7 @@ PRE_S = 60                 # intervals view: seconds shown before the first rep
 MATCH_TOL = 0.2            # rep matching: max |log ratio| of distance or time (about +-22 %)
 MATCH_GAP = 0.25           # rep matching: cost of leaving a rep unmatched
 MATCH_SAME = 0.05          # rep matching: distance or time within 5 % = the same prescribed rep
+SKI_MATCH = (0.45, 0.10)   # ski reps (terrain-defined, durations vary): closer of distance / time, tol and free band
 STRIDE_S = 35              # reps < 35 s in groups of <= 2 are strides (left out, as in the signature)
 HR_AT = (30, 60, 90)       # breaks: HR read at these seconds after the break start
 LEG_TOL_M = 100.0          # distance legs: a session joining / stopping this close to a leg end covers it
@@ -185,30 +188,36 @@ class _Store:
             raise KeyError(f"no FIT file for {i}")
         s = sg.read_series(f)
         G = sg.to_grid(s)
-        if G["d"][-1] < 100:
+        no_dist = bool(G["d"][-1] < 100)
+        if no_dist and ("hr" not in G or not np.isfinite(G["hr"]).any()):
             raise ValueError(f"{i}: no distance")
-        P = sg.find_pauses(G)
+        # without distance (indoor / no-GPS lap workouts) only timer stops are pauses; HR-only comparisons
+        P = [(a, b) for a, b in sg.runs_of(G["timer"])] if no_dist else sg.find_pauses(G)
         T = G["T"]
         paused = np.zeros(T + 1, bool)
         for a, b in P:
             paused[a:b] = True
         a = self.act(i) or {}
         S = {"id": i, "G": G, "P": P, "paused": paused, "mt": np.concatenate([[0], np.cumsum(~paused[:-1])]).astype(float),
-             "sport": a.get("sport") or ("ski" if s["sport"] == 12 else "run"), "meta": a, "fit": f}
+             "sport": a.get("sport") or ("ski" if s["sport"] == 12 else "run"), "meta": a, "fit": f, "no_dist": no_dist}
         if len(self._sess) > 64:
             self._sess.clear()
         self._sess[i] = S
         return S
 
-    # reps (run_analysis v2, cached on disk)
+    # reps (run_analysis v2 for runs, ski_intervals for ski; cached on disk)
     def reps(self, ids, workers=8):
         c = self.cache()
-        todo = []
+        todo, keys = [], {}
         for i in ids:
             f = self.fit(i)
+            if f is None:
+                continue
+            ski = (self.act(i) or {}).get("sport") == "ski"
+            keys[str(f)] = (*self.fkey(f), si.VERSION) if ski else self.fkey(f)
             e = c.get(("reps", int(i)))
-            if f is not None and (e is None or e["key"] != self.fkey(f)):
-                todo.append(str(f))
+            if e is None or e["key"] != keys[str(f)]:
+                todo.append((str(f), ski))
         if todo:
             if len(todo) > 2 and workers > 1:
                 with Pool(min(workers, len(todo))) as pool:
@@ -217,7 +226,7 @@ class _Store:
                 res = [_rep_job(f) for f in todo]
             for f, r in res:
                 p = Path(f)
-                c[("reps", int(p.stem))] = {"key": self.fkey(p), "r": r}
+                c[("reps", int(p.stem))] = {"key": keys[f], "r": r}
             self._dirty = True
             self.save()
         return {int(i): (c.get(("reps", int(i))) or {}).get("r") for i in ids}
@@ -254,16 +263,17 @@ class _Store:
         return e["tp"].astype(float), e["on"], e["dir"]
 
 
-def _rep_job(fit):
-    """compact rep / break rows from run_analysis.analyse (subprocess-safe)"""
+def _rep_job(job):
+    """compact rep / break rows from run_analysis.analyse, or ski_intervals.analyse for ski (subprocess-safe)"""
+    fit, ski = job
     import run_analysis as ra
     try:
-        x = ra.analyse(Path(fit))
+        x = si.analyse(Path(fit)) if ski else ra.analyse(Path(fit))
     except Exception as e:
         return fit, {"err": repr(e)[:100]}
     keep = ("start", "end", "time", "dist", "speed", "hr", "maxhr", "hr_start", "hr_end", "dist_source")
     return fit, {"mode": x["mode"], "reps": [{k: r.get(k) for k in keep} for r in x["reps"]],
-                 "laps": [(l.get("intensity"), l.get("trigger")) for l in x["laps"]]}
+                 "laps": list(x["laps"]) if ski else [(l.get("intensity"), l.get("trigger")) for l in x["laps"]]}
 
 
 _STORES: dict = {}
@@ -299,7 +309,7 @@ def _summary(S):
     hr = G.get("hr")
     hrm = _nanmean(hr[mov]) if hr is not None else None
     hmax = float(np.nanmax(hr)) if hr is not None and np.isfinite(hr).any() else None
-    v = dist / mov_s if mov_s else None
+    v = dist / mov_s if mov_s and not S.get("no_dist") else None
     gap_v = None
     if S["sport"] == "run":
         g = _grade_per_s(G)
@@ -368,7 +378,10 @@ def compare(ids, mode="distance", *, person="adrian", reference="first", max_poi
     sess, skipped = [], []
     for i in ids:
         try:
-            sess.append(st.session(i))
+            S = st.session(i)
+            if S["no_dist"] and mode not in NO_DIST_MODES:
+                raise ValueError(f"{i}: no distance (only {', '.join(NO_DIST_MODES)} work without it)")
+            sess.append(S)
         except Exception as e:
             skipped.append({"id": i, "why": str(e)[:80]})
     if not sess:
@@ -407,12 +420,13 @@ def _time_mode(sess, mode, reference, max_points, smooth_s):
     for S in sess:
         G = S["G"]
         T = G["T"]
-        v = _speed(S, smooth_s)
+        v = _speed(S, smooth_s) if not S["no_dist"] else np.full(T + 1, np.nan)
         keep = np.ones(T + 1, bool) if mode == "elapsed" else ~S["paused"]
         x = np.arange(T + 1, dtype=float) if mode == "elapsed" else S["mt"]
         c = {"x": x[keep], "t": np.arange(T + 1, dtype=float)[keep], "speed_kmh": v[keep] * 3.6,
              "hr": G["hr"][keep] if "hr" in G else np.full(keep.sum(), np.nan),
-             "alt": G["alt"][keep] if "alt" in G else np.full(keep.sum(), np.nan), "dist_m": G["d"][keep]}
+             "alt": G["alt"][keep] if "alt" in G else np.full(keep.sum(), np.nan),
+             "dist_m": G["d"][keep] if not S["no_dist"] else np.full(keep.sum(), np.nan)}
         cols[S["id"]] = c
         pauses[S["id"]] = [{"x": _r(x[a], 0), "t": a, "dur_s": b - a} for a, b in S["P"]]
     # common 1 s grid for the gap (distance ahead) and the median reference
@@ -624,11 +638,12 @@ def _ref_climb(ctx, a, b):
 
 
 # ---------------------------------------------------------------- intervals / breaks
-def _main_reps(reps):
+def _main_reps(reps, ski=False):
     """drop strides like session_groups.signature: consecutive groups of similar reps (+-15 % time or
-    distance); groups of <= 2 reps all shorter than STRIDE_S go, unless nothing else is left"""
-    if not reps:
-        return []
+    distance); groups of <= 2 reps all shorter than STRIDE_S go, unless nothing else is left.
+    Ski reps (ski_intervals) are used as detected."""
+    if not reps or ski:
+        return list(reps or [])
     sim = lambda x, y: abs(math.log(max(x, 1) / max(y, 1))) < 0.15
     groups = []
     for r in reps:
@@ -641,11 +656,12 @@ def _main_reps(reps):
     return [r for g in (main or groups) for r in g]
 
 
-def _match(a, b):
+def _match(a, b, ski=False):
     """order-preserving alignment (DP) of rep lists a (anchor) and b by nearest distance / duration:
     c = min(|log dist ratio|, |log time ratio|) when that is <= MATCH_SAME (same prescribed rep), else the max
     of both; pairs with c > MATCH_TOL can't match; pair cost max(0, c - MATCH_SAME) (GPS noise is free),
     unmatched rep MATCH_GAP, tiny index-shift penalty so ties leave the trailing reps unmatched.
+    ski=True (terrain-defined ski reps): c = the closer of both, tol / free band SKI_MATCH.
     Returns {j_b: i_a}."""
     n, m = len(a), len(b)
     INF = 1e9
@@ -655,11 +671,13 @@ def _match(a, b):
     for i in range(1, n + 1):
         for j in range(1, m + 1):
             ra, rb = a[i - 1], b[j - 1]
-            cd = abs(math.log(max(ra["dist"], 1) / max(rb["dist"], 1)))
             ct = abs(math.log(max(ra["time"], 1) / max(rb["time"], 1)))
+            # no distance (indoor / no-GPS reps): duration only
+            cd = abs(math.log(max(ra["dist"], 1) / max(rb["dist"], 1))) if (ra["dist"] or 0) > 0 and (rb["dist"] or 0) > 0 else ct
             # same prescribed distance (or duration) if either is within MATCH_SAME; else both must be close
-            c = min(cd, ct) if min(cd, ct) <= MATCH_SAME else max(cd, ct)
-            dg = D[i - 1, j - 1] + (max(0.0, c - MATCH_SAME) + 1e-3 * abs(i - j) if c <= MATCH_TOL else INF)
+            tol, same = SKI_MATCH if ski else (MATCH_TOL, MATCH_SAME)
+            c = min(cd, ct) if (ski or min(cd, ct) <= same) else max(cd, ct)
+            dg = D[i - 1, j - 1] + (max(0.0, c - same) + 1e-3 * abs(i - j) if c <= tol else INF)
             up, lf = D[i - 1, j] + MATCH_GAP, D[i, j - 1] + MATCH_GAP
             k = int(np.argmin([dg, up, lf]))
             D[i, j] = (dg, up, lf)[k]; B[i, j] = k
@@ -675,7 +693,7 @@ def _match(a, b):
     return out
 
 
-def _slots(reps_by, match="auto"):
+def _slots(reps_by, match="auto", ski=False):
     """slot per (session, rep): anchor (first) session's reps are slots 0..n-1; unmatched reps of other sessions
     get extra slots right after the anchor slot they follow. Returns slot keys (sorted), {sid: [slot idx per rep]}"""
     ids = list(reps_by)
@@ -685,7 +703,7 @@ def _slots(reps_by, match="auto"):
     method = {ids[0]: "anchor"}
     for sid in ids[1:]:
         b = reps_by[sid]
-        mp, method[sid] = (_match(anchor, b), "distance") if match != "index" else ({}, "index")
+        mp, method[sid] = (_match(anchor, b, ski), "distance") if match != "index" else ({}, "index")
         if len(mp) < max(1, 0.5 * min(len(anchor), len(b))):   # different workouts: rep 1 vs rep 1, ...
             mp, method[sid] = {j: j for j in range(min(len(anchor), len(b)))}, "index"
         prev, k, lst = -1, 0, []
@@ -738,6 +756,8 @@ def _break_stats(S, a, b, nxt_start):
         peak = _r(np.nanmax(w), 0) if np.isfinite(w).any() else None
     row = {"start_s": _r(a, 1), "dur_s": _r(dur, 1), "dist_m": _r(dist, 0), "speed_kmh": _r(mean_v * 3.6, 2),
            "standing_s": stand, "kind": kind, "hr_peak": peak}
+    if S.get("no_dist"):
+        row.update(dist_m=None, speed_kmh=None, standing_s=None, kind=None)
     for s_ in HR_AT:
         h = _hr_at(G, a + s_) if a + s_ <= b else None
         row[f"hr_{s_}"] = h
@@ -753,7 +773,7 @@ def _interval_modes(st, sess, mode, reference, max_points, rep_axis, gap_s, rep_
     reps_by, info = {}, {}
     for S in sess:
         r = R.get(S["id"])
-        rr = _main_reps((r or {}).get("reps") or [])
+        rr = _main_reps((r or {}).get("reps") or [], str((r or {}).get("mode") or "").startswith("ski"))
         if len(rr) >= 1:
             reps_by[S["id"]] = rr
             info[S["id"]] = {"det_mode": r["mode"], "n_detected": len(r["reps"]), "n_used": len(rr)}
@@ -761,7 +781,8 @@ def _interval_modes(st, sess, mode, reference, max_points, rep_axis, gap_s, rep_
         raise ValueError("no reps found in any session")
     SS = {S["id"]: S for S in sess if S["id"] in reps_by}
     ids_ = list(reps_by)
-    labels, anchored, slot_of, method = _slots(reps_by, match)
+    ski = all(str(info[sid]["det_mode"]).startswith("ski") for sid in reps_by)
+    labels, anchored, slot_of, method = _slots(reps_by, match, ski)
     for sid in ids_:
         info[sid]["match"] = method[sid]
     ns = len(labels)
@@ -772,7 +793,7 @@ def _interval_modes(st, sess, mode, reference, max_points, rep_axis, gap_s, rep_
     for sid in ids:
         G = SS[sid]["G"]
         for j, (r, k) in enumerate(zip(reps_by[sid], slot_of[sid])):
-            v = r["dist"] / r["time"] if r["time"] else None
+            v = r["dist"] / r["time"] if r["time"] and r["dist"] else None
             rows[sid][k] = {"n": j + 1, "start_s": _r(r["start"], 1), "time_s": _r(r["time"], 1), "dist_m": _r(r["dist"], 0),
                             "speed_kmh": _r(v * 3.6 if v else None, 2), "pace_s_km": _r(_pace(v), 1),
                             "hr": r["hr"], "hr_max": r["maxhr"], "hr_start": r["hr_start"], "hr_end": _hr_at(G, r["end"])}
@@ -904,7 +925,7 @@ def _rep_timeline(SS, reps_by, slot_of, rows, ns, max_points, rep_axis, gap_s):
                 g0, g1 = X0[k] + W[k], X0[sl[j + 1]]
                 add(t, g0 + (g1 - g0) * (t - b0) / max(b1 - b0, 1e-6), 2, -1)
         t = np.concatenate(ts)
-        sp = _rep_speed(G, t) * 3.6
+        sp = _rep_speed(G, t) * 3.6 if not S["no_dist"] else np.full(len(t), np.nan)
         hr = np.interp(t, np.arange(G["T"] + 1), G["hr"]) if "hr" in G else np.full(len(t), np.nan)
         series[str(sid)] = _pack({"x": np.concatenate(xs), "t": t, "speed_kmh": sp, "hr": hr,
                                   "phase": np.concatenate(ph), "slot": np.concatenate(sl_)}, max_points)
@@ -946,7 +967,8 @@ def _break_timeline(SS, reps_by, slot_of, brows, ns, max_points, rep_gap_s, post
             t = np.arange(math.floor(b0) + 1, b1, 1.0)
             add(t, XB0[k] + (t - b0), p, k)
         t = np.concatenate(ts)
-        sp = _smooth(G["v"], 3)[np.clip(np.round(t).astype(int), 0, G["T"])] * 3.6
+        sp = (_smooth(G["v"], 3)[np.clip(np.round(t).astype(int), 0, G["T"])] * 3.6 if not S["no_dist"]
+              else np.full(len(t), np.nan))
         hr = np.interp(t, np.arange(G["T"] + 1), G["hr"]) if "hr" in G else np.full(len(t), np.nan)
         series[str(sid)] = _pack({"x": np.concatenate(xs), "t": t, "speed_kmh": sp, "hr": hr,
                                   "phase": np.concatenate(ph), "slot": np.concatenate(sl_)}, max_points)
@@ -1112,6 +1134,42 @@ def validate(person="adrian"):
         print(f"\n[mixed] {' vs '.join(A[str(i)].get('sig') or '?' for i in pair)}: slots {labs}")
         for i in r["ids"]:
             print(f"   {i} rep# {m[str(i)]} dist {dd[str(i)]}  Δpace matched {r['rep_summary'][str(i)].get('d_rep_pace_matched_s_km')}")
+
+    # 4. ski intervals (ski_intervals.py): same reps as groups.json, none in non-interval ski sessions
+    ski = [int(k) for k, a in A.items() if a.get("sport") == "ski" and k.isdigit() and store(person).fit(k) is not None]
+    R = store(person).reps(ski)
+    mism, extra, n_iv = 0, [], 0
+    for i in ski:
+        a = A[str(i)]; rr = (R.get(i) or {}).get("reps") or []
+        gr = a.get("reps") or []
+        if a.get("type") == "ski_intervals":
+            n_iv += 1
+            mism += int(len(rr) != len(gr) or any(abs(x["time"] - y[0]) > 0.2 for x, y in zip(rr, gr)))
+        elif rr:
+            extra.append(i)
+    r3 = g["routes"]["R3"]["members"]
+    r3iv = [i for i in r3 if A[str(i)].get("type") == "ski_intervals"]
+    print(f"\n[ski] {len(ski)} ski sessions, {n_iv} ski_intervals ({len(r3iv)} on R3)")
+    print(f"  {ok(mism == 0)} ski rep times = groups.json reps ({mism} sessions differ)")
+    print(f"  {ok(not extra)} no reps in non-interval ski sessions ({len(extra)}: {extra[:5]})")
+    easy = [i for i in r3 if A[str(i)].get("type") == "ski_easy"]
+    try:
+        compare(easy[:3], "intervals")
+        print("  BAD easy R3 climbs got reps")
+    except ValueError as e:
+        print(f"  OK  easy R3 climbs ({len(easy)}) have no reps: intervals mode raises '{e}'")
+    if len(r3iv) >= 2:
+        r = compare(r3iv, "intervals")
+        b = compare(r3iv, "breaks")
+        print(f"  R3 interval climbs: slots {[s['label'] for s in r['slots']]}; " + "; ".join(
+            f"{A[str(i)]['date']} {A[str(i)]['sig']} rest {r['rep_summary'][str(i)]['break_median_s']} s "
+            f"drop60 {r['rep_summary'][str(i)]['drop_60_median']}" for i in r["ids"]))
+        print(f"  breaks view: {len(b['axis']['break_x0'])} break slots")
+    lw = [i for i in ski if A[str(i)].get("type") == "ski_intervals" and "lap workout" in (A[str(i)].get("type_detail") or "")]
+    if len(lw) >= 2:
+        r = compare(lw[:4], "intervals")
+        print(f"  lap workouts (no GPS, HR only): {[A[str(i)]['sig'] for i in r['ids']]} slots {len(r['slots'])}, "
+              f"matched {[r['rep_summary'][str(i)]['match'] for i in r['ids']]}")
 
 
 def main():

@@ -27,9 +27,14 @@ cmp.validate(person)                                                          # 
 - `groups.json` (session_groups.py) supplies the session meta, routes, waypoints and the medoid. FIT files
   are re-read with the fast reader on the 1 Hz grid (`session_groups.read_series/to_grid`, ~10 ms each).
   Pauses use `session_groups.find_pauses` (speed < 0.5 m/s for ≥ 15 s, or timer stopped).
-- Reps come from `run_analysis.analyse` (detector v2, sub-second boundaries, ~0.6 s per file, in a process
-  pool). Route projections come from `session_groups.project` onto the medoid's 20 m reference. Both are cached in
-  `data/<p>/cache/compare.pkl`, keyed by FIT mtime+size. With a warm cache a call takes 0.01–0.1 s
+- Reps come from `run_analysis.analyse` for runs (detector v2, sub-second boundaries, ~0.6 s per file, in a
+  process pool) and from `ski_intervals.analyse` for ski sessions (lap workouts / hard efforts, 1 s boundaries,
+  ~10 ms per file; the same detector session_groups uses, so ski reps equal groups.json reps). Route projections
+  come from `session_groups.project` onto the medoid's 20 m reference. All are cached in
+  `data/<p>/cache/compare.pkl`, keyed by FIT mtime+size (+ detector version for ski).
+- Sessions **without distance** (no-GPS lap workouts, HR only) work in `elapsed`, `intervals` and `breaks`
+  (speed / distance / pace fields are null, pauses = timer stops only, reps are matched by duration). In
+  `distance` and `moving` they are skipped with `why: "no distance ..."`. With a warm cache a call takes 0.01–0.1 s
   (all 19 R3 sessions: 0.1 s). Cold: about 0.5 s plus the rep detector.
 - An in-process `_Store` per person caches the grids of up to 64 sessions. It isn't thread-safe.
 
@@ -85,7 +90,7 @@ per-second median over the sessions present (needs at least half of them).
 
 ### `intervals` (rep-aligned, breaks collapsed)
 - **Reps**: detector v2 reps, with strides left out (groups of ≤ 2 consecutive reps < 35 s, the
-  same rule as the signature).
+  same rule as the signature). Ski: the ski_intervals reps as detected (only ski_intervals sessions have any).
 - **Matching** against the anchor session (the first id, also with the median reference). It's an
   order-preserving DP. Rep cost c = min(|log distance ratio|, |log time ratio|) when that's ≤ 5 % (same
   prescribed rep, e.g. 1000 m at different speeds or 4:00 at different distances). Otherwise c = the
@@ -93,7 +98,8 @@ per-second median over the sessions present (needs at least half of them).
   rep costs 0.25, plus a tiny index-shift penalty so ties leave the *trailing* reps unmatched. If fewer
   than half the reps match (different workouts, e.g. 6×1000 vs 8×800), it falls back to index pairing
   (rep 1 vs rep 1). `rep_summary[id].match` = anchor / distance / index. `match="index"` forces index
-  pairing.
+  pairing. When every session is a ski session (`det_mode` ski_*), c = the closer of distance / time,
+  free within 10 %, matchable up to 0.45 (terrain-defined reps vary more).
 - **Slots**: the anchor's reps are slots `1..n`. Unmatched reps of other sessions get extra slots right after
   the anchor rep they follow (`"0+1"` = before anchor rep 1, `"6+2"` = 2nd extra after rep 6).
   `slots [{slot, label, anchor, n_sessions}]`.
@@ -109,8 +115,8 @@ per-second median over the sessions present (needs at least half of them).
 - **`rep_summary["<id>"]`**: `n_reps, rep_time_s, rep_dist_m, rep_pace_s_km, rep_hr, rep_hr_max,
   break_total_s, break_median_s, drop_60_median, matched_slots, d_rep_pace_matched_s_km,
   d_rep_hr_matched` (over the slots both have, so 5×1000 vs 6×1000 compares like with like),
-  `det_mode, n_detected, n_used, match`. `no_reps` lists sessions without reps. A ski or easy session alone
-  raises `ValueError`.
+  `det_mode` (gps / track / ski_effort / ski_laps), `n_detected, n_used, match`. `no_reps` lists sessions without
+  reps. An easy session alone (run or ski) raises `ValueError("no reps found in any session")`.
 
 ### `breaks` (break-aligned)
 Same matching and slots. Break k = from the end of the rep in slot k to the session's next rep.
@@ -135,6 +141,11 @@ is included too.
   is > 3 km/h above speed 3–12 s before it (0 misses). Rep times equal groups.json reps (0.00 s). In
   the breaks view every break starts at its common x (0 misses). Breaks are 143–175 s, mostly stand+walk,
   HR drop at 60 s 26–69 bpm.
+- **Ski (135 sessions):** 18 ski_intervals; compare's ski reps equal groups.json reps in all 18 (0 differ), no
+  other ski session has reps (before: the run detector gave 13–16 random "reps" to 3 R3 climbs). The 11 easy R3
+  climbs raise "no reps found". The 7 R3 interval climbs align into slots `1, 1+1, 2, 3, 4` (rest medians 66–225 s,
+  HR drop at 60 s 25–36 bpm per session); breaks view 5 break slots. Four no-GPS lap workouts (`7×4:00`,
+  `8×4:00`, `4×4:00` ×2) align into 8 slots by duration.
 - **Different rep counts:**
   - 6×1000 vs 5×1000 (2022, R55): reps 1–5 matched, slot 6 empty for the 5-rep session. Matched pace
     −6.1 s/km.
@@ -146,8 +157,10 @@ is included too.
 ## Limitations
 - Which rep was skipped in an N vs N+1 session isn't knowable. Ties leave the trailing reps unmatched, so a
   fast last rep of a 5×1000 is compared with rep 5 of the 6×1000, not with its last rep.
-- Ski sessions don't get reps: the run detector needs ≥ 2.5 m/s steps. GAP is only computed for runs.
-  Classic and skate are indistinguishable.
+- Ski reps exist only for ski_intervals sessions (programmed lap workouts, or hard efforts with clear HR
+  recovery; see [session-groups.md](session-groups.md)). Their boundaries are 1 s grid points from the effort
+  blocks (no sub-second refinement or lag compensation), and for climbs they follow the route's stops. GAP is
+  only computed for runs. Classic and skate are indistinguishable.
 - Route axis only works when *all* sessions are in the same compared route (≥ 3 sessions, not laps).
   Otherwise it uses its own distance, and GPS distance error (±1–2 %) then shifts the ghost gap a little.
   Reversed sessions on a route keep their own travel direction (`dir: "rev"`), so their x isn't the same

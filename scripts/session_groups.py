@@ -3,8 +3,10 @@ legs and pauses, and compare the sessions of each recurring route leg by leg.
 
 Usage: uv run scripts/session_groups.py adrian
 Writes data/<person>/groups.json (see docs/session-groups.md). Caches the (slow, fitparse-based)
-rep detector output per FIT file in data/<person>/cache/session_groups.pkl, keyed by mtime+size.
-Place name overrides: data/<person>/places.json {"<place id>" or "lat,lon": "name"}.
+rep detector output per FIT file in data/<person>/cache/session_groups.pkl, keyed by mtime+size; ski
+sessions get reps from ski_intervals.py (cheap, recomputed every run, stored in the same cache).
+Start clusters are named by KNOWN spots, then curated LANDMARKS, else "<loc>-<rank>".
+Place name overrides: data/<person>/places.json {"<place id>" / "<generic id>" or "lat,lon": "name"}.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ CACHE_VERSION = 1
 gq._WANT[20].update({2: "altitude", 3: "heart_rate", 78: "enhanced_altitude"})
 gq._WANT[21] = {0: "event", 1: "event_type"}
 gq._NAMES[21] = "event"
+gq._WANT[19][23] = "intensity"   # lap intensity (active / rest / ...), for the ski lap-workout detector
 
 # ---- parameters ----
 PLACE_R, AREA_R = 400, 2000          # m: place = greedy density cluster of first fix; area = single link
@@ -52,6 +55,23 @@ FAM = {"running": "run", "track_running": "run", "treadmill_running": "run", "in
 KNOWN = {"Bislet": (59.9253, 10.7331), "Sognsvann": (59.9690, 10.7310), "Frognerseteren": (59.9785, 10.6800),
          "Holmenkollen": (59.9620, 10.6600), "Granåsen": (63.3800, 10.3130), "NTNU Gløshaugen": (63.4190, 10.4040)}
 BISLET = KNOWN["Bislet"]
+# Curated landmarks (approximate centres, offline) for naming start clusters that no KNOWN spot claims:
+# the nearest cluster within LANDMARK_R gets the name, otherwise it stays "<Garmin location>-<rank>".
+# Only spots whose position is known to well within the radius. User names go in data/<p>/places.json.
+LANDMARK_R = 400
+LANDMARKS = {
+    # Oslo
+    "Marienlyst": (59.9325, 10.7196), "Majorstuen": (59.9297, 10.7155), "Frogner stadion": (59.9285, 10.7090),
+    "Frognerparken": (59.9270, 10.7005), "Blindern": (59.9400, 10.7220), "Ullevål stadion": (59.9489, 10.7343),
+    "St. Hanshaugen": (59.9268, 10.7406), "Nationaltheatret": (59.9147, 10.7340), "Aker Brygge": (59.9105, 10.7270),
+    "Rådhusplassen": (59.9115, 10.7340), "Tryvann": (59.9860, 10.6660),
+    # Trondheim
+    "Lerkendal": (63.4125, 10.4045), "Øya": (63.4265, 10.3800), "Nidarosdomen": (63.4269, 10.3969),
+    "Torvet": (63.4305, 10.3951), "Moholt": (63.4115, 10.4330), "Dragvoll": (63.4080, 10.4710),
+    "Tyholt": (63.4223, 10.4317),
+    # Fauske
+    "Fauske sentrum": (67.2589, 15.3939),
+}
 SIM_W = {  # similarity presets; components missing for a pair score 0.4
     "route": {"route": 0.45, "type": 0.15, "dist": 0.12, "dur": 0.05, "pace": 0.04, "intensity": 0.07,
               "structure": 0.03, "elev": 0.03, "season": 0.03, "recency": 0.03},
@@ -61,7 +81,7 @@ SIM_W = {  # similarity presets; components missing for a pair score 0.4
 RELATED = {frozenset(p) for p in [("intervals_track", "intervals_road"), ("intervals_road", "tempo"), ("tempo", "race?"),
                                   ("easy", "long"), ("ski_easy", "ski_long"), ("ski_hard", "ski_long_race?"),
                                   ("ski_long", "ski_long_race?"), ("intervals_track", "intervals_treadmill"),
-                                  ("intervals_road", "intervals_treadmill")]}
+                                  ("intervals_road", "intervals_treadmill"), ("ski_intervals", "ski_hard")]}
 STD = [(5, "5k"), (10, "10k"), (21.0975, "half"), (42.195, "marathon")]
 FIELDS = {
     "legs": ["t", "dur_s", "dist_m", "kmh", "hr", "hr_max", "climb_m", "desc_m", "grade_pct"],
@@ -214,6 +234,9 @@ def read_series(fit: Path) -> dict:
             cur = None
     s["timer_stops"] = stops
     s["sport"] = (raw["session"][0].get("sport") if raw["session"] else None)
+    s["laps"] = sorted(({"t": l["start_time"] - t0, "dur": (l.get("total_elapsed_time") or 0) / 1000,
+                         "dist": (l.get("total_distance") or 0) / 100, "trigger": l.get("lap_trigger"),
+                         "intensity": l.get("intensity")} for l in raw["lap"] if "start_time" in l), key=lambda l: l["t"])
     return s
 
 
@@ -335,7 +358,7 @@ def ana_compact(fit):
 
 
 def worker(job):
-    fit, typ, need_ana = job
+    fit, typ, need_ana, hr_hard = job
     fit = Path(fit)
     out = {"id": int(fit.stem)}
     try:
@@ -360,6 +383,12 @@ def worker(job):
     if G["d"][-1] >= 200:
         out["legs"], out["pauses"], out["summ"], _ = legs_and_pauses(G)
     out["elapsed"] = G["T"]
+    if FAM.get(typ) == "ski":   # ski interval detector (ski_intervals.py, ~10 ms on the grid)
+        import ski_intervals as si
+        try:
+            out["ski_ana"] = si.compact(si.analyse(fit, hr_hard, G=G, s=s))
+        except Exception as e:
+            out["ana_err"] = repr(e)[:100]
     if need_ana:
         try:
             out["ana"] = ana_compact(fit)
@@ -376,8 +405,8 @@ def ana_job(fit):
 
 
 # ---------------------------------------------------------------- session features / types
-def zones_floor():
-    z = json.loads((ROOT / "data/adrian/profile/heart_rate_zones.json").read_text())
+def zones_floor(person="adrian"):
+    z = json.loads((ROOT / "data" / person / "profile" / "heart_rate_zones.json").read_text())
     z = [x for x in z if x.get("sport") in ("DEFAULT", None)][0] if isinstance(z, list) else z
     return [z[f"zone{i}Floor"] for i in range(1, 6)]
 
@@ -398,7 +427,12 @@ def features(a, ZF):
             z[sum(hv >= fl for fl in ZF)] += sec
         r["zones"] = [v / tot for v in z]
     ana = f.get("ana")
-    if ana:
+    if ana and a["fam"] == "ski":
+        rt = ana["rep_times"]
+        r.update(n_reps=len(rt), rep_time=sum(rt), rep_med_s=float(np.median(rt)) if rt else 0, mode=ana["mode"],
+                 rep_grade=(float(np.sum(ana.get("rep_climbs") or [0]) / max(1.0, sum(d or 0 for d in ana["rep_dists"])))
+                            if ana.get("rep_climbs") else None))
+    elif ana:
         sp = [v for v in ana["rep_speeds"] if v]
         rt, br = ana["rep_times"], ana["breaks"]
         r.update(n_reps=len(rt), rep_time=sum(rt), rep_med_s=float(np.median(rt)) if rt else 0,
@@ -412,13 +446,43 @@ def features(a, ZF):
     return r
 
 
+def other_tags(a):
+    """type_detail tags for hikes and other sports (the type stays the sport / activity type)"""
+    F, x = a["F"], a["x"]
+    tags = []
+    el = x.get("elapsedDuration") or x.get("duration") or 0
+    if not a["gps"]:
+        tags.append("no GPS")
+    if el > 86400:
+        tags.append("over 24 h (multi-day or timer left running)")
+    if a["fam"] == "hike" and F["dist_ok"]:
+        v = F["speed"] or 0
+        if F["elev_per_km"] >= 60:
+            tags.append("steep")
+        elif F["elev_per_km"] >= 25:
+            tags.append("hilly")
+        if F["dist_km"] >= 20 or el >= 5 * 3600:
+            tags.append("long")
+        if v >= 7.5 / 3.6 and F["moving_s"] >= 1800:
+            tags.append("fast: part by vehicle / bike?")
+    return tags
+
+
 def classify(a, ZF, easy_ref):
     F = a["F"]
     if a["fam"] == "ski":
         z = F["zones"]; mov = F["moving_s"] / 60; hard = (z[4] + z[5]) if z else None
+        surface = "roller?" if a["date"][5:7] in ("05", "06", "07", "08", "09", "10") else "snow"
+        if F.get("n_reps", 0) >= 3:   # ski_intervals.py found a rep series (lap workout or hard climbs / efforts)
+            if F["mode"] == "ski_laps":
+                det = "lap workout"
+            else:
+                det = "uphill reps" if (F.get("rep_grade") or 0) >= 0.03 else "reps"
+            L = F["rep_med_s"]; length = "short" if L < 100 else ("medium" if L < 300 else "long")
+            return "ski_intervals", " ".join([f"{length} reps", det] + ([] if F["dist_ok"] else ["no GPS"])), \
+                (surface if F["dist_ok"] else None)
         if not F["dist_ok"]:
             return ("ski_hard" if (F["avg_hr"] or 0) >= ZF[3] else "ski_easy"), "no GPS", None
-        surface = "roller?" if a["date"][5:7] in ("05", "06", "07", "08", "09", "10") else "snow"
         if mov >= 150 or F["dist_km"] >= 35:
             t = "ski_long" + ("_race?" if hard is not None and hard > 0.4 else "")
         elif (hard is not None and hard >= 0.25) or (hard is None and (F["avg_hr"] or 0) >= ZF[3]):
@@ -427,7 +491,7 @@ def classify(a, ZF, easy_ref):
             t = "ski_easy"
         return t, "", surface
     if a["fam"] != "run":
-        return a["fam"] if a["fam"] != "other" else a["type"], "", None
+        return (a["fam"] if a["fam"] != "other" else a["type"]), " ".join(other_tags(a)), None
     if F["dist_km"] < 1.5 or not F["speed"] or F["speed"] < 1.8:
         return "run_other", "walk/short/paused", None
     if not F["dist_ok"]:
@@ -457,33 +521,68 @@ def classify(a, ZF, easy_ref):
     return "easy", " ".join(tags), None
 
 
+def is_iv(stype):
+    """interval session types: intervals_track / _road / _treadmill and ski_intervals"""
+    return bool(stype) and (stype.startswith("intervals") or stype == "ski_intervals")
+
+
 def mmss(s):
     s = int(round(s)); return f"{s // 60}:{s % 60:02d}"
 
 
+REP_TOL, SKI_REP_TOL, SKI_ONE_GROUP = 0.15, 0.3, 0.35
+
+
+def rep_groups(times, dists, ski=False):
+    """index groups of consecutive similar reps. Runs: same time or distance (+-15 % of the group median);
+    stray short reps (< 35 s, groups of <= 2: strides) are left out. Ski (terrain-defined reps, time only):
+    one group if every rep is within +-35 % of the median, else consecutive groups at +-30 %."""
+    n = len(times)
+    if not n:
+        return []
+    if ski:
+        med = float(np.median(times))
+        if all(abs(math.log(max(t, 1) / max(med, 1))) <= SKI_ONE_GROUP for t in times):
+            return [list(range(n))]
+    tol = SKI_REP_TOL if ski else REP_TOL
+    sim = lambda x, y: abs(math.log(max(x, 1) / max(y, 1))) < tol
+    groups = []
+    for i in range(n):
+        g = groups[-1] if groups else None
+        if g and (sim(times[i], np.median([times[j] for j in g]))
+                  or (not ski and sim(dists[i], np.median([dists[j] for j in g])))):
+            g.append(i)
+        else:
+            groups.append([i])
+    main = [g for g in groups if not (len(g) <= 2 and max(times[j] for j in g) < 35)]
+    return main or groups
+
+
+def ski_dur_label(t):
+    """ski rep duration label: 15 s steps below 2:00, 30 s below 10:00, then whole minutes"""
+    step = 15 if t < 120 else 30 if t < 600 else 60
+    return mmss(max(step, round(t / step) * step))
+
+
 def signature(ana):
     """'6×1000', '5×3:00', '3×1800 + 2×900': consecutive reps grouped by similar time or distance (±15 %);
-    stray short reps (< 35 s, groups of <= 2: strides) are left out"""
-    reps = list(zip(ana["rep_times"], ana["rep_dists"]))
-    if not reps:
+    stray short reps (< 35 s, groups of <= 2: strides) are left out. Ski reps (mode ski_*) are labelled by
+    duration only ('4×4:00', '4×5:00'), see rep_groups"""
+    times, dists = ana["rep_times"], ana["rep_dists"]
+    if not times:
         return None
-    sim = lambda x, y: abs(math.log(max(x, 1) / max(y, 1))) < 0.15
-    groups = []
-    for t_, d_ in reps:
-        g = groups[-1] if groups else None
-        if g and (sim(t_, np.median([x[0] for x in g])) or sim(d_, np.median([x[1] for x in g]))):
-            g.append((t_, d_))
-        else:
-            groups.append([(t_, d_)])
-    main = [g for g in groups if not (len(g) <= 2 and max(x[0] for x in g) < 35)]
-    groups = main or groups
+    ski = str(ana.get("mode") or "").startswith("ski")
+    groups = rep_groups(times, dists, ski)
     if len(groups) > 3:
         n = sum(map(len, groups))
-        tt = [x[0] for g in groups for x in g]
+        tt = [times[j] for g in groups for j in g]
         return f"{n} reps (mixed {mmss(min(tt))}–{mmss(max(tt))})"
     parts = []
     for g in groups:
-        ds = [x[1] for x in g]; d_ = float(np.median(ds)); t_ = float(np.median([x[0] for x in g]))
+        ds = [dists[j] for j in g]; d_ = float(np.median(ds)); t_ = float(np.median([times[j] for j in g]))
+        if ski:
+            parts.append(f"{len(g)}×{ski_dur_label(t_)}")
+            continue
         r100 = round(d_ / 100) * 100
         steady = max(ds) - min(ds) <= 0.06 * d_
         if r100 >= 100 and steady and (ana["mode"] == "track" or abs(d_ - r100) <= 0.04 * d_):
@@ -743,7 +842,7 @@ def main():
     args = ap.parse_args()
     T0 = time.time()
     D = ROOT / "data" / args.person
-    ZF = zones_floor()
+    ZF = zones_floor(args.person)
     idx = json.loads((D / "activities_index.json").read_text())
     fits = {int(p.stem): p for p in (D / "activities").glob("*/*.fit")}
 
@@ -761,15 +860,23 @@ def main():
             cache[fp] = {"key": key(Path(fp)), "ana": ana}
         if todo:
             cfile.write_bytes(pickle.dumps(cache))
-        res = pool.map(worker, [(str(p), types.get(i), False) for i, p in fits.items()], chunksize=8)
+        res = pool.map(worker, [(str(p), types.get(i), False, ZF[3]) for i, p in fits.items()], chunksize=8)
     feats = {}
+    ski_new = 0
     for r in res:
         if "err" in r:
             continue
+        if "ski_ana" in r:   # ski reps go into the same cache (read by similarity.py), keyed by FIT + detector version
+            p = fits[r["id"]]
+            k = (*key(p), r["ski_ana"]["version"])
+            if cache.get(str(p), {}).get("key") != k or cache[str(p)].get("ana") != r["ski_ana"]:
+                cache[str(p)] = {"key": k, "ana": r["ski_ana"]}; ski_new += 1
         c = cache.get(str(fits[r["id"]]), {}).get("ana")
         if c and "err" not in c:
             r["ana"] = c
         feats[r["id"]] = r
+    if ski_new:
+        cfile.write_bytes(pickle.dumps(cache))
     print(f"read {len(feats)} FIT files ({len(todo)} rep analyses refreshed) {time.time() - T0:.1f}s")
 
     acts = []
@@ -809,16 +916,26 @@ def main():
         d, l = min((hav(c, q), l) for l, c in cens.items())
         if d < 600:
             known_of[l] = kn
+    # curated landmarks name the nearest still unnamed cluster within LANDMARK_R
+    land_of = {}
+    for kn, q in LANDMARKS.items():
+        free = [(hav(c, q), l) for l, c in cens.items() if l not in known_of]
+        if free:
+            d, l = min(free)
+            if d < LANDMARK_R and (l not in land_of or d < land_of[l][1]):
+                land_of[l] = (kn, d)
     for l, m in sorted(groups.items(), key=lambda kv: -len(kv[1])):
         cen = cens[l]
         nm = known_of.get(l)
-        if not nm:
+        gen = None
+        if not nm:   # generic id "<loc>-<rank>" (rank counted over all unnamed-by-KNOWN clusters, so it stays stable)
             loc = collections.Counter(a["loc"] for a in m if a["loc"]).most_common(1)
             loc = loc[0][0] if loc else "?"
-            rank[loc] += 1; nm = f"{loc}-{rank[loc]}"
+            rank[loc] += 1; gen = f"{loc}-{rank[loc]}"
+            nm = land_of[l][0] if l in land_of else gen
         pid = nm
         for k, v in over.items():
-            if k == pid:
+            if k == pid or (gen and k == gen):
                 nm = v
             elif "," in k:
                 try:
@@ -828,7 +945,9 @@ def main():
                 except ValueError:
                     pass
         places[pid] = {"name": nm, "lat": round(cen[0], 5), "lon": round(cen[1], 5), "n": len(m),
-                       "types": dict(collections.Counter(a["type"] for a in m).most_common())}
+                       "types": dict(collections.Counter(a["type"] for a in m).most_common()),
+                       "src": "known" if l in known_of else ("landmark" if l in land_of else "generic"),
+                       **({"generic_id": gen} if gen and gen != pid else {})}
         for a in m:
             a["place"] = pid
     areas = {}
@@ -920,7 +1039,7 @@ def main():
     for a in acts:
         a["stype"], a["detail"], a["surface"] = classify(a, ZF, easy_ref)
         ana = (a["f"] or {}).get("ana")
-        a["sig"] = signature(ana) if ana and a["stype"].startswith("intervals") else None
+        a["sig"] = signature(ana) if ana and is_iv(a["stype"]) else None
 
     # ---- similarity
     def comps(q, c):
@@ -943,7 +1062,7 @@ def main():
             s["pace"] = math.exp(-abs(math.log(qF["speed"] / cF["speed"])) / 0.1)
         if qF["zones"] and cF["zones"]:
             s["intensity"] = 1 - 0.5 * sum(abs(u - v) for u, v in zip(qF["zones"], cF["zones"]))
-        if q["stype"].startswith("intervals") and c["stype"].startswith("intervals") and qF.get("rep_med_s") and cF.get("rep_med_s"):
+        if is_iv(q["stype"]) and is_iv(c["stype"]) and qF.get("rep_med_s") and cF.get("rep_med_s"):
             s["structure"] = math.exp(-abs(math.log(qF["rep_med_s"] / max(cF["rep_med_s"], 1))) / 0.4) * \
                 math.exp(-abs(math.log(qF["rep_time"] / max(cF["rep_time"], 1))) / 0.5)
         doy = abs(q["doy"] - c["doy"]); doy = min(doy, 365 - doy)

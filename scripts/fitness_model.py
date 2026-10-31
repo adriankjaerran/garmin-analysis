@@ -514,7 +514,7 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
     elif sport == "ski":
         e = f.get("ski")
         if e and act.get("dist_trusted", True):
-            kind = "hard" if t in ("ski_hard", "ski_long_race?") else "bound"
+            kind = "hard" if t in ("ski_hard", "ski_long_race?", "ski_intervals") else "bound"   # ski_intervals: hard sessions with reps
             out.append(("ski", e["vdot"], kind, SIG["ski_hard" if kind == "hard" else "ski_bound"],
                         {"window_s": e["dur_s"], "climb_m": e["climb_m"], "speed": round(e["speed"], 2),
                          "demand": round(e["demand"], 1), "surface": act.get("surface"), "hrr": e.get("hrr")}))

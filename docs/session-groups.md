@@ -2,15 +2,27 @@
 
 `uv run scripts/session_groups.py adrian [--show [ROUTE_ID ...]]` → `data/adrian/groups.json`
 (~5 s; first run ~15 s while the rep detector of every run is cached in
-`data/adrian/cache/session_groups.pkl`, keyed by FIT mtime+size). `--show` prints the leg table of a
+`data/adrian/cache/session_groups.pkl`, keyed by FIT mtime+size; ski reps from `ski_intervals.py` go into
+the same cache, keyed by FIT mtime+size+detector version). `--show` prints the leg table of a
 route (default: the largest ski route, i.e. the Holmenkollen rollerski climb).
 
 ## Grouping
 - **Places**: first GPS fix of each session, greedy density clustering (densest point + everything
-  within 400 m, repeat). Name = known spot within 600 m (Bislet, Sognsvann, Frognerseteren,
+  within 400 m, repeat). Name = known spot within 600 m (`KNOWN`: Bislet, Sognsvann, Frognerseteren,
   Holmenkollen, Granåsen, NTNU Gløshaugen; only the cluster nearest to the spot gets the name),
-  else `<Garmin locationName>-<rank by size>`; the name is also the place id. Where an activity
-  mostly happens (named places / regions by time share) is in [similarity.md](similarity.md). Overrides: `data/adrian/places.json` `{"Oslo-1": "Majorstuen"}` or
+  else a curated landmark within 400 m (`LANDMARKS` in the code, offline approximate centres: Marienlyst,
+  Majorstuen, Frogner stadion, Frognerparken, Blindern, Ullevål stadion, St. Hanshaugen, Nationaltheatret,
+  Aker Brygge, Rådhusplassen, Tryvann; Lerkendal, Øya, Nidarosdomen, Torvet, Moholt, Dragvoll, Tyholt;
+  Fauske sentrum; again only the nearest cluster), else `<Garmin locationName>-<rank by size>`. The
+  name is also the place id. The rank counts every cluster without a KNOWN name, so generic ids stay
+  stable (`Oslo-3` stays `Oslo-3` although `Oslo-1/2/4/5` got landmark names); a landmark-named place keeps
+  its old id in `generic_id`, `src` = known / landmark / generic. Currently named by landmark: Marienlyst
+  (was Oslo-1, start of the Holmenkollen climbs, 95 m), Aker Brygge (Oslo-2, 295 m), Øya (Trondheim-2, 56 m),
+  Frogner stadion (Oslo-4), Nationaltheatret (Oslo-5), Fauske sentrum (Fauske-2), Frognerparken (Oslo-9),
+  Lerkendal (Trondheim-4), St. Hanshaugen (Oslo-16), Rådhusplassen (Oslo-19). Fauske-1, Trondheim-1 and
+  Oslo-3 have no landmark close enough and stay generic. Where an activity mostly happens (named
+  places / regions by time share) is in [similarity.md](similarity.md). User overrides:
+  `data/adrian/places.json` `{"Oslo-3": "Bogstad"}` (place id or old generic id) or
   `{"59.933,10.719": "name"}` (any place whose centre is within 400 m).
 - **Areas**: single-link chaining of start points at 2 km.
 - **Routes**: track on a 75 m grid; coverage(A|B) = share of A's cells within one cell of B's;
@@ -20,12 +32,52 @@ route (default: the largest ski route, i.e. the Holmenkollen rollerski climb).
   vs the reference (cw/ccw for loops).
 - **Session types** (rules): runs → intervals_track/road/treadmill (rep detector, manual laps),
   tempo, long, easy, race? (fast + standard distance), run_nogps, run_other; tags hilly/strides in
-  `type_detail`. Ski → ski_easy / ski_hard (≥ 25 % time in Z4–5) / ski_long (≥ 150 min or ≥ 35 km);
-  `surface` guess roller? (May–Oct) / snow — classic vs skate isn't in the files (all sport 12).
-  No-GPS distances are `dist_trusted: false`. Intervals get `sig` ("6×1000", "10×4:00",
-  "3×1800 + 2×900"), `reps` [time_s, dist_m, speed_ms, hr] and `breaks_s`.
+  `type_detail`. Ski → **ski_intervals** (≥ 3 reps from the ski detector below; detail
+  `lap workout` / `uphill reps` / `reps`, `short|medium|long reps`) / ski_easy / ski_hard (≥ 25 % time in
+  Z4–5) / ski_long (≥ 150 min or ≥ 35 km); `surface` guess roller? (May–Oct) / snow — classic vs skate
+  isn't in the files (all sport 12). Other sports keep their sport / activity type as type (hike,
+  cycling, lap_swimming, rowing_v2, …) with `type_detail` tags: `no GPS`, `over 24 h (multi-day or timer left running)`, and for hikes `hilly` (≥ 25 m/km) / `steep` (≥ 60 m/km), `long` (≥ 20 km or ≥ 5 h),
+  `fast: part by vehicle / bike?` (moving ≥ 7.5 km/h for ≥ 30 min: 5 hikes, e.g. a 112 km "hike").
+  No-GPS distances are `dist_trusted: false`. Intervals (runs and ski) get `sig` ("6×1000", "10×4:00",
+  "3×1800 + 2×900"; ski: durations only, "4×4:00"), `reps` [time_s, dist_m, speed_ms, hr] and `breaks_s`.
 - **Similar**: top 5 of the same sport family for two presets, `route` (route overlap 0.45) and
   `workout` (type 0.30, pace/intensity/structure); missing components score 0.4; `reasons` = top 3.
+
+## Ski intervals (`scripts/ski_intervals.py`, detector `ski-1.0`)
+The run detector needs ≥ 2.5 m/s steps, so on skis it found either nothing or random fast stretches
+(downhills; 3 Holmenkollen climbs got 13–16 "reps" in compare). The ski detector runs on the same 1 Hz
+grid (fast reader, ~10 ms per file, all 135 ski files in ~1 s), same code in session_groups and compare:
+- **Lap workout** (`mode ski_laps`): ≥ 5 consecutive time-triggered laps (or laps marked rest/recovery)
+  alternating between two durations; work = the longer phase (equal: the phase where HR rises).
+  Other blocks of the same workout split by a manual lap are added (laps of the work duration ±10 %).
+  Needs ≥ 3 reps of similar duration. HR is not required (the workout is programmed).
+- **Effort** (`mode ski_effort`): work rate P = v·(0.03 + grade) + 4e-4·v³ (vertical-equivalent m/s,
+  grade over ±10 s, clipped at 0, 0 while stopped), 15 s smoothed. Recovery = standing or P < 45 % of
+  the session's median working P for ≥ 30 s (so the downhill back after an uphill rep is a recovery);
+  work blocks = the rest, ≥ 60 s. A block is hard when its last-third HR ≥ max(Z4 floor (165),
+  top-3 block median − 12). Reps = the contiguous series of hard blocks with the most work time (non-hard
+  blocks < 90 s don't break it); hard blocks < 60 s apart or without a 12 bpm HR drop between them are one
+  rep; first / last reps shorter than half the median are dropped (warm-up ramp, finish). The session
+  counts only if it is hard overall (≥ 25 % of HR time ≥ Z4, the ski_hard rule), has ≥ 3 reps ≤ 20 min,
+  ≥ 3 of them within ±25 % of the median duration, ≥ 8 min rep time, median recovery ≤ 8 min and median
+  HR drop in the recoveries ≥ 20 bpm. Otherwise there are no reps.
+- **Holmenkollen climb (R3)**: every session stops at the same points, so stops alone never make
+  intervals. The 11 easy climbs (HR < Z4 in most blocks, < 25 % Z4+ time) get no reps. 7 of the 8 hard
+  climbs are intervals: 3–4 climbs between stops ending at 170–188 bpm, standing rests of 1–4 min
+  (median HR drop after 60 s of rest 25–36 bpm per session; e.g. 2026-08-10 `4×4:30`, 187 → 114 bpm in
+  rests of 3:00–4:15). The 8th (2024-09-30) fails the
+  similar-duration rule (7:38 / 3:57 / 2:39) and stays ski_hard. This is a judgment call: a hard R3
+  climb is "climb hard between the usual stops"; the rep durations follow the terrain, so their
+  similarity `exact_key` is the route (`ski/intervals · R3`), see [similarity.md](similarity.md).
+- **Result** (135 ski files): 18 ski_intervals = 11 lap workouts 2021–2024 (10 without GPS) (`4×4:00` / 2:00 ×6,
+  `3×4:00` ×2, `7×4:00`, `8×4:00` / 1:00, `5×1:00` / 0:30) + 7 hard R3 climbs. No GPS ski session outside R3
+  qualified (hilly Sognsvann tours with 8–10 min climbs at 150–160 bpm stay ski_easy).
+- **Signature** (`rep_groups(times, dists, ski=True)`): one group if every rep is within ±35 % of the
+  median (`4×6:30` for 5:19 / 5:02 / 7:34 / 7:25), else consecutive groups at ±30 %; labels are durations
+  rounded to 15 s below 2:00, 30 s below 10:00, else 1:00.
+- Cache entry (session_groups.pkl, per FIT): `rep_times, rep_dists, rep_speeds, rep_hr, rep_starts,
+  rep_climbs, breaks [(time, dist, standing)], laps [(intensity, trigger)], mode, threshold, version`.
+  `uv run scripts/ski_intervals.py adrian <id> ...` prints reps and all work blocks (late HR, P).
 
 ## Legs and pauses (every FIT with distance)
 1 Hz grid; speed from the distance field (5 s centred). Pause = speed < 0.5 m/s for ≥ 15 s or a
