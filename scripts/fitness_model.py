@@ -18,7 +18,8 @@ Disciplines (see docs):
             VO2 with an assumed gross efficiency, scored like a run (best sustained demand / Daniels %VO2max).
   overall   precision-weighted mix of the disciplines as % of each one's personal best.
 
-HR is NOT used in the scores (evidence in docs/fitness-model.md); it is reported as diagnostics.
+Two variants: "pace" (performance only; HR is diagnostics) and "hr" (same scores, but HR effort decides whether a
+hard session was maximal: sub-max -> lower bound, else weighted by p(maximal), FR935 HR discounted). See `apply_hr_intent`.
 
 Importable API (for a backend): `build(person)` -> fitness doc; `load_features`, `collect_evidence`,
 `score_session`, `smooth_series`, `forecast_errors`; physiology `vdot_from_race`, `race_time`, `speed_for`,
@@ -71,6 +72,14 @@ P = {
     "hr_warmup_s": 600,
     "hr_min_hrr": 0.45,          # below this %HRR the HR-VO2 line is unreliable
     "hr_max_cv": 0.12,
+    # HR-intent variant ("pace+hr"): HR effort decides how maximal a session labelled hard really was
+    "hr_intent": {
+        "thr": {"interval": 0.85, "long": 0.85, "ski": 0.82},  # %HRR of a maximal effort (work-HR p90 / last 2/3 of the window)
+        "sd": 0.04,                                           # spread of maximal-effort %HRR around thr
+        "trust": {"fr935": {"interval": 0.3, "steady": 0.5},  # FR935 wrist HR under-reads interval bursts erratically; 0.5: never demotes alone
+                  "4315": {"interval": 1.0, "steady": 1.0}},
+        "demote_p": 0.5,                                      # p(maximal) below this: hard -> bound (in-sample choice, see docs)
+    },
     # ski
     "ski_eff": 0.16,             # gross efficiency (Sandbakk et al.: 15-18 % roller ski)
     "ski_mu": {"roller?": 0.025, "snow": 0.035, "unknown": 0.03},
@@ -184,6 +193,7 @@ def _shift_diff(x, w):
 def session_series(fit, act):
     """1 Hz series from the FIT: v (m/s), vg (grade-adjusted / ski VO2 demand), hr, legs (pause-free spans)."""
     G = sg.to_grid(sg.read_series(Path(fit)))
+    sg.indoor_grid(G, act)   # Bislett indoor: reps of n x 546.5 m - 7.5 m, 0 between (watch distance is made up there)
     T = G["T"]
     v = np.clip(G["v"], 0, P["v_max_run"] if act["sport"] == "run" else 20.0)
     flat = act.get("atype") in ("track_running", "treadmill_running", "indoor_running") or act.get("place") == "Bislet"
@@ -433,7 +443,8 @@ def session_features(fit, act, hr_rest):
         if e:
             e["hrr"] = effort_hrr(S, e["start"] + (e["end"] - e["start"]) // 3, e["end"], hr_rest)
             f["ski"] = e
-    f["hr_aer"] = hr_aerobic(S, act["sport"], hr_rest)
+    # HR-speed line: not for Bislett indoor (speed is synthetic or made up there)
+    f["hr_aer"] = hr_aerobic(S, act["sport"], hr_rest) if not act.get("indoor_bislett") else None
     if hr is not None:
         h = hr[~np.isnan(hr)]
         f["hr_max_s"] = float(h.max()) if len(h) else None
@@ -472,7 +483,10 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
     if "err" in f:
         return out
     if sport == "run":
-        if not act.get("dist_trusted") or act.get("atype") in ("treadmill_running", "indoor_running"):
+        ind = act.get("indoor_bislett")
+        if ind and not any(ind.get("rep_m") or []):
+            return out
+        if not ind and (not act.get("dist_trusted") or act.get("atype") in ("treadmill_running", "indoor_running")):
             return out
         track = act.get("atype") == "track_running" or act.get("place") == "Bislet"
         fw = f.get("wbal_flat")
@@ -503,7 +517,7 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
                 if hr_b and f.get("work_hrr") is not None:
                     w = w + hr_b * (hr_ref - f["work_hrr"])
                 out.append(("interval", w, "hard", SIG["int_track" if track else "int_road"], c))
-        cont = f.get("cont")
+        cont = f.get("cont") if not ind else None   # indoor: only the whole-lap reps carry distance
         if cont and t != "race?":
             kind = "hard" if t == "tempo" else "bound"
             out.append(("long", cont["vdot"] + (P["tempo_offset"] if kind == "hard" else 0.0), kind, SIG["tempo" if kind == "hard" else "cont_bound"],
@@ -519,6 +533,53 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
                         {"window_s": e["dur_s"], "climb_m": e["climb_m"], "speed": round(e["speed"], 2),
                          "demand": round(e["demand"], 1), "surface": act.get("surface"), "hrr": e.get("hrr")}))
     return [{"discipline": d, "score": float(s), "kind": k, "sigma": sg_, "components": c} for d, s, k, sg_, c in out]
+
+
+# ------------------------------------------------------------------ HR intent (variant "hr")
+VARIANTS = {"pace": "Performance only (speed, altitude, distance, breaks)",
+            "hr": "Performance + heart rate (HR decides how maximal each hard session was)"}
+
+
+def watch_of(date):
+    return "4315" if date >= NEW_WATCH_FROM else "fr935"
+
+
+def hr_intent(e):
+    """p(maximal) of a hard evidence item from its HR effort, blended with the device's trust:
+    p_eff = trust * Phi((hrr - thr) / sd) + (1 - trust). None without HR."""
+    c = e["components"]
+    h = c.get("work_hrr") if e["discipline"] == "interval" else c.get("hrr")
+    if h is None:
+        return None, None
+    H = P["hr_intent"]
+    p = 0.5 * (1 + math.erf((h - H["thr"][e["discipline"]]) / (H["sd"] * math.sqrt(2))))
+    t = H["trust"][watch_of(e["date"])]["interval" if e["discipline"] == "interval" else "steady"]
+    return t * p + (1 - t), h
+
+
+def apply_hr_intent(ev):
+    """Variant "hr": hard (not race) evidence with p(maximal) < demote_p becomes a lower bound; other hard
+    evidence keeps weight in proportion to p (sigma / sqrt(0.5 + 0.5 p)): clearly maximal sessions count fully."""
+    out = []
+    for e in ev:
+        e = {**e, "components": dict(e["components"])}
+        if e["kind"] == "hard":
+            p, h = hr_intent(e)
+            if p is not None:
+                e["components"]["p_max"] = p
+                if p < P["hr_intent"]["demote_p"]:
+                    e["kind"] = "bound"
+                    e["sigma"] = SIG["ski_bound" if e["discipline"] == "ski" else "cont_bound"]
+                    e["components"]["hr_intent"] = f"sub-max HR ({h:.2f} HRR) -> lower bound"
+                else:
+                    e["sigma"] = e["sigma"] / math.sqrt(0.5 + 0.5 * p)
+        out.append(e)
+    return out
+
+
+def variant_evidence(acts, feats, variant="pace", **kw):
+    ev = collect_evidence(acts, feats, **kw)
+    return apply_hr_intent(ev) if variant == "hr" else ev
 
 
 # ------------------------------------------------------------------ smoother
@@ -607,8 +668,9 @@ def load_features(person, workers=8, progress=True):
     cfile = D / "cache" / "fitness_model.pkl"
     cfile.parent.mkdir(exist_ok=True)
     cache = pickle.loads(cfile.read_bytes()) if cfile.exists() else {}
-    if cache.get("_v") != (MODEL_VERSION, json.dumps(P, sort_keys=True, default=str)):
-        cache = {"_v": (MODEL_VERSION, json.dumps(P, sort_keys=True, default=str))}
+    ck = (MODEL_VERSION, json.dumps({k: v for k, v in P.items() if k != "hr_intent"}, sort_keys=True, default=str))
+    if cache.get("_v") != ck:
+        cache = {"_v": ck}
     key = lambda p: (p.stat().st_mtime_ns, p.stat().st_size)
     jobs, feats = [], {}
     for i, a in acts.items():
@@ -616,7 +678,7 @@ def load_features(person, workers=8, progress=True):
             continue
         c = cache.get(i)
         hr0 = rest.get(a["date"], P["hr_rest_default"])
-        if c and c["key"] == key(fits[i]) and c.get("hr_rest") == hr0:
+        if c and c["key"] == key(fits[i]) and c.get("hr_rest") == hr0 and c.get("indoor") == a.get("indoor_bislett"):
             feats[i] = c["f"]
         else:
             jobs.append((str(fits[i]), {k: v for k, v in a.items() if k != "similar"}, hr0))
@@ -629,7 +691,7 @@ def load_features(person, workers=8, progress=True):
         for (fit, a, hr0), (_, f) in zip(jobs, res):
             i = Path(fit).stem
             feats[i] = f
-            cache[i] = {"key": key(Path(fit)), "hr_rest": hr0, "f": f}
+            cache[i] = {"key": key(Path(fit)), "hr_rest": hr0, "f": f, "indoor": a.get("indoor_bislett")}
         cfile.write_bytes(pickle.dumps(cache))
     if progress:
         print(f"features: {len(feats)} sessions ({len(jobs)} recomputed)")
@@ -666,11 +728,8 @@ def cross_check(ev, interval_series):
             e["components"]["implausible"] = f"> interval shape {m[k]:.1f} + {lim - m[k]:.1f}"
 
 
-def build(person, workers=8, today=None, progress=True):
-    """The whole fitness doc (what fitness.json holds)."""
-    acts, feats, rest = load_features(person, workers, progress)
-    ev = collect_evidence(acts, feats)
-    today = today or dt.date.today()
+def _model(ev, today):
+    """Smoothed shape per discipline + overall from evidence items (sets weight / shape_at on them)."""
     t1 = today.toordinal()
     series, best = {}, {}
     for disc in DISCIPLINES:
@@ -748,6 +807,19 @@ def build(person, workers=8, today=None, progress=True):
                    for y in sorted({dt.date.fromordinal(int(d)).year for d in days_all})},
         "weekly": weekly(days_all, ov_m, ov_s),
     }
+    return disc_out
+
+
+def build(person, workers=8, today=None, progress=True):
+    """The whole fitness doc (what fitness.json holds): variant "pace" in `disciplines` / `sessions`, variant "hr"
+    in `variants.hr` and `sessions[].hr`."""
+    acts, feats, rest = load_features(person, workers, progress)
+    ev = collect_evidence(acts, feats)
+    ev_hr = apply_hr_intent(ev)          # copies, before cross_check marks the pace list
+    today = today or dt.date.today()
+    disc_out = _model(ev, today)
+    disc_hr = _model(ev_hr, today)
+    hr_by = {(e["id"], e["discipline"]): e for e in ev_hr}
     sessions = []
     for e in ev:
         sessions.append({"id": int(e["id"]), "date": e["date"], "discipline": e["discipline"], "type": e["type"],
@@ -755,6 +827,12 @@ def build(person, workers=8, today=None, progress=True):
                          "weight": e.get("weight"), "shape_at": e.get("shape_at"),
                          "confidence": round(float(e.get("weight") or 0) * (SIG["race"] / e["sigma"]) ** 2, 3),
                          "components": _clean(e["components"])})
+        h = hr_by.get((e["id"], e["discipline"]))
+        if h is not None:
+            sessions[-1]["hr"] = {"kind": h["kind"], "sigma": round(h["sigma"], 2), "weight": h.get("weight"),
+                                  "shape_at": h.get("shape_at"),
+                                  "p_max": round(h["components"]["p_max"], 3) if "p_max" in h["components"] else None,
+                                  "note": h["components"].get("hr_intent")}
     hr_diag = {}
     for i, f in feats.items():
         ha = f.get("hr_aer") or {}
@@ -762,7 +840,9 @@ def build(person, workers=8, today=None, progress=True):
             hr_diag[i] = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in ha.items()}
     return {"built": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "model_version": MODEL_VERSION,
             "params": P, "sigma": SIG, "scale": "Daniels VDOT; race_time(vdot, dist) gives equivalent race times",
-            "hr_used_in_score": False, "disciplines": disc_out, "sessions": sessions, "hr_diagnostics": hr_diag}
+            "hr_used_in_score": False, "disciplines": disc_out,
+            "variants": {"pace": {"label": VARIANTS["pace"], "hr_used_in_score": False},
+                         "hr": {"label": VARIANTS["hr"], "hr_used_in_score": True, "disciplines": disc_hr}}, "sessions": sessions, "hr_diagnostics": hr_diag}
 
 
 def _clean(d):

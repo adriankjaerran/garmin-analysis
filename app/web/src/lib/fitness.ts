@@ -28,14 +28,25 @@ export interface Discipline { label: string; unit: string; q_per_day?: number; p
   yearly: Record<string, Yearly | number>; weekly: Weekly[] }
 export interface FitSession { id: string; date: string; discipline: Disc; type: string; score: number; kind: Kind; sigma: number;
   weight: number | null; shape_at: number | null; confidence: number; components: Record<string, any>; explain: string;
-  name?: string | null; dist_km?: number | null; sport?: string | null }
+  name?: string | null; dist_km?: number | null; sport?: string | null; hr?: SessionHr | null }
+/** the session as seen by the "hr" model variant (HR decides how maximal a hard session was) */
+export interface SessionHr { kind: Kind; sigma: number; weight: number | null; shape_at: number | null; p_max: number | null; note: string | null }
+export type VariantName = "pace" | "hr";
+export interface Variant { label: string; hr_used_in_score: boolean; disciplines?: Record<string, Discipline> }
+export interface EvalDisc { n: number; forecast_mae: number; loglik: number; race_n?: number; race_mae?: number; race_mean_err?: number;
+  r3_n?: number; r3_corr_prior_shape_vs_log_speed?: number }
+export interface EvalVariants { default: Record<VariantName, Record<Disc, EvalDisc>>;
+  demoted: { date: string; id: string; discipline: Disc; type: string; score: number; p_max: number; note: string }[];
+  sensitivity_hr?: Record<string, Record<Disc, Partial<EvalDisc>>> }
 export interface FitnessDoc { built: string; model_version: number; params: Record<string, any>; sigma: Record<string, number>;
   scale: string; hr_used_in_score: boolean; disciplines: Record<string, Discipline>; sessions: FitSession[];
+  variants?: Partial<Record<VariantName, Variant>>; eval_variants?: EvalVariants | null;
   rebuild: { running: boolean; started: string | null; finished: string | null; error: string | null; seconds: number | null } }
 export interface Explained { key: string; label: string; value?: any; text: string; meaning: string }
 export interface SessionShape extends FitSession { label: string; race_equivalents_s: RaceEq | null; components_explained: Explained[];
   shape: { date: string; mean: number; sd: number } | null; shape_race_equivalents_s: RaceEq | null;
-  personal_best: number | null; current: Current | null }
+  personal_best: number | null; current: Current | null;
+  hr?: (SessionHr & { shape: { date: string; mean: number; sd: number } | null; current: Current | null; label: string | null }) | null }
 export interface FitnessSession { id: string; scored: boolean; sessions: SessionShape[]; hr_used_in_score: boolean; built: string;
   hr_diagnostics: ({ n_chunks: number; vdot?: number; iqr?: number; hrr?: number; ef?: number; decoupling_pct?: number; explained: Explained[] }) | null }
 

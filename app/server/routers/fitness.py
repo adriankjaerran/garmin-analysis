@@ -57,31 +57,61 @@ def _race_eq(vdot: float) -> dict:
 
 
 # ------------------------------------------------------------------ derived fields
-def _prepare(doc: dict) -> dict:
-    """Add trend_90d / last_evidence per discipline and a sessions-by-id index (memoised with the file)."""
-    for disc in DISC:
-        d = doc["disciplines"].get(disc)
+def _trend(d: dict) -> float | None:
+    cur = d["current"]
+    cut = (dt.date.fromisoformat(cur["date"]) - dt.timedelta(days=90)).isoformat()
+    past = [w for w in d["weekly"] if w["date"] <= cut]
+    return round(cur["mean"] - past[-1]["mean"], 2) if past else None
+
+
+def _prep_discs(discs: dict, sessions: list, variant: str = "pace") -> None:
+    """trend_90d / last_evidence per discipline; for the "hr" variant kind/weight come from each session's `hr` block."""
+    for disc in (*DISC, "overall"):
+        d = discs.get(disc)
         if not d:
             continue
-        wk = d["weekly"]
         cur = d["current"]
-        past = [w for w in wk if w["date"] <= (dt.date.fromisoformat(cur["date"]) - dt.timedelta(days=90)).isoformat()]
-        cur["trend_90d"] = round(cur["mean"] - past[-1]["mean"], 2) if past else None
-        ev = [s for s in doc["sessions"] if s["discipline"] == disc and s["kind"] in ("race", "hard")
-              and (s.get("weight") or 0) > 0.5]
-        last = max(ev, key=lambda s: s["date"]) if ev else None
-        cur["last_evidence"] = {"date": last["date"], "id": last["id"], "score": last["score"], "kind": last["kind"]} if last else None
-    ov = doc["disciplines"].get("overall")
-    if ov:
-        cur = ov["current"]
-        past = [w for w in ov["weekly"] if w["date"] <= (dt.date.fromisoformat(cur["date"]) - dt.timedelta(days=90)).isoformat()]
-        cur["trend_90d"] = round(cur["mean"] - past[-1]["mean"], 2) if past else None
+        cur["trend_90d"] = _trend(d)
+        if disc == "overall":
+            continue
+        ev = []
+        for s in sessions:
+            v = s if variant == "pace" else (s.get("hr") or s)
+            if s["discipline"] == disc and v["kind"] in ("race", "hard") and (v.get("weight") or 0) > 0.5:
+                ev.append((s, v))
+        last, lv = max(ev, key=lambda e: e[0]["date"]) if ev else (None, None)
+        cur["last_evidence"] = {"date": last["date"], "id": last["id"], "score": last["score"], "kind": lv["kind"]} if last else None
+
+
+def _prepare(doc: dict) -> dict:
+    """Add trend_90d / last_evidence per discipline (both model variants) and a sessions-by-id index
+    (memoised with the file)."""
+    _prep_discs(doc["disciplines"], doc["sessions"])
+    for name, v in (doc.get("variants") or {}).items():
+        if v.get("disciplines"):
+            _prep_discs(v["disciplines"], doc["sessions"], name)
     by_id: dict[str, list] = {}
     for s in doc["sessions"]:
         s["explain"] = explain(s)
         by_id.setdefault(str(s["id"]), []).append(s)
     doc["_by_id"] = by_id
     return doc
+
+
+def _eval_variants(store: Store) -> dict | None:
+    """`variants` of data/<p>/fitness_eval.json (scripts/fitness_eval.py): pace vs hr model comparison,
+    demoted sessions, HR sensitivity. None if the file (or the key) is missing."""
+    p = store.dir / "fitness_eval.json"
+
+    def build():
+        if not p.exists():
+            return None
+        try:
+            return json.loads(p.read_text()).get("variants")
+        except (OSError, ValueError):
+            log.warning("unreadable %s", p)
+            return None
+    return store._memoize("fitness_eval", lambda: [p], build)
 
 
 def explain(s: dict) -> str:
@@ -178,16 +208,22 @@ def fitness(store: Store = Depends(get_store),
 
     def inr(date: str) -> bool:
         return (not date_from or date >= date_from) and (not date_to or date <= date_to)
-    discs = {}
-    for k, d in doc["disciplines"].items():
-        if want and k not in want:
-            continue
-        d = dict(d)
-        d["weekly"] = [w for w in d["weekly"] if inr(w["date"])]
-        if date_from or date_to:
-            d["yearly"] = {y: v for y, v in d["yearly"].items()
-                           if (not date_from or y >= date_from[:4]) and (not date_to or y <= date_to[:4])}
-        discs[k] = d
+    def cut(src: dict) -> dict:
+        discs = {}
+        for k, d in src.items():
+            if want and k not in want:
+                continue
+            d = dict(d)
+            d["weekly"] = [w for w in d["weekly"] if inr(w["date"])]
+            if date_from or date_to:
+                d["yearly"] = {y: v for y, v in d["yearly"].items()
+                               if (not date_from or y >= date_from[:4]) and (not date_to or y <= date_to[:4])}
+            discs[k] = d
+        return discs
+    discs = cut(doc["disciplines"])
+    variants = {name: {**{k: x for k, x in v.items() if k != "disciplines"},
+                       **({"disciplines": cut(v["disciplines"])} if v.get("disciplines") else {})}
+                for name, v in (doc.get("variants") or {}).items()}
     sessions = []
     for s in doc["sessions"]:
         if (want and s["discipline"] not in want) or not inr(s["date"]):
@@ -195,11 +231,18 @@ def fitness(store: Store = Depends(get_store),
         a = acts.get(str(s["id"])) or {}
         sessions.append({**s, "id": str(s["id"]), "name": a.get("name"), "dist_km": a.get("dist_km"),
                          "sport": a.get("sport")})
-    out = {k: v for k, v in _strip(doc).items() if k not in ("sessions", "hr_diagnostics", "disciplines")}
-    out.update(disciplines=discs, sessions=sessions, rebuild=dict(_rebuild))
+    out = {k: v for k, v in _strip(doc).items() if k not in ("sessions", "hr_diagnostics", "disciplines", "variants")}
+    out.update(disciplines=discs, variants=variants, sessions=sessions, eval_variants=_eval_variants(store),
+               rebuild=dict(_rebuild))
     if hr:
         out["hr_diagnostics"] = doc["hr_diagnostics"]
     return out
+
+
+@router.get("/fitness/eval")
+def fitness_eval(store: Store = Depends(get_store)):
+    """Pace vs with-HR model comparison from fitness_eval.json (`variants`); null if not evaluated yet."""
+    return _eval_variants(store)
 
 
 @router.get("/fitness/session/{aid}")
@@ -213,12 +256,15 @@ def fitness_session(aid: str, store: Store = Depends(get_store)):
         comps = [{"key": k, "label": COMPONENT_LABELS.get(k, (k, ""))[0], "value": v, "text": _fmt_component(k, v),
                   "meaning": COMPONENT_LABELS.get(k, (k, ""))[1]} for k, v in (s.get("components") or {}).items()]
         sh = _shape_on(d, s["date"])
+        hv = ((doc.get("variants") or {}).get("hr") or {}).get("disciplines", {}).get(s["discipline"], {})
+        hr_blk = {**s["hr"], "shape": _shape_on(hv, s["date"]), "current": hv.get("current"),
+                  "label": ((doc.get("variants") or {}).get("hr") or {}).get("label")} if s.get("hr") else None
         items.append({**s, "id": str(s["id"]), "label": d.get("label", s["discipline"]),
                       "race_equivalents_s": _race_eq(s["score"]) if s["discipline"] != "ski"
                       and s["kind"] != "implausible" and 20 < s["score"] < 90 else None,
                       "components_explained": comps, "shape": sh,
                       "shape_race_equivalents_s": _race_eq(sh["mean"]) if sh and s["discipline"] != "ski" else None,
-                      "personal_best": d.get("personal_best"),
+                      "hr": hr_blk, "personal_best": d.get("personal_best"),
                       "current": d.get("current")})
     hd = doc["hr_diagnostics"].get(aid)
     hr = None

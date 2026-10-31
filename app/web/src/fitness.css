@@ -31,3 +31,9 @@ details.howto[open] summary::before { content: "▾"; }
 .shape-chart .subtitle { color: var(--text-muted); margin: var(--space-2) 0 0; font-size: var(--fs-12); }
 .fit-sessions td:nth-child(5) { max-width: 500px; }   /* 560 overflowed the table by ~50 px at 1600 px (σ column clipped) */
 .fit-sessions td:nth-child(4) { max-width: 200px; }
+/* model variants: solid = performance only, dashed = with HR (ShapeChart withHr) */
+.line-sw { display: inline-block; width: 20px; border-top: 2px solid var(--text-muted); vertical-align: middle; margin-right: 6px; }
+.line-sw.dash { border-top-style: dashed; }
+.hr-val { color: var(--text-muted); }
+.variant-eval th.grp { text-align: center; }
+.variant-eval td.better { color: var(--state-good); font-weight: var(--fw-semibold); }

@@ -188,7 +188,8 @@ class _Store:
             raise KeyError(f"no FIT file for {i}")
         s = sg.read_series(f)
         G = sg.to_grid(s)
-        no_dist = bool(G["d"][-1] < 100)
+        # Bislett indoor: watch distance is made up; whole-lap reps only (n x 546.5 m - 7.5 m), else distance-free
+        no_dist = not sg.indoor_grid(G, self.act(i) or {}) or bool(G["d"][-1] < 100)
         if no_dist and ("hr" not in G or not np.isfinite(G["hr"]).any()):
             raise ValueError(f"{i}: no distance")
         # without distance (indoor / no-GPS lap workouts) only timer stops are pauses; HR-only comparisons
@@ -229,7 +230,25 @@ class _Store:
                 c[("reps", int(p.stem))] = {"key": keys[f], "r": r}
             self._dirty = True
             self.save()
-        return {int(i): (c.get(("reps", int(i))) or {}).get("r") for i in ids}
+        out = {int(i): (c.get(("reps", int(i))) or {}).get("r") for i in ids}
+        for i in ids:   # Bislett indoor: reps = the manual run laps (groups.json), whole laps n x 546.5 m - 7.5 m
+            ind = (self.act(i) or {}).get("indoor_bislett")
+            if ind and ind.get("rep_laps"):
+                out[int(i)] = self._indoor_reps(i, ind)
+        return out
+
+    def _indoor_reps(self, i, ind):
+        hr = self.session(i)["G"].get("hr")
+        reps = []
+        for (t0, dur, _), m in zip(ind["rep_laps"], ind["rep_m"]):
+            a, b = int(round(t0)), int(round(t0 + dur))
+            h = hr[a:b] if hr is not None else np.array([])
+            h = h[np.isfinite(h)] if len(h) else h
+            reps.append({"start": t0, "end": t0 + dur, "time": dur, "dist": m, "speed": m / dur if m else None,
+                         "hr": round(float(h.mean())) if len(h) > 5 else None, "maxhr": round(float(h.max())) if len(h) > 5 else None,
+                         "hr_start": round(float(h[0])) if len(h) else None, "hr_end": round(float(h[-1])) if len(h) else None,
+                         "dist_source": "bislett_indoor_laps" if m else None})
+        return {"mode": "indoor", "reps": reps, "laps": []}
 
     # route context: reference polyline from the medoid (as in session_groups.compare_route)
     def route(self, rid):
@@ -773,7 +792,8 @@ def _interval_modes(st, sess, mode, reference, max_points, rep_axis, gap_s, rep_
     reps_by, info = {}, {}
     for S in sess:
         r = R.get(S["id"])
-        rr = _main_reps((r or {}).get("reps") or [], str((r or {}).get("mode") or "").startswith("ski"))
+        md = str((r or {}).get("mode") or "")
+        rr = _main_reps((r or {}).get("reps") or [], md.startswith("ski") or md == "indoor")   # indoor: laps as recorded
         if len(rr) >= 1:
             reps_by[S["id"]] = rr
             info[S["id"]] = {"det_mode": r["mode"], "n_detected": len(r["reps"]), "n_used": len(rr)}

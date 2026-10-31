@@ -48,7 +48,8 @@ C(i) = 155.4i⁵ − 30.4i⁴ − 43.3i³ + 46.3i² + 19.5i + 3.6 J/kg/m.
 - Synthetic 6×1000 @ 3:15 with standing rest scores 57.2 / 55.8 / 52.9 / 51.3 for 60 / 90 / 180 / 300 s
   rest. This is the work:rest effect: the same pace on shorter rest is worth more.
 - Only `intervals_track` / `intervals_road` sessions get an interval score. Treadmill sessions are
-  excluded because their distance is untrusted.
+  excluded because their distance is untrusted. Bislett indoor sessions (winter) score from their whole-lap
+  reps only (n × 546.5 m − 7.5 m, speed 0 between reps); no continuous / HR-aerobic items from them.
 
 **Races** (`race?` within 3.5 % of 5k / 10k / half / marathon): Daniels VDOT from the nominal distance
 and moving time.
@@ -140,7 +141,45 @@ all-out. It accounts for +3.4 of the interval error.
   54–57 vs 45–53. Score noise is mostly FR935 altitude.
 - Long-run bounds 4.4, ski bounds 4.6 (they mix intents).
 
-## HR decision: not used in the score (evidence)
+## Variant "hr": performance + heart-rate intent
+`fitness.json` holds two variants with the same per-session scores:
+- **pace** (performance only: speed, altitude, distance, breaks): everything above. Stored in `disciplines` / `sessions`.
+- **hr**: HR judges *intent*, meaning whether a session labelled hard was really maximal. Stored in `variants.hr.disciplines`
+  and `sessions[].hr` = {kind, sigma, weight, shape_at, p_max, note}.
+
+HR never changes a score. The three ways it failed as a score input are in the next section. It only changes how much a hard
+session counts (`apply_hr_intent`, parameters `P["hr_intent"]`):
+- **Effort measure:** the work-HR p90 as %HRR for intervals; the HR over the last 2/3 of the scored window for long and ski.
+- **p(maximal)** = Φ((hrr − thr)/0.04), with thr = 0.85 for interval and long, 0.82 for ski.
+- **Watch trust:** p_eff = trust·p + (1 − trust). 4315: trust 1. FR935: 0.3 on intervals (erratic wrist HR in bursts),
+  0.5 on steady efforts. With trust ≤ 0.5, p_eff ≥ 0.5, so FR935 HR alone can never demote a session.
+- **p_eff < 0.5:** the session becomes a lower bound (`bound`). Otherwise σ / √(0.5 + 0.5·p_eff), so a clearly maximal
+  session counts fully and an uncertain one about half.
+- Races aren't touched. Bounds are never promoted: easy and long runs with high HR still sit 8–25 VDOT below the shape,
+  so high HR there doesn't mean a maximal effort.
+
+Why only this: across all hard sessions, HR doesn't predict the interval residual (r = 0.12 on the 4315, −0.09 on the
+FR935). It does on ski: `ski_hard` at ≥ 0.85 HRR sits on the shape, at 0.70–0.85 HRR it sits 4–5 VDOT below.
+
+**Evaluation** (`fitness_eval.py` → `variants`). The same targets are used for both variants: races + sessions hard in both.
+Forecasts are one step ahead, races are predicted with a forward filter, and R3 = correlation of the ski shape the day
+*before* each Holmenkollen climb with that climb's log speed (independent of HR).
+
+| | race MAE pace / hr | forecast MAE pace / hr | R3 corr pace / hr |
+|---|---|---|---|
+| interval (107, 6 races) | 1.80 / 1.82 | 2.90 / 2.90 | |
+| long (9, 4 races) | 1.02 / 1.01 | 2.07 / 2.05 | |
+| ski (11, 17 R3) | | 6.53 / 6.19 | 0.45 / **0.67** |
+
+- **Demoted (2):** 2026-02-18 snow `ski_hard` (40.9 at 0.81 HRR, while the other 2026 ski sessions were 54–57)
+  and 2026-07-23 road intervals (49.6 at 0.81 HRR on the 4315).
+- **In-sample choice.** `demote_p` 0.5 and FR935 steady trust 0.5 were chosen from a 3×3 grid (`variants.sensitivity_hr`).
+  The starting settings (0.3 / 0.8) were no better than pace (R3 0.40). The ski gain mostly comes from that one 2026-02-18
+  session, so treat it as a hypothesis. Re-check as more 4315 sessions come in.
+- Current shape is identical in both variants (interval 53.0, long 58.4, ski 55.3 vs 55.4). Yearly values differ by
+  ≤ 0.2.
+
+## HR as a score input: rejected (evidence)
 Three ways HR could help were tested. All three made predictions worse or added noise:
 1. **HR as the final effort adjustment of interval scores**, y + b·(0.9 − work %HRR):
    - The forecast MAE gets worse as b grows: 3.03 (b = 0), 3.21 (5), 3.48 (10), 4.28 (20).
@@ -166,7 +205,7 @@ Three ways HR could help were tested. All three made predictions worse or added 
 
 So HR is reported as **diagnostics only**: `components.work_hrr` / `hrr` per session, and
 `hr_diagnostics` (efficiency factor = GAP m/s per beat, aerobic decoupling, Swain estimate) per session.
-`hr_used_in_score: false` in the doc.
+`hr_used_in_score: false` for the pace variant (`variants.hr.hr_used_in_score: true`).
 
 ## fitness.json
 ```
@@ -178,9 +217,11 @@ So HR is reported as **diagnostics only**: `components.work_hrr` / `hrr` per ses
      yearly: {YYYY: {mean, max, sd_median, n_evidence, mean_well_observed (days with sd<2), days_well_observed}},
      weekly: [{date, mean, sd, n (non-bound evidence that week), days_since_evidence}]},
    overall: {label, unit, current {date, mean, sd}, yearly {YYYY: mean}, weekly [{date, mean, sd}]}},
+ variants: {pace: {label, hr_used_in_score}, hr: {label, hr_used_in_score, disciplines (same shape as above)}},
  sessions: [{id, date, discipline, type, score, kind (race|hard|bound|implausible), sigma,
              weight (robust weight 0..1 the smoother gave it), shape_at (smoothed value that day),
-             confidence (evidence strength relative to a race = 1), components {...}}],
+             confidence (evidence strength relative to a race = 1), components {...},
+             hr {kind, sigma, weight, shape_at, p_max, note}}],
  hr_diagnostics: {activity id: {n_chunks, vdot, iqr, hrr, ef, decoupling_pct}}}
 ```
 Components:
@@ -192,6 +233,7 @@ Components:
 ## API for a backend
 `build(person, workers=8, today=None) -> doc` is the whole file. Lower level:
 - `load_features(person)` → (acts, feats, rest). Cached.
+- `apply_hr_intent(ev)` / `variant_evidence(acts, feats, variant)` → the hr variant's evidence.
 - `collect_evidence(acts, feats, tau=, hr_b=, use_hr_aer=)` and `score_session(act, feat)` → evidence items.
 - `smooth_series(obs, day0, day1, q)` → (days, mean, sd, weights, forecasts). `forecast_errors(obs, q)`.
 - Physiology helpers: `vdot_from_race`, `race_time`, `speed_for`, `daniels_vo2`, `daniels_pct`, `cs_dprime`,

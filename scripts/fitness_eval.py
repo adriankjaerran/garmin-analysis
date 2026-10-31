@@ -38,6 +38,95 @@ def watch(date):
     return "4315" if date >= fm.NEW_WATCH_FROM else "fr935"
 
 
+def _forward(ev, disc, upto=None):
+    """Forward-filter forecasts {(id, day): (mean, sd)} for one discipline's evidence (data before each item only)."""
+    obs = [(e["day"], e["score"], e["sigma"], e["kind"], e["id"]) for e in ev
+           if e["discipline"] == disc and e["kind"] != "implausible" and (upto is None or e["day"] < upto)]
+    if len(obs) < 3:
+        return None, obs
+    d0, d1 = min(o[0] for o in obs) - 7, (upto - 1) if upto else max(o[0] for o in obs)
+    days, m, sd, _, fc = fm.smooth_series(obs, d0, d1, fm.P["q_per_day"][disc], iters=1)
+    obs_s = sorted(obs, key=lambda o: o[0])
+    return {"fc": {(o[4], o[0]): f for o, f in zip(obs_s, fc)}, "last": (float(m[-1]), float(sd[-1]))}, obs_s
+
+
+def compare_variants(acts, feats, races, r3=None):
+    """Performance-only ("pace") vs performance + HR intent ("hr"), same targets for both:
+    - race prediction: forward-filtered shape the day before each race (race and later data excluded);
+    - one-step forecast of the next race / hard session, targets = races + items hard in BOTH variants
+      (MAE and predictive log-likelihood, z clipped at 3);
+    - sensitivity of the hr variant to demote_p and the FR935 trust on steady efforts."""
+    fits_disc = {"interval": ("5k", "10k"), "long": ("10k", "half", "marathon")}
+
+    base = fm.collect_evidence(acts, feats)
+    hr0 = fm.apply_hr_intent(base)
+    # fixed targets (same for every variant / setting): races + items hard in both default variants
+    T = {disc: set.intersection(*({(e["id"], e["day"]) for e in vv if e["discipline"] == disc and e["kind"] in ("race", "hard")}
+                                  for vv in (base, hr0))) for disc in fm.DISCIPLINES}
+
+    def metrics(ev_by):
+        out = {}
+        ev_p = ev_by["pace"]
+        for name, ev in ev_by.items():
+            row = {}
+            for disc in fm.DISCIPLINES:
+                targets = T[disc]
+                F, obs = _forward(ev, disc)
+                if not F:
+                    continue
+                sig = {(e["id"], e["day"]): e for e in ev_p if e["discipline"] == disc}
+                err, ll = [], []
+                for k in sorted(targets, key=lambda k: k[1])[3:]:
+                    f = F["fc"].get(k)
+                    if f is None:
+                        continue
+                    y = sig[k]["score"]; s = math.sqrt(f[1] ** 2 + sig[k]["sigma"] ** 2)
+                    err.append(y - f[0]); z = min(abs(y - f[0]) / s, 3)
+                    ll.append(-0.5 * z * z - math.log(s))
+                row[disc] = {"n": len(err), "forecast_mae": round(float(np.mean(np.abs(err))), 2),
+                             "loglik": round(float(np.mean(ll)), 3)}
+                if disc in fits_disc:
+                    e = []
+                    for r in races:
+                        if r["race"] not in fits_disc[disc]:
+                            continue
+                        F2, _ = _forward(ev, disc, upto=r["day"])
+                        if F2:
+                            e.append(F2["last"][0] - r["vdot"])
+                    row[disc].update(race_n=len(e), race_mae=round(float(np.mean(np.abs(e))), 2),
+                                     race_mean_err=round(float(np.mean(e)), 2))
+                if disc == "ski" and r3:
+                    # HR-independent: forward ski shape the day before each Holmenkollen R3 climb vs its route speed
+                    xs, ys = [], []
+                    for day_, mv in r3:
+                        F2, _ = _forward(ev, "ski", upto=day_)
+                        if F2:
+                            xs.append(F2["last"][0]); ys.append(-math.log(mv))
+                    if len(xs) > 5:
+                        row[disc].update(r3_n=len(xs), r3_corr_prior_shape_vs_log_speed=round(float(np.corrcoef(xs, ys)[0, 1]), 3))
+            out[name] = row
+        return out
+
+    R = {"default": metrics({"pace": base, "hr": hr0})}
+    changed = [{"date": e["date"], "id": e["id"], "discipline": e["discipline"], "type": e["type"],
+                "score": round(e["score"], 1), "p_max": round(e["components"]["p_max"], 2), "note": e["components"]["hr_intent"]}
+               for e in fm.apply_hr_intent(base) if e["components"].get("hr_intent")]
+    R["demoted"] = changed
+    H = fm.P["hr_intent"]; keep = json.loads(json.dumps(H))
+    sens = {}
+    try:
+        for dp in (0.2, 0.3, 0.5):
+            for tr in (0.5, 0.8, 1.0):
+                H["demote_p"] = dp; H["trust"]["fr935"]["steady"] = tr
+                m = metrics({"pace": base, "hr": fm.apply_hr_intent(base)})["hr"]
+                sens[f"demote_p={dp},fr935_steady_trust={tr}"] = {d: {k: v for k, v in r.items() if k in ("forecast_mae", "loglik", "race_mae", "r3_corr_prior_shape_vs_log_speed")}
+                                                                  for d, r in m.items()}
+    finally:
+        fm.P["hr_intent"] = keep
+    R["sensitivity_hr"] = sens
+    return R
+
+
 def run(person, out=True):
     acts, feats, rest = fm.load_features(person, progress=False)
     R = {}
@@ -246,6 +335,8 @@ def run(person, out=True):
             ll = float(np.mean(-0.5 * z**2 - np.log(s)))
             qrow.setdefault(disc, {})[str(q)] = round(ll, 3)
     R["q_loglik"] = qrow
+    r3v = [(dt.date.fromisoformat(r["date"]).toordinal(), r["moving_s"]) for r in (R.get("R3_holmenkollen") or {}).get("sessions", [])]
+    R["variants"] = compare_variants(acts, feats, races, r3v)
     if out:
         p = ROOT / "data" / person / "fitness_eval.json"
         p.write_text(json.dumps(R, ensure_ascii=False, indent=1, default=float))

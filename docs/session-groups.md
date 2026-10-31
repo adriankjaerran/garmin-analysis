@@ -50,7 +50,11 @@ route (default: the largest ski route, i.e. the Holmenkollen rollerski climb).
   isn't in the files (all sport 12). Other sports keep their sport / activity type as type (hike,
   cycling, lap_swimming, rowing_v2, …) with `type_detail` tags: `no GPS`, `over 24 h (multi-day or timer left running)`, and for hikes `hilly` (≥ 25 m/km) / `steep` (≥ 60 m/km), `long` (≥ 20 km or ≥ 5 h),
   `fast: part by vehicle / bike?` (moving ≥ 7.5 km/h for ≥ 30 min: 5 hikes, e.g. a 112 km "hike").
-  No-GPS distances are `dist_trusted: false`. Intervals (runs and ski) get `sig` ("6×1000", "10×4:00",
+  No-GPS distances are `dist_trusted: false`. **Bislett indoor** (winter, GPS track < 30 % of the watch distance at
+  Bislet): `dist_trusted: false`, type `intervals_track` with detail `indoor laps (546.5 m)`, reps from the manual
+  laps (≥ 160 steps/min) as whole laps n × 546.5 m − 7.5 m; `indoor_bislett` {gps_cover, n_reps, single_lap,
+  rep_t_cv, rep_laps [[start_s, dur_s, n]], rep_m}. `indoor_grid()` gives consumers the matching 1 Hz speed
+  (rep distance / rep time in reps, 0 between, no altitude). See [distance-calibration.md](distance-calibration.md). Intervals (runs and ski) get `sig` ("6×1000", "10×4:00",
   "3×1800 + 2×900"; ski: durations only, "4×4:00"), `reps` [time_s, dist_m, speed_ms, hr] and `breaks_s`.
 - **Pool swims** (`pool_swim()`, FIT sport 5 with length messages and a pool length): the records of a pool swim
   come in bursts and their distance steps per length, so pauses / legs from records are garbage (12:40 "moving",

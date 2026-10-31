@@ -1,6 +1,8 @@
 // Fitness: shape per discipline (interval / long-distance running / ski) and overall over the years,
 // from scripts/fitness_model.py (fitness.json via /api/fitness). URL state:
-// ?d=interval,long,ski&ov=0&b=0&from=2023-01-01&to=2026-10-31&sd=interval&sk=race&q=
+// Two model variants: "pace" (performance only; top-level disciplines) and "hr" (variants.hr: HR decides how
+// maximal each hard session was), compared with fitness_eval.json (eval_variants).
+// ?d=interval,long,ski&ov=0&b=0&hr=0&from=2023-01-01&to=2026-10-31&sd=interval&sk=race&q=
 import { useMemo, useState } from "preact/hooks";
 import { useApi } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
@@ -10,12 +12,12 @@ import { ShapeChart } from "../components/ShapeChart";
 import "../fitness.css";
 import {
   DISCS, DISC_LABEL, KIND_HELP, KIND_LABEL, daysAgo, discColor, pm, raceT, signed, unitShort,
-  type Disc, type FitSession, type FitnessDoc, type Kind, type Yearly,
+  type Disc, type EvalDisc, type FitSession, type FitnessDoc, type Kind, type Yearly,
 } from "../lib/fitness";
 
 const DOT_CONF: Record<string, string> = { high: "good", medium: "partial", low: "none" };
 
-interface CurRow { key: string; label: string; mean: number; sd: number; conf: string | null; pct: number | null; pb: number | null;
+interface CurRow { key: string; label: string; mean: number; sd: number; hrMean: number | null; hrSd: number | null; conf: string | null; pct: number | null; pb: number | null;
   r5: number | null; r10: number | null; rh: number | null; trend: number | null; last: string | null; lastId: string | null; lastDays: number | null }
 
 export function KindMark({ kind, disc }: { kind: Kind; disc: string }) {
@@ -52,6 +54,8 @@ export function FitnessPage() {
   const discs = (query.get("d") ?? "interval,long,ski").split(",").filter((d): d is Disc => (DISCS as string[]).includes(d));
   const overall = query.get("ov") !== "0";
   const bounds = query.get("b") !== "0";
+  const hasHr = !!doc?.variants?.hr?.disciplines;
+  const withHr = hasHr && query.get("hr") !== "0";
   const from = query.get("from"), to = query.get("to");
   const sd = query.get("sd") ?? "", sk = query.get("sk") ?? "", q = (query.get("q") ?? "").toLowerCase();
 
@@ -65,21 +69,26 @@ export function FitnessPage() {
   const curRows = useMemo<CurRow[]>(() => {
     if (!doc) return [];
     const ref = doc.disciplines.interval?.current.date ?? doc.built.slice(0, 10);
+    const H = doc.variants?.hr?.disciplines;
     const rows: CurRow[] = DISCS.filter((k) => doc.disciplines[k]).map((k) => {
       const d = doc.disciplines[k], c = d.current, eq = c.race_equivalents_s;
-      return { key: k, label: DISC_LABEL[k], mean: c.mean, sd: c.sd, conf: c.confidence ?? null, pct: c.pct_of_best ?? null,
+      return { key: k, label: DISC_LABEL[k], mean: c.mean, sd: c.sd, hrMean: H?.[k]?.current.mean ?? null, hrSd: H?.[k]?.current.sd ?? null, conf: c.confidence ?? null, pct: c.pct_of_best ?? null,
         pb: d.personal_best ?? null, r5: eq?.["5k"] ?? null, r10: eq?.["10k"] ?? null, rh: eq?.half ?? null, trend: c.trend_90d,
         last: c.last_evidence?.date ?? null, lastId: c.last_evidence ? String(c.last_evidence.id) : null,
         lastDays: c.last_evidence ? daysAgo(c.last_evidence.date, ref) : null };
     });
     const o = doc.disciplines.overall;
-    if (o) rows.push({ key: "overall", label: DISC_LABEL.overall, mean: o.current.mean, sd: o.current.sd, conf: null, pct: o.current.mean,
+    if (o) rows.push({ key: "overall", label: DISC_LABEL.overall, mean: o.current.mean, sd: o.current.sd,
+      hrMean: H?.overall?.current.mean ?? null, hrSd: H?.overall?.current.sd ?? null, conf: null, pct: o.current.mean,
       pb: null, r5: null, r10: null, rh: null, trend: o.current.trend_90d, last: null, lastId: null, lastDays: null });
     return rows;
   }, [doc]);
 
   const yearRows = useMemo(() => years.map((y) => ({ y, ...Object.fromEntries(
     [...DISCS, "overall"].map((k) => [k, doc?.disciplines[k]?.yearly[y] ?? null])) })) as any[], [doc, years]);
+
+  // sessions the with-HR variant demoted (hard -> lower bound because the HR shows a sub-maximal effort)
+  const demoted = useMemo(() => (doc?.sessions ?? []).filter((s) => s.hr?.note).sort((a, b) => b.date.localeCompare(a.date)), [doc]);
 
   const sessions = useMemo(() => (doc?.sessions ?? []).filter((s) =>
     (!sd || s.discipline === sd) && (!sk || s.kind === sk) && (!from || s.date >= from) && (!to || s.date <= to) &&
@@ -94,7 +103,10 @@ export function FitnessPage() {
   };
   const curCols: Col<CurRow>[] = [
     { key: "label", label: "Discipline", render: (r) => <><span class="dot" style={{ background: discColor(r.key) }} />{r.label}</> },
-    { key: "mean", label: "Current", num: true, render: (r) => <b>{pm(r.mean, r.sd)}</b>, title: "smoothed shape today ± 1 sd" },
+    { key: "mean", label: "Current", num: true, render: (r) => <b>{pm(r.mean, r.sd)}</b>,
+      title: `smoothed shape today ± 1 sd. ${doc.variants?.pace?.label ?? "Performance only"}` },
+    ...(hasHr ? [{ key: "hrMean", label: "With HR", num: true, render: (r: CurRow) => <span class="hr-val">{pm(r.hrMean, r.hrSd)}</span>,
+      title: `same, ${doc.variants?.hr?.label ?? "with heart rate"}` } as Col<CurRow>] : []),
     { key: "unit", label: "Unit", render: (r) => <span class="muted">{unitShort(r.key)}</span>, sort: () => null },
     { key: "conf", label: "Confidence", render: (r) => r.conf ? <><span class={"dot " + DOT_CONF[r.conf]} />{r.conf}</> : <span class="muted">—</span>,
       title: "high: sd < 1, medium: < 2, low: ≥ 2 (no recent evidence)" },
@@ -141,7 +153,7 @@ export function FitnessPage() {
       <section class="first">
         <div class="head">
           <h1>Fitness</h1>
-          <span class="sub">Shape per discipline on the Daniels VDOT scale · model built {doc.built.slice(0, 16).replace("T", " ")} · HR not used in the score</span>
+          <span class="sub">Shape per discipline on the Daniels VDOT scale · model built {doc.built.slice(0, 16).replace("T", " ")} · {hasHr ? "two variants: performance only and with HR" : "HR not used in the score"}</span>
           <div class="tools">
             {rb && <span class="muted">{rb}</span>}
             <button onClick={() => rebuild(setRb)} title="Re-run scripts/fitness_model.py (≈0.1 s with cached features)">Rebuild</button>
@@ -165,6 +177,8 @@ export function FitnessPage() {
                 <span class="dot" style={{ background: discColor("overall") }} />Overall %
               </button>
               <button class={"chip" + (bounds ? " on" : "")} onClick={() => setQuery({ b: bounds ? "0" : null })} title={KIND_HELP.bound}>Bounds</button>
+              {hasHr && <button class={"chip" + (withHr ? " on" : "")} onClick={() => setQuery({ hr: withHr ? "0" : null })}
+                title={doc.variants?.hr?.label}><span class="line-sw dash" />With HR</button>}
             </div>
             <span class="muted">Years</span>
             <select value={yFrom} onChange={(e) => setQuery({ from: (e.target as HTMLSelectElement).value ? (e.target as HTMLSelectElement).value + "-01-01" : null })}>
@@ -179,8 +193,12 @@ export function FitnessPage() {
             <button disabled={!from && !to} onClick={() => setQuery({ from: null, to: null })}>All years</button>
           </div>
         </div>
-        <ShapeChart doc={doc} discs={discs} overall={overall} bounds={bounds} from={from} to={to} highlight={hover}
+        <ShapeChart doc={doc} discs={discs} overall={overall} bounds={bounds} from={from} to={to} highlight={hover} withHr={withHr}
           onZoom={(a, b) => setQuery({ from: a, to: b })} />
+        {withHr && <div class="legend-row muted">
+          <span><span class="line-sw" />{doc.variants?.pace?.label ?? "Performance only"} (± 1 sd band)</span>
+          <span><span class="line-sw dash" />{doc.variants?.hr?.label ?? "With HR"}</span>
+        </div>}
         <div class="legend-row muted">
           <span><KindMark kind="race" disc="interval" />race</span>
           <span><KindMark kind="hard" disc="interval" />hard session (paler = lower weight)</span>
@@ -189,6 +207,8 @@ export function FitnessPage() {
           <span>Ski is on its own VDOT-equivalent scale (physics-based), comparable in trend, not in absolute level.</span>
         </div>
       </section>
+
+      {hasHr && <VariantSection doc={doc} demoted={demoted} />}
 
       <section>
         <div class="head"><h2>By year</h2><span class="sub">mean and max of the daily shape; n = races + hard sessions; * = 0–2 pieces of evidence (interpolated)</span></div>
@@ -230,9 +250,12 @@ export function FitnessPage() {
               <li><b>Smoothing</b>: a daily random walk (Kalman + RTS smoother) with robust, asymmetric weights: a training session far below
                 the shape is weak evidence (it may not have been all-out), a race counts fully. In gaps the band widens.</li>
               <li><b>Overall</b>: % of personal best per discipline, precision-weighted across disciplines (ski and run VDOT are never averaged).</li>
-              <li><b>Heart rate is not used in the score.</b> It made race prediction worse (MAE 1.86 → 2.37 VDOT) and added noise: the
-                wrist sensor under-reads hard intervals erratically and the watch change shifted HR by ~0.17 HRR. HR is shown per session as
-                diagnostics only (effort %, efficiency, decoupling).</li>
+              <li><b>With HR</b> (dashed line): the same model, but a hard session whose heart rate shows a sub-maximal effort
+                becomes a lower bound, and the other hard sessions are weighted by the probability that they were maximal (p_max).
+                The table under the chart compares both variants on held-out data.</li>
+              <li><b>Heart rate as a direct score correction</b> was tested and made race prediction worse (MAE 1.86 → 2.37 VDOT): the
+                FR935 wrist sensor under-reads hard intervals erratically and the watch change shifted HR by ~0.17 HRR. So HR only judges
+                intent in the With HR variant, and FR935 HR alone can never demote a session. Settings are tuned on few cases (in-sample).</li>
             </ul>
             <p class="muted">Full model, evaluation and limitations: <span class="mono">docs/fitness-model.md</span>. Engine:
               <span class="mono"> scripts/fitness_model.py</span> → <span class="mono">data/&lt;person&gt;/fitness.json</span>.</p>
@@ -240,5 +263,86 @@ export function FitnessPage() {
         </details>
       </section>
     </main>
+  );
+}
+
+type Better = "low" | "high";
+const EVAL_COLS: { key: keyof EvalDisc; label: string; better: Better; d: number; title: string }[] = [
+  { key: "race_mae", label: "Race MAE", better: "low", d: 2, title: "mean absolute error predicting race VDOT from the shape before the race" },
+  { key: "forecast_mae", label: "Forecast MAE", better: "low", d: 2, title: "mean absolute error of the next hard session / race from the prior shape" },
+  { key: "loglik", label: "Log-lik", better: "high", d: 3, title: "mean predictive log-likelihood of the next evidence (higher = better calibrated)" },
+  { key: "r3_corr_prior_shape_vs_log_speed", label: "R3 corr", better: "high", d: 3,
+    title: "ski: correlation of the prior shape with log speed on the R3 Holmenkollen climb (independent check)" },
+];
+
+/** "Performance vs with-HR": eval comparison (fitness_eval.json variants.default) + the sessions HR demoted */
+function VariantSection({ doc, demoted }: { doc: FitnessDoc; demoted: FitSession[] }) {
+  const ev = doc.eval_variants?.default;
+  const pl = doc.variants?.pace?.label ?? "Performance only", hl = doc.variants?.hr?.label ?? "With HR";
+  const cell = (key: string, k: (typeof EVAL_COLS)[number], a?: number, b?: number, mine?: number) => {
+    if (mine === undefined || mine === null) return <td key={key} class="num muted">—</td>;
+    const other = mine === a ? b : a;
+    const win = other !== undefined && other !== null && mine !== other && (k.better === "low" ? mine < other : mine > other);
+    return <td key={key} class={"num" + (win ? " better" : "")}>{mine.toFixed(k.d)}</td>;
+  };
+  return (
+    <section>
+      <div class="head">
+        <h2>Performance vs with HR</h2>
+        <span class="sub">held-out evaluation of both variants (scripts/fitness_eval.py); better value in green</span>
+      </div>
+      <div class="cols" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <div>
+          {ev ? (
+            <div class="tablewrap">
+              <table class="variant-eval">
+                <thead>
+                  <tr><th rowSpan={2}>Discipline</th>{EVAL_COLS.map((k) => <th key={k.key} colSpan={2} class="num grp" title={k.title}>{k.label}</th>)}</tr>
+                  <tr>{EVAL_COLS.map((k) => [<th key={k.key + "p"} class="num" title={pl}>perf.</th>,
+                    <th key={k.key + "h"} class="num" title={hl}>HR</th>])}</tr>
+                </thead>
+                <tbody>
+                  {DISCS.filter((d) => ev.pace?.[d] || ev.hr?.[d]).map((d) => {
+                    const p = ev.pace?.[d], h = ev.hr?.[d];
+                    return (
+                      <tr key={d}>
+                        <td><span class="dot" style={{ background: discColor(d) }} />{DISC_LABEL[d]} <span class="muted">n {p?.n ?? h?.n}</span></td>
+                        {EVAL_COLS.map((k) => {
+                          const a = p?.[k.key] as number | undefined, b = h?.[k.key] as number | undefined;
+                          return [cell(k.key + "p", k, a, b, a), cell(k.key + "h", k, a, b, b)];
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : <div class="empty">No evaluation yet: run <span class="mono">uv run scripts/fitness_eval.py</span>.</div>}
+          <p class="muted" style={{ fontSize: "var(--fs-12)" }}>MAE in VDOT (lower is better); log-lik and R3 corr: higher is better.
+            Race MAE for interval / long only, R3 corr for ski only.</p>
+        </div>
+        <div>
+          <h3 class="muted" style={{ margin: "0 0 var(--space-1)", fontSize: "var(--fs-13)" }}>Demoted by HR <span class="count">{demoted.length}</span></h3>
+          {demoted.length ? (
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th>Date</th><th>Type</th><th class="num">Score</th><th class="num" title="probability the session was maximal, from HR">p max</th><th>Note</th></tr></thead>
+                <tbody>
+                  {demoted.map((s) => (
+                    <tr key={s.id + s.discipline}>
+                      <td><a href={`/activities/${s.id}`}>{s.date}</a></td>
+                      <td><span class="dot" style={{ background: discColor(s.discipline) }} />{s.type.replace(/_/g, " ")}</td>
+                      <td class="num">{s.score.toFixed(1)}</td>
+                      <td class="num">{s.hr?.p_max === null || s.hr?.p_max === undefined ? "—" : s.hr.p_max.toFixed(2)}</td>
+                      <td class="muted">{s.hr?.note}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <div class="empty">No session demoted.</div>}
+        </div>
+      </div>
+    </section>
   );
 }

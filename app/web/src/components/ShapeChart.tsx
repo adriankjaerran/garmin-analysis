@@ -1,6 +1,7 @@
 // Weekly shape per discipline (mean line + ±1 sd band) over all years, overall % of best on a right
 // axis, and every session's evidence as markers (race = diamond, hard = dot, bound = ring,
-// implausible = cross). Hover a marker -> session details, click -> activity. Drag across the plot to zoom.
+// implausible = cross). With `withHr`, the "with HR" model variant (fitness.json variants.hr) is drawn per
+// discipline as a dashed line in the same colour, without a band. Hover a marker -> session details, click -> activity. Drag across the plot to zoom.
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { useEffect, useRef } from "preact/hooks";
@@ -27,11 +28,13 @@ interface Props {
   from: string | null;
   to: string | null;
   highlight: string | null;
+  /** also draw the "with HR" variant (dashed, no band) */
+  withHr?: boolean;
   onZoom: (from: string | null, to: string | null) => void;
   height?: number;
 }
 
-export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, onZoom, height = 380 }: Props) {
+export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, withHr = false, onZoom, height = 380 }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const read = useRef<HTMLDivElement>(null);
   const tip = useRef<HTMLDivElement>(null);
@@ -60,7 +63,8 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, o
     const data: (number | null)[][] = [x];
     const series: uPlot.Series[] = [{}];
     const bandsCfg: uPlot.Band[] = [];
-    const lines: { key: string; idx: number }[] = [];
+    const lines: { key: string; idx: number; hr: { m: (number | null)[]; sd: (number | null)[] } | null }[] = [];
+    const HD = withHr ? doc.variants?.hr?.disciplines : undefined;
     let lo = Infinity, hi = -Infinity;
     for (const k of discs) {
       const d = D[k];
@@ -79,7 +83,20 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, o
         { stroke: "transparent", width: 0, scale: "v", points: { show: false } },
         { stroke: "transparent", width: 0, scale: "v", points: { show: false } });
       bandsCfg.push({ series: [base + 1, base + 2], fill: rgba(c, 0.13) });
-      lines.push({ key: k, idx: base });
+      let hr: (typeof lines)[number]["hr"] = null;
+      if (HD?.[k]) {
+        const hm: (number | null)[] = xs.map(() => null), hs = [...hm];
+        for (const w of HD[k].weekly) {
+          const i = pos.get(w.date);
+          if (i === undefined) continue;
+          hm[i] = w.mean; hs[i] = w.sd;
+          lo = Math.min(lo, w.mean); hi = Math.max(hi, w.mean);
+        }
+        data.push(hm);
+        series.push({ label: k + " (with HR)", stroke: c, width: 1.5, dash: [5, 4], scale: "v", points: { show: false } });
+        hr = { m: hm, sd: hs };
+      }
+      lines.push({ key: k, idx: base, hr });
     }
     // overall (% of best) goes in its own small panel below, x-synced
     let ov: (number | null)[][] | null = null;
@@ -142,10 +159,11 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, o
     const fmtRead = (i: number | null | undefined) => {
       if (i === null || i === undefined) i = xs.length - 1;
       const parts = [`<span class="muted">week to ${xs[i]}</span>`];
-      for (const { key, idx } of lines) {
+      for (const { key, idx, hr } of lines) {
         const m = data[idx][i], up = data[idx + 1][i];
         if (m === null) continue;
-        parts.push(`<span><i class="dot" style="background:${discColor(key)}"></i>${DISC_LABEL[key]} ${pm(m, (up as number) - m)}</span>`);
+        const h = hr && hr.m[i] !== null ? ` <span class="muted" title="with HR">· HR ${pm(hr.m[i], hr.sd[i])}</span>` : "";
+        parts.push(`<span><i class="dot" style="background:${discColor(key)}"></i>${DISC_LABEL[key]} ${pm(m, (up as number) - m)}${h}</span>`);
       }
       if (ov && ov[1][i] !== null) parts.push(`<span><i class="dot" style="background:${discColor("overall")}"></i>Overall ${(ov[1][i] as number).toFixed(1)} %</span>`);
       read.current!.innerHTML = parts.join("");
@@ -244,7 +262,7 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, o
       over.removeEventListener("click", onClick); over.removeEventListener("dblclick", onDbl);
       u.destroy(); u2?.destroy(); plot.current = null;
     };
-  }, [doc, discs.join(","), overall, bounds, from, to, height]);
+  }, [doc, discs.join(","), overall, bounds, withHr, from, to, height]);
 
   return (
     <div class="shape-chart">

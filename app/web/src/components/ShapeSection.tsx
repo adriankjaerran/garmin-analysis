@@ -50,6 +50,15 @@ export function ShapeSection({ id }: { id: string }) {
                   <dt>Score − shape</dt><dd>{delta === null ? "—" : signed(delta)}</dd>
                   <dt>Shape now</dt><dd>{s.current ? <>{pm(s.current.mean, s.current.sd)} <span class="muted">{s.current.pct_of_best !== undefined ? `${s.current.pct_of_best.toFixed(1)} % of best ${s.personal_best?.toFixed(1)}` : ""}</span></> : "—"}</dd>
                   <dt>Race equivalents</dt><dd>{eq ? `5k ${raceT(eq["5k"])} · 10k ${raceT(eq["10k"])} · half ${raceT(eq.half)}` : <span class="muted">{s.discipline === "ski" ? "n/a (ski scale)" : "—"}</span>}</dd>
+                  {s.hr && <>
+                    <dt title={s.hr.label ?? "with-HR model variant"}>With HR</dt>
+                    <dd title={`${s.hr.label ?? ""}: ${KIND_HELP[s.hr.kind]}`}>{KIND_LABEL[s.hr.kind]}{s.hr.kind !== s.kind ? <span class="muted"> (was {KIND_LABEL[s.kind]})</span> : null}</dd>
+                    <dt title="weight and p(maximal) in the with-HR variant">HR weight</dt>
+                    <dd>{s.hr.weight === null ? "—" : s.hr.weight.toFixed(2)}
+                      <span class="muted">{s.hr.p_max !== null && s.hr.p_max !== undefined ? ` · p max ${s.hr.p_max.toFixed(2)}` : ""}
+                        {s.hr.shape ? ` · shape ${pm(s.hr.shape_at ?? s.hr.shape.mean, s.hr.shape.sd)}` : ""}</span></dd>
+                    {s.hr.note && <><dt>HR note</dt><dd class="muted" title={s.hr.note}>{s.hr.note}</dd></>}
+                  </>}
                 </dl>
                 <h3>Components</h3>
                 <div class="tablewrap">
@@ -78,8 +87,8 @@ export function ShapeSection({ id }: { id: string }) {
               </table>
             </div>
           ) : <div class="empty">No usable HR in this session.</div>}
-          <p class="note"><span class="dot none" />HR is <b>not used in the score</b>{data.hr_used_in_score ? " (the model says it is: check fitness.json)" : ""}. In the evaluation it made race
-            prediction worse (MAE 1.86 → 2.37 VDOT): the wrist sensor under-reads hard intervals erratically and the watch change shifted HR.
+          <p class="note"><span class="dot none" />HR is <b>not used in the performance-only score</b>{data.sessions.some((s) => s.hr) ? " (the “With HR” line shows how the HR variant treats this session)" : ""}{data.hr_used_in_score ? " (the model says it is: check fitness.json)" : ""}. Used as a direct score correction it made race
+            prediction worse (MAE 1.86 → 2.37 VDOT), so the HR variant only uses it to judge whether a hard session was maximal.
             These numbers are for context only.</p>
         </div>
       </div>

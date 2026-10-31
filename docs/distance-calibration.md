@@ -127,6 +127,30 @@ All 492 runs downloaded (backfill 2026-10-30, 393 calls at 3 s, no 429).
 - Caveats: the environment guess is a jitter threshold and doesn't really find cities (Copenhagen and Rome count as
   "open"). Satellites and accuracy can't be decoded from `gps_metadata`. A third device (product 3077, 6 runs in 2021) exists.
 
+### Bislett indoor lap, winter (7 sessions; `session_groups.bislett_indoor`, 2026-10-31)
+In winter the reps are run on the indoor lap under the Bislett stands: **546.5 m per lap** (Adrian), and each rep
+stops 7–8 m before the line, so **rep = n laps × 546.5 m − 7.5 m** (1 lap 539.0 m, 2 laps 1,085.5 m, 3 laps 1,632.0 m).
+- **Detection:** main place Bislet and GPS track length < 30 % of the watch distance. The 7 sessions are at
+  0.3–6 %, every other Bislet run is > 80 %. The few GPS fixes sit 40–60 m outside lane 1 (the stands).
+- **The watch distance is made up there.** Rest laps at 10–70 steps/min (standing / walking: 7–75 strides) still
+  log 200–1,100 m; on 2026-01-20 the 1-lap reps read 464–556 m. Session distance: `dist_trusted: false`.
+- **Reps = manual laps at ≥ 160 steps/min** (FIT lap `total_cycles`). n laps per block of similar-time reps (±15 %)
+  = median watch distance / 546.5 rounded; sessions of steady ~100 s reps (≥ 6, CV ≤ 8 %) use n = 1. A rep whose
+  implied pace is outside 2:40–4:30 /km gets no distance (none did).
+
+| Date | Reps | n laps | Pace /km | Old sig (speed detector) | Fitness interval item, old → new |
+|---|---|---|---|---|---|
+| 2024-12-10 | 3 × 6:00 | 3 | 3:31–3:40 | 1×1500 + 3×7:00 | 55.6 → 50.6 |
+| 2024-12-17 | 9 × 1:28–1:43 | 1 | 2:51–3:10 | 8 reps (mixed) | 57.3 → 55.0 |
+| 2025-01-07 | 6 × ~4:00 | 2 | 3:29–3:50 | 4×4:00 + 1×3000 | 50.8 → 50.1 |
+| 2025-01-28 | 6 × 4:00 | 2 | 3:26–3:42 | 7 reps (mixed) | 52.1 → 48.2 |
+| 2025-02-04 | 6 × 3:45 | 2 | 3:17–3:34 | 3×4:00 + 1×3600 | 55.0 → 51.1 |
+| 2026-01-13 | 3 × 5:45, 3:45, 1:30 | 3, 2, 1 | 3:27–3:37 (1 lap 2:53) | 5 reps (mixed) | 50.0 → 50.9 |
+| 2026-01-20 | 10 × ~1:42 | 1 | 3:05–3:15 (last 2:53) | 1×2400 + 1×7700 + 2×8:45 | 66.2 → 54.4 |
+
+The old "long" bound items of all 7 (and the implausible 68.6 on 2026-01-20) are gone; the 2026 interval max
+went 56.2 → 54.9, no other session changed. Between reps the speed is 0 (standing rests).
+
 ## Which number to believe
 1. **Track mode, lap button pressed:** Garmin lap distance (exactly the nominal lane-1
    distance). If you're forced out to lane 2 for a bend, add ≈ 3.8 m per bend (7.7 m per

@@ -173,3 +173,32 @@ def test_fitness_json_loads(client):
     assert len(d["sessions"]) == len(raw["sessions"])
     cur = d["disciplines"]["interval"]["current"]
     assert 30 < cur["mean"] < 85
+
+
+def test_fitness_variants(client):
+    raw = json.loads((DATA / "fitness.json").read_text())
+    if "variants" not in raw:
+        pytest.skip("fitness.json has no model variants")
+    d = client.get("/api/fitness").json()
+    v = d["variants"]
+    assert v["pace"]["label"] and v["hr"]["label"]
+    hd = v["hr"]["disciplines"]
+    assert {"interval", "long", "ski"} <= set(hd)
+    cur = hd["interval"]["current"]
+    assert 30 < cur["mean"] < 85 and "trend_90d" in cur and "last_evidence" in cur
+    # filters apply to the variant series too
+    f = client.get("/api/fitness?discipline=long&from=2024-01-01").json()
+    assert set(f["variants"]["hr"]["disciplines"]) == {"long"}
+    assert all(w["date"] >= "2024-01-01" for w in f["variants"]["hr"]["disciplines"]["long"]["weekly"])
+    # eval comparison: null without fitness_eval.json, else pace/hr per discipline
+    ev = d["eval_variants"]
+    assert ev == client.get("/api/fitness/eval").json()
+    if (DATA / "fitness_eval.json").exists() and ev is not None:
+        assert {"pace", "hr"} <= set(ev["default"])
+        assert "forecast_mae" in ev["default"]["hr"]["interval"]
+    # session endpoint carries the with-HR block
+    s = next((s for s in d["sessions"] if s.get("hr")), None)
+    if s:
+        r = client.get(f"/api/fitness/session/{s['id']}").json()
+        blk = next(x for x in r["sessions"] if x["discipline"] == s["discipline"])["hr"]
+        assert {"kind", "weight", "p_max", "note", "shape", "label"} <= set(blk)
