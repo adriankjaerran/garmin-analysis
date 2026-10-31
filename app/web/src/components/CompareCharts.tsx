@@ -114,8 +114,9 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
       } as uPlot.Series));
       if (P.median) series.push({ stroke: REF_MED, width: 1.5, dash: [5, 4], points: { show: false }, spanGaps: false });
       const u = new uPlot({
-        width, height: P.height + (isLast ? 22 : 0),
-        padding: [6, 8, 0, 0],
+        // non-last panels get 7 px below the plot so a y tick label at the bottom edge isn't cut in half
+        width, height: P.height + (isLast ? 22 : 7),
+        padding: [6, 8, isLast ? 0 : 7, 0],
         legend: { show: false },
         cursor: {
           sync: { key: sync.key, setSeries: false },

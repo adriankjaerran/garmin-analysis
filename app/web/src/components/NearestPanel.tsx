@@ -5,7 +5,7 @@ import { useApi } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
 import { dur, km, kmh, pace, pace100 } from "../lib/format";
 import { decodePolyline, unionBBox, type BBox } from "../lib/geo";
-import { compareUrl, type NearestResult, type NearRow } from "../lib/search";
+import { compareUrl, coreBBox, type NearestResult, type NearRow } from "../lib/search";
 import { Table } from "./Table";
 import { TracksMap } from "./TracksMap";
 import { SportDot } from "./ActivityBits";
@@ -54,7 +54,9 @@ export function NearestPanel({ id }: { id: string }) {
     const near = (b: BBox) => !q || (Math.abs((b[0] + b[2]) / 2 - (q[0] + q[2]) / 2) < 1 && Math.abs((b[1] + b[3]) / 2 - (q[1] + q[3]) / 2) < 0.5);
     const bs = rows.filter((r) => r.poly && r.bbox).map((r) => r.bbox as BBox);
     const close = bs.filter(near);
-    return unionBBox([q, ...(q || close.length ? close : bs)].filter((b): b is BBox => !!b));
+    // no track of its own (treadmill, pool): the densest cluster of the results, not every one of them
+    if (!q) return (coreBBox(bs).fit as BBox | null) ?? unionBBox(bs);
+    return unionBBox([q, ...close]);
   }, [data]);
   const ids = [id, ...rows.map((r) => r.id)];
   const comps = data ? Object.entries(data.weights).filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]) : [];

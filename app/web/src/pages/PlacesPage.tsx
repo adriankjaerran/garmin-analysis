@@ -161,7 +161,7 @@ export function PlacesPage() {
         </div>
       </div>
       <div class="split">
-        <div class="left"><MapView style={{ flex: 1 }} onReady={onReady} /></div>
+        <div class="left"><MapView style={{ flex: 1 }} onReady={onReady} defaultBasemap="grey" /></div>
         <div class="right" style={{ width: "560px" }}>
           {r ? (
             <>
@@ -193,12 +193,13 @@ export function PlacesPage() {
                 <Table rows={r.members} rowKey={(a) => a.id} highlight={hlMember} onHover={(a) => setHlMember(a?.id ?? null)}
                   onRow={(a) => navigate(`/activities/${a.id}`)} defaultSort={["date", -1]} cols={[
                     { key: "date", label: "Date" },
-                    { key: "stype", label: "Workout", render: (a) => <span title={a.name ?? ""}>{whatShort(a)}</span>, sort: (a) => whatShort(a) },
+                    { key: "stype", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "84px" }} title={`${whatShort(a)} · ${a.name ?? ""}`}>{whatShort(a)}</span>, sort: (a) => whatShort(a) },
                     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s) },
                     { key: "pause_s", label: "Paused", num: true, render: (a) => dur(a.pause_s) },
-                    { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: speedSort },
+                    // one sport per route: "Pace" or "Speed" (the long "Pace / speed" header pushed Dir out of the pane)
+                    { key: "speed", label: r.sport === "run" ? "Pace" : "Speed", num: true, render: speedText, sort: speedSort },
                     { key: "hr", label: "HR", num: true, render: (a) => a.hr ?? "—" },
-                    { key: "route_dir", label: "Dir", render: (a) => a.route_dir ?? "—" },
+                    { key: "route_dir", label: "Dir", title: "direction along the route (fwd / rev)", render: (a) => a.route_dir ?? "—" },
                   ]} />
               </div>
             </>

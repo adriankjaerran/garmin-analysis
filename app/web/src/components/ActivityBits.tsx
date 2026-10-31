@@ -30,14 +30,17 @@ export function activityCols(opts: { date?: boolean } = {}): Col<Activity>[] {
   if (opts.date !== false) cols.push({ key: "start", label: "Date", render: (a) => <span>{a.date} <span class="muted">{time(a.start)}</span></span> });
   else cols.push({ key: "start", label: "Start", render: (a) => time(a.start) });
   cols.push(
-    { key: "type", label: "Workout", render: (a) => <span title={typeText(a)}><SportDot sport={a.sport} />{what(a)}</span>, sort: (a) => a.sport + what(a) },
+    { key: "type", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "210px" }} title={`${what(a)} · ${typeText(a)}`}><SportDot sport={a.sport} />{what(a)}</span>, sort: (a) => a.sport + what(a) },
     { key: "dist_km", label: "km", num: true, render: (a) => km(a.dist_km) },
     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s ?? a.dur_s) },
     { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: speedSort },
     { key: "hr", label: "HR", num: true, render: (a) => num(a.hr) },
     { key: "elev", label: "Climb", num: true, render: (a) => num(a.elev) },
-    { key: "place", label: "Place", render: placeText, sort: (a) => placeText(a) },
-    { key: "track", label: "GPS", render: (a) => <span><span class={"dot " + (a.track ? "good" : a.fit ? "partial" : "none")} />{a.track ? "track" : a.fit ? "no GPS" : "no file"}</span> },
+    { key: "place", label: "Place", render: (a) => <span class="clip" style={{ maxWidth: "140px" }} title={placeText(a)}>{placeText(a)}</span>, sort: (a) => placeText(a) },
+    // dot only (green = GPS track, amber = FIT without GPS, grey = no file); the text is the tooltip
+    { key: "track", label: "GPS", title: "green = GPS track, amber = FIT file without GPS, grey = no file (hover a dot)",
+      render: (a) => <span class={"dot " + (a.track ? "good" : a.fit ? "partial" : "none")} title={a.track ? "GPS track" : a.fit ? "no GPS" : "no file"} />,
+      sort: (a) => (a.track ? 2 : a.fit ? 1 : 0) },
   );
   return cols;
 }

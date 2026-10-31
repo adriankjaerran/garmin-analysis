@@ -29,5 +29,5 @@ details.howto[open] summary::before { content: "▾"; }
 .shape-block h3 { font-size: var(--fs-13); font-weight: var(--fw-semibold); color: var(--text-muted); margin: var(--space-3) 0 var(--space-1); }
 .shape-block td.wrap { white-space: normal; max-width: 420px; }
 .shape-chart .subtitle { color: var(--text-muted); margin: var(--space-2) 0 0; font-size: var(--fs-12); }
-.fit-sessions td:nth-child(5) { max-width: 560px; }
+.fit-sessions td:nth-child(5) { max-width: 500px; }   /* 560 overflowed the table by ~50 px at 1600 px (σ column clipped) */
 .fit-sessions td:nth-child(4) { max-width: 200px; }

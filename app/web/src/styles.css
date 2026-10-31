@@ -129,7 +129,10 @@ dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow
 .map .overlay { position: absolute; z-index: 2; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-control); padding: var(--space-1) var(--space-2); font-size: var(--fs-12); box-shadow: 0 1px 3px rgba(20, 24, 28, 0.12); }
 .map .overlay.bl { left: var(--space-2); bottom: var(--space-5); }
 .map .overlay.tr { right: var(--space-2); top: var(--space-2); }
-.map .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); z-index: 1; pointer-events: none; }
+/* centred note over a map ("No GPS tracks", "Select a group…"): a chip, so it stays readable over the basemap labels */
+.map .msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: var(--text-muted); z-index: 1; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-control); padding: var(--space-1) var(--space-2);
+  font-size: var(--fs-12); box-shadow: 0 1px 3px rgba(20, 24, 28, 0.12); white-space: nowrap; }
 .maplibregl-ctrl-attrib { font-size: 11px; }
 .maplibregl-popup-content { font-family: var(--font); font-size: var(--fs-12); padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); box-shadow: var(--shadow-float); }
 .maplibregl-popup-tip { display: none; }

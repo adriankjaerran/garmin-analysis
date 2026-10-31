@@ -271,7 +271,11 @@ export function ComparePage() {
   const D = useMemo<DD | null>(() => {
     if (!r || !r.series || !Object.keys(r.series).length) return null;
     const sids = r.ids.map(String).filter((i) => r.series[i]);
-    const refId = r.reference.kind === "session" ? String(r.reference.id) : null;
+    // the reference may have no series in this mode (e.g. a pool swim without reps in Intervals): fall back to the engine's
+    // anchor session, else no reference line (gap vs the median)
+    const ref0 = r.reference.kind === "session" ? String(r.reference.id) : null;
+    const anchor = r.anchor_id;
+    const refId = ref0 && r.series[ref0] ? ref0 : ref0 && anchor != null && r.series[String(anchor)] ? String(anchor) : null;
     const { colors, many } = colorsFor(sids, refId);
     const order = refId ? [...sids.filter((i) => i !== refId), refId] : sids;
     const X = buildGrid(r);
@@ -334,7 +338,7 @@ export function ComparePage() {
       const has = (ys: Record<string, N[]>) => Object.values(ys).some((a) => a.some((v) => v !== null));
       if (has(speedP.ys)) P.push(speedP);   // sessions without distance: HR only
       // gap inside each rep (seconds at the same distance): the clearest "who is faster in this rep, by how much"
-      if (r.axis?.rep_axis !== "normalized" && r.axis?.slot_x0) {
+      if (r.axis?.rep_axis !== "normalized" && r.axis?.slot_x0 && D.sids.length >= 2) {   // one session: nothing to gap against
         const refSp = D.refId ? D.repSpeed[D.refId] : stats(D.sids.map((i) => D.repSpeed[i])).med;
         const gaps: Record<string, N[]> = {};
         for (const i of D.sids) gaps[i] = repGap(D.X, r.axis.slot_x0, r.axis.slot_width, D.repSpeed[i], refSp);
@@ -344,7 +348,8 @@ export function ComparePage() {
       P.push(hrP);
     }
     else { P.push(hrP); if (Object.values(speedP.ys).some((a) => a.some((v) => v !== null))) P.push(speedP); }
-    return P;
+    // drop panels without any data (pool swims: no HR / elevation) instead of an empty chart with a 0–1 axis
+    return P.filter((p) => p.single || Object.values(p.ys).some((a) => a.some((v) => v !== null && v !== undefined)));
   }, [D, metric, refKind, mode]);
 
   const ticks = useMemo(() => (r ? alignedTicks(r) : null), [r]);

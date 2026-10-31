@@ -13,3 +13,8 @@
 .tablewrap::-webkit-scrollbar-thumb { background: var(--chart-muted); border-radius: 4px; border: 1px solid var(--surface); }
 .tablewrap::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 .tablewrap::-webkit-scrollbar-track, .tablewrap::-webkit-scrollbar-corner { background: var(--surface-tint); }
+/* dense body rows (Fabstack console tables): 28 px like the controls; headers keep var(--row) (32 px).
+   Tables with their own row height (.legend, .ladder-rank) use more specific selectors and win. */
+tbody td { height: 28px; }
+/* a cell's content clipped to its own max-width (set inline) with an ellipsis; the full text is the tooltip */
+td .clip { display: inline-block; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

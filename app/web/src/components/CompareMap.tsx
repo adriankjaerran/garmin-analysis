@@ -96,5 +96,5 @@ export function CompareMap({ tracks, order, colors, refId, focus, many, position
       geometry: { type: "Point", coordinates: positions[id]! } })) });
   }, [map, positions, focus, colors, many]);
 
-  return <MapView onReady={onReady} class="bordered">{!Object.keys(tracks).length && <div class="msg">No GPS tracks</div>}</MapView>;
+  return <MapView onReady={onReady} class="bordered" defaultBasemap="grey">{!Object.keys(tracks).length && <div class="msg">No GPS tracks</div>}</MapView>;
 }

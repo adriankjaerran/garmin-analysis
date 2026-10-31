@@ -77,8 +77,8 @@ No JS errors or console warnings were logged on any page. API timings (warm, cur
 | 27 ✅ | Day | Calendar is small (≈ 750 px of 1350) — make cells scale to the width; HR chart clips peaks at the 99th percentile (looks cut off); x ticks at 02:46 / 05:33 instead of whole hours | SS-03, SS-06 | `components/Calendar.tsx`, `pages/DayPage.tsx` (WP-C) <br>**WP-B:** x ticks now whole hours, HR y range up to the max instead of p99 — calendar width still C <br>**WP-C:** calendar cells scale with the width (12–22 px) |
 | 28 ✅ | Compare | Map column is short with empty space below; make it sticky while scrolling the tables; empty `/compare` list has no search box | SS-24, SS-29 | `pages/ComparePage.tsx`, `compare.css` (WP-D) <br>**WP-D:** intervals: the empty space under the map now holds “Who was faster” (mean rep pace per session vs the reference, with bars; hover legend replaces it while on the charts); landing list has a filter box (any words: 6×1000, Bislett, R3, 2025) over all activities. The map stays sticky only next to the charts (tables below are full width) |
 | 29 ✅ | Compare | Cross-sport sets allowed (pool swim vs 6×1000) — warn when sports differ | SS-30 | `pages/ComparePage.tsx` (WP-D) <br>**WP-D:** ⚠ note under the mode bar when the sessions' sports differ |
-| 30 (✅ C part) | Activities list | Rows 32 px (less dense than "dense"); no route / rep pace columns; side panel lacks Compare / Closest links | SS-09, SS-10 | `pages/ActivitiesPage.tsx` (WP-C) <br>**WP-C:** side panel: Compare + Closest buttons (`?go=closest` scrolls there); `?place=` filter chip. Row height (table.css) not changed |
-| 31 (✅ D part) | Maps | Colourful Kartverket topo competes with coloured tracks on track-heavy maps (Places, Compare, Find); Map page already defaults to Grey | SS-17, SS-21 | per-page `defaultBasemap="grey"` (owner of each page) <br>**WP-D:** Find & group results and groups maps default to Grey (stored choice still wins). CompareMap is not in D's files |
+| 30 ✅ | Activities list | Rows 32 px (less dense than "dense"); no route / rep pace columns; side panel lacks Compare / Closest links | SS-09, SS-10 | `pages/ActivitiesPage.tsx` (WP-C) <br>**WP-C:** side panel: Compare + Closest buttons (`?go=closest` scrolls there); `?place=` filter chip <br>**QA:** body rows 28 px (`tbody td` in table.css; headers 32 px); GPS column = dot only, Workout / Place clipped with tooltip, so the list fits at 1600 px without side-scrolling |
+| 31 ✅ | Maps | Colourful Kartverket topo competes with coloured tracks on track-heavy maps (Places, Compare, Find); Map page already defaults to Grey | SS-17, SS-21 | per-page `defaultBasemap="grey"` (owner of each page) <br>**WP-D:** Find & group results and groups maps default to Grey (stored choice still wins). CompareMap is not in D's files <br>**QA:** Compare and Places & routes maps default to Grey too |
 | 32 ✅ | Fitness | Overall % chart starts with an artificial dip (first week); main chart y range pulled down to 30 by lower bounds — consider clamping to shape band ± margin with bounds clipped | SS-31 | `components/ShapeChart.tsx` (WP-B) <br>**WP-B:** overall % starts once every discipline has data (no warm-up dip); hard/race evidence widens the VDOT range at most 3 beyond the bands (was 6 below) |
 | 33 ✅ | Find & group | Date inputs show today's date as grey placeholder (looks like a set filter); "Bislet (94)" vs touched counts unexplained | SS-20, SS-21 | `pages/SearchPage.tsx` (WP-D) <br>**WP-D:** date filters are empty “from” / “to” boxes until focused; place / region options read “Bislett (94 · 108 touched)”, groups “Activities” column “94 · 108 touched”, tooltips explain main vs touched |
 | 34 ✅ | Activity | Ski climbs (R3) have no reps; the Holmenkollen "intervals" in Compare come from pauses — a short note "reps = segments between stops" on ski compares would help | SS-25 | `pages/ComparePage.tsx` (WP-D) <br>**WP-D:** ModeNote in interval / breaks views with ski sessions: “reps = the hard efforts between stops (laps or climbs found by ski_intervals), so reps of different sessions can be on different parts of a climb” |
@@ -108,6 +108,22 @@ exact nodes `label`), `workout_label` (activity rows). HR: compare sessions `hr_
 (activity `hr` = whole activity). Rest: search rows `rest_group_s`. Swim: activity row `swim`, detail `swim`
 (+ `lengths`), laps `kind`, `swim_s`, `pace_100m_s`. Fitness: `not_scored {key, text}`. Compare suggest:
 `modes`, `no_distance`, `comparable`, `why_not`.
+
+## QA pass (2026-10-31, after WP A–D)
+Clean build, every page and the core flows at 1600 px, `errors list` after each, API sweep (all GET endpoints, 100
+sampled activities × detail / track / geojson / fitness session / suggest / nearest, R3 and 6×1000 compares in every
+mode). Fixed:
+- Compare: bottom y tick ("4.0" km/h) cut in half on non-last panels → 7 px bottom padding (CompareCharts; same fix in
+  SeriesCharts, e.g. "6:00" on the activity pace chart).
+- Compare › Intervals crashed (`t[c]` TypeError, blank charts) when the reference had no reps (pool swim first) → the
+  reference falls back to the engine's anchor session; the in-rep gap panel needs ≥ 2 sessions.
+- Compare with pool swims: empty HR / elevation panels with a 0–1 axis → panels without data are dropped.
+- Closest activities without an own track (treadmill) zoomed out to all of southern Norway → densest cluster (`coreBBox`).
+- Tables clipped at 1600 px: Activities list (GPS column), Places › route members (Dir), Fitness sessions (σ) → condensed.
+- "Select a group…" / "No GPS tracks" map notes printed over basemap labels → centred chip (`.map .msg`).
+- #30 row height, #31 Grey default on Compare / Places.
+Remaining (not small): Compare's pool-swim series come from the engine's raw records (moving 12:40 vs the activity
+page's 29:36 swimming time); Find & group results still scroll sideways at 1600 px by design (sticky tick + date).
 
 ## Open questions for the user
 - Home page: keep `/map`, or start on the latest day (`/day`) — or a combined "today" page?
