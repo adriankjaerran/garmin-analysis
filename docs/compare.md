@@ -1,7 +1,7 @@
 # Workout comparison (`scripts/compare.py`)
 
 Compares one session with one or many others: "this run vs similar runs / intervals". Library + CLI.
-The API will use it via `/api/compare`.
+Served by `/api/compare` and the Compare page (see [app.md](app.md)).
 
 ```
 uv run scripts/compare.py adrian distance --route R3                 # all Holmenkollen climbs, ghost race vs the newest

@@ -3,14 +3,16 @@
 import type { Map as MLMap, MapMouseEvent } from "maplibre-gl";
 import { Popup } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { useApi, type Activity, type ActivityDetail, type Series, type Similar } from "../lib/api";
+import { useApi, type ActivityDetail, type Series } from "../lib/api";
 import { setQuery, useLocation } from "../lib/router";
-import { dur, km, num, pace, kmh, stypeLabel, time, dayLabel } from "../lib/format";
+import { dur, num, pace, kmh, stypeLabel, time, dayLabel } from "../lib/format";
 import { RAMP, quantile } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
 import { SeriesCharts, type Band, type PanelKey } from "../components/SeriesCharts";
 import { Table, type Col } from "../components/Table";
 import { SportDot, speedText, what } from "../components/ActivityBits";
+import { NearestPanel } from "../components/NearestPanel";
+import { ShapeSection } from "../components/ShapeSection";
 
 interface Track { t: number[]; lat: number[]; lon: number[]; speed: (number | null)[]; hr: (number | null)[]; alt: (number | null)[] }
 type ColorBy = "speed" | "hr" | "alt";
@@ -149,31 +151,11 @@ const lapCols = (sport: string): Col<any>[] => [
   { key: "trigger", label: "Trigger", render: (r) => r.trigger ?? "—" },
 ];
 
-function Similars({ title, list, all }: { title: string; list: Similar[] | undefined; all: Map<string, Activity> }) {
-  if (!list?.length) return null;
-  const rows = list.map((s) => ({ ...s, a: all.get(String(s.id)) }));
-  return (
-    <div>
-      <h2 style={{ marginBottom: "8px" }}>{title}</h2>
-      <Table rows={rows} rowKey={(r) => String(r.id)} cols={[
-        { key: "date", label: "Date", render: (r) => (r.a ? <a href={`/activities/${r.id}`}>{r.a.date}</a> : String(r.id)), sort: (r) => r.a?.date },
-        { key: "type", label: "Type", render: (r) => (r.a ? what(r.a) : "—") },
-        { key: "km", label: "km", num: true, render: (r) => km(r.a?.dist_km) },
-        { key: "time", label: "Moving", num: true, render: (r) => dur(r.a?.moving_s) },
-        { key: "score", label: "Score", num: true, render: (r) => r.score.toFixed(2) },
-        { key: "reasons", label: "Why", render: (r) => <span class="muted">{r.reasons}</span> },
-      ]} defaultSort={["score", -1]} />
-    </div>
-  );
-}
-
 export function ActivityPage({ id }: { id: string }) {
   const { query } = useLocation();
   const colorBy = (query.get("color") as ColorBy) || "speed";
   const { data, error } = useApi<ActivityDetail>(`/api/activities/${id}`);
   const tr = useApi<Track>(data?.activity.track ? `/api/activities/${id}/track?format=columns` : null);
-  const all = useApi<{ activities: Activity[] }>("/api/activities").data;
-  const allMap = useMemo(() => new Map((all?.activities ?? []).map((a) => [a.id, a])), [all]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const [span, setSpan] = useState<[number, number] | null>(null);
   const chartCursor = useRef<((i: number | null) => void) | null>(null);
@@ -217,6 +199,7 @@ export function ActivityPage({ id }: { id: string }) {
           <span class="sub">{dayLabel(a.date)} {time(a.start)}</span>
           <div class="tools">
             <a class="btn" href={`/day/${a.date}`}>Day view</a>
+            {a.fit && <a class="btn" href={`/compare?suggest=${a.id}`} title="Compare with similar sessions (same workout / route)">Compare</a>}
             <a class="btn" href={data.older ? `/activities/${data.older}` : undefined} aria-disabled={!data.older} title="Older activity">← Older</a>
             <a class="btn" href={data.newer ? `/activities/${data.newer}` : undefined} title="Newer activity">Newer →</a>
           </div>
@@ -275,6 +258,8 @@ export function ActivityPage({ id }: { id: string }) {
         </section>
       )}
 
+      <ShapeSection id={id} />
+
       {data.laps.length > 1 && (
         <section>
           <div class="head"><h2>Laps</h2><span class="count">{data.laps.length}</span><span class="sub">from the watch file</span></div>
@@ -311,15 +296,7 @@ export function ActivityPage({ id }: { id: string }) {
         </section>
       )}
 
-      {data.similar && (data.similar.route?.length || data.similar.workout?.length) ? (
-        <section>
-          <div class="head"><h2>Similar sessions</h2><span class="sub">Top 5 of the same sport; score 0–1 (groups.json). Full nearest-neighbour search: <a href="/search">Search</a></span></div>
-          <div class="cols" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <Similars title="Same route" list={data.similar.route} all={allMap} />
-            <Similars title="Same workout" list={data.similar.workout} all={allMap} />
-          </div>
-        </section>
-      ) : null}
+      <NearestPanel id={id} />
     </main>
   );
 }

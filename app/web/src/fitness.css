@@ -1,0 +1,26 @@
+/* Fitness page + activity "Shape" section (imported by pages/FitnessPage.tsx and components/ShapeSection.tsx) */
+.shape-chart .readout { display: flex; gap: var(--space-4); flex-wrap: wrap; font-variant-numeric: tabular-nums; min-height: 20px; margin-bottom: var(--space-1); }
+.shape-chart .readout .dot { margin-right: 4px; }
+.shape-chart .plotwrap { position: relative; }
+.shape-chart .u-over { cursor: crosshair; }
+.chart-tip { display: none; position: absolute; z-index: 5; pointer-events: none; background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: var(--radius-float); box-shadow: var(--shadow-float); padding: var(--space-2) var(--space-3); font-size: var(--fs-12);
+  line-height: 1.5; max-width: 420px; white-space: normal; }
+.chart-tip .t1 { font-size: var(--fs-13); }
+.legend-row { display: flex; gap: var(--space-4); flex-wrap: wrap; font-size: var(--fs-12); margin-top: var(--space-2); align-items: center; }
+.chip .dot { margin-right: 4px; }
+details.howto summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--space-2); }
+details.howto summary::-webkit-details-marker { display: none; }
+details.howto summary::before { content: "▸"; color: var(--text-muted); }
+details.howto[open] summary::before { content: "▾"; }
+.prose { max-width: 900px; line-height: 1.55; }
+.prose ul { padding-left: var(--space-5); margin: var(--space-2) 0; }
+.prose li { margin-bottom: var(--space-1); }
+.shape-line { font-size: var(--fs-15); margin: 0 0 var(--space-3); }
+.shape-line .muted { font-size: var(--fs-13); }
+.shape-block + .shape-block { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px dashed var(--hairline); }
+.shape-block h3 { font-size: var(--fs-13); font-weight: var(--fw-semibold); color: var(--text-muted); margin: var(--space-3) 0 var(--space-1); }
+.shape-block td.wrap { white-space: normal; max-width: 420px; }
+.shape-chart .subtitle { color: var(--text-muted); margin: var(--space-2) 0 0; font-size: var(--fs-12); }
+.fit-sessions td:nth-child(5) { max-width: 560px; }
+.fit-sessions td:nth-child(4) { max-width: 200px; }

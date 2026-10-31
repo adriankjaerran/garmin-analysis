@@ -6,7 +6,9 @@ import { ActivitiesPage } from "./pages/ActivitiesPage";
 import { ActivityPage } from "./pages/ActivityPage";
 import { DayPage } from "./pages/DayPage";
 import { PlacesPage } from "./pages/PlacesPage";
-import { StubPage } from "./pages/StubPage";
+import { SearchPage } from "./pages/SearchPage";
+import { FitnessPage } from "./pages/FitnessPage";
+import { ComparePage } from "./pages/ComparePage";
 import "./styles.css";
 
 // Route table. Extension points (search / compare / fitness) render StubPage until implemented:
@@ -18,9 +20,9 @@ const ROUTES: { path: string; nav?: string; render: (p: Record<string, string>) 
   { path: "/activities", nav: "activities", render: () => <ActivitiesPage /> },
   { path: "/activities/:id", nav: "activity", render: (p) => <ActivityPage id={p.id} /> },
   { path: "/places", nav: "places", render: () => <PlacesPage /> },
-  { path: "/search", nav: "search", render: () => <StubPage kind="search" /> },
-  { path: "/compare", nav: "compare", render: () => <StubPage kind="compare" /> },
-  { path: "/fitness", nav: "fitness", render: () => <StubPage kind="fitness" /> },
+  { path: "/search", nav: "search", render: () => <SearchPage /> },
+  { path: "/compare", nav: "compare", render: () => <ComparePage /> },
+  { path: "/fitness", nav: "fitness", render: () => <FitnessPage /> },
 ];
 
 function Nav({ current, meta, activityId }: { current: string; meta: Meta | null; activityId: string | null }) {
@@ -41,9 +43,9 @@ function Nav({ current, meta, activityId }: { current: string; meta: Meta | null
       <a class="step" href="/places">Places</a>
       {tab("places", "/places", "Places & routes")}
       <a class="step" href="/search">Analysis</a>
-      {tab("search", "/search", "Search", true)}
-      {tab("compare", "/compare", "Compare", true)}
-      {tab("fitness", "/fitness", "Fitness", true)}
+      {tab("search", "/search", "Find & group")}
+      {tab("compare", "/compare", "Compare")}
+      {tab("fitness", "/fitness", "Fitness")}
       {meta && (
         <div class="built">
           {meta.n_activities} activities, {meta.n_tracks} with GPS<br />
