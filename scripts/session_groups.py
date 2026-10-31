@@ -5,7 +5,8 @@ Usage: uv run scripts/session_groups.py adrian
 Writes data/<person>/groups.json (see docs/session-groups.md). Caches the (slow, fitparse-based)
 rep detector output per FIT file in data/<person>/cache/session_groups.pkl, keyed by mtime+size; ski
 sessions get reps from ski_intervals.py (cheap, recomputed every run, stored in the same cache).
-Start clusters are named by KNOWN spots, then curated LANDMARKS, else "<loc>-<rank>".
+Start clusters are named by KNOWN spots, then curated LANDMARKS, then the cached reverse geocode
+(scripts/geocode_places.py), else "<loc>-<rank>".
 Place name overrides: data/<person>/places.json {"<place id>" / "<generic id>" or "lat,lon": "name"}.
 """
 
@@ -197,13 +198,13 @@ def display(pid):
 # ---------------------------------------------------------------- place naming
 # One function names every start cluster; priority: user override (data/<p>/places.json) > curated list
 # (KNOWN spots, then LANDMARKS) > cached reverse geocode (data/<p>/cache/geocode.json) > "<loc>-<rank>".
-# id = known / landmark / geocode name (generic ids stay as `generic_id`); a user override changes the
-# display name only, so ids (URLs, other scripts) stay stable.
+# id = known / landmark name (the generic id is kept as `generic_id`), else the generic id - a geocode name
+# or a user override changes the display name only, so ids (URLs, other scripts) stay stable.
 GEOCODE_R = 400   # m: a geocoded point names the cluster whose centre is within this distance
 
 
 def load_geocode(D):
-    """data/<p>/cache/geocode.json, written by a (future, one-off) reverse-geocode step:
+    """data/<p>/cache/geocode.json, written by the one-off scripts/geocode_places.py (OSM Nominatim):
     {"source": "...", "points": [{"lat": .., "lon": .., "name": "Majorstuen", "kind": "suburb"}, ...]}
     (one point per cluster centre). Missing file = no geocode names."""
     f = D / "cache" / "geocode.json"
@@ -217,10 +218,29 @@ def load_geocode(D):
     return [p for p in pts or [] if p.get("name") and p.get("lat") is not None and p.get("lon") is not None]
 
 
+def compass(a, b):
+    """8-point compass direction of b seen from a ("N", "NE", ...)"""
+    dy, dx = b[0] - a[0], (b[1] - a[1]) * math.cos(math.radians(a[0]))
+    return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][round(math.degrees(math.atan2(dx, dy)) / 45) % 8]
+
+
+def geocode_label(name, c, taken):
+    """Geocode name, disambiguated against names already in use: "Tryvann", then "Tryvann (N)" (direction
+    from the place that already has the name), then "Tryvann (N 2)" ..."""
+    if name.lower() not in taken:
+        return name
+    lab = f"{name} ({compass(taken[name.lower()], c)})"
+    k, out = 2, lab
+    while out.lower() in taken:
+        out = f"{lab[:-1]} {k})"; k += 1
+    return out
+
+
 def name_places(cens, sizes, locs, over=None, geocode=None):
     """cens {label: (lat, lon)}, sizes {label: n}, locs {label: Garmin locationName or None}
-    -> {label: {"id", "name", "src", "name_src", "generic_id"}}; src (where the id comes from) = known |
-    landmark | geocode | generic; name_src = src, or override when places.json renames it"""
+    -> {label: {"id", "name", "src", "name_src", "generic_id"}}; src (where the name comes from) = known |
+    landmark | geocode | generic (geocode keeps the generic id); name_src = src, or override when
+    places.json renames it (keys: id, generic id or "lat,lon")"""
     over, geocode = over or {}, geocode or []
     known_of = {}   # a known name goes to the one cluster nearest to it (within 600 m)
     for kn, q in KNOWN.items():
@@ -240,10 +260,14 @@ def name_places(cens, sizes, locs, over=None, geocode=None):
             continue
         d, p = min(((hav(c, (p["lat"], p["lon"])), p) for p in geocode), key=lambda t: t[0])
         if d <= GEOCODE_R:
-            geo_of[l] = p["name"]
-    out, rank, used = {}, collections.defaultdict(int), set(known_of.values()) | {v[0] for v in land_of.values()}
+            geo_of[l] = p
+    # names already taken (lower-case display name -> centre of the cluster holding it)
+    taken = {display(n).lower(): q for n, q in KNOWN.items()}   # also named places in similarity.py
+    taken.update({display(n).lower(): cens[l] for l, n in known_of.items()})
+    taken.update({display(v[0]).lower(): cens[l] for l, v in land_of.items()})
+    out, rank = {}, collections.defaultdict(int)
     for l in sorted(cens, key=lambda l: -sizes[l]):
-        gen = None
+        gen, nm = None, None
         if l in known_of:
             pid, src = known_of[l], "known"
         else:   # generic id "<loc>-<rank>" (rank counted over all clusters without a KNOWN name, so it stays stable)
@@ -251,15 +275,12 @@ def name_places(cens, sizes, locs, over=None, geocode=None):
             rank[loc] += 1; gen = f"{loc}-{rank[loc]}"
             if l in land_of:
                 pid, src = land_of[l][0], "landmark"
-            elif l in geo_of:
-                pid, k = geo_of[l], 2
-                while pid in used:   # two clusters in the same locality: "Majorstuen", "Majorstuen 2"
-                    pid = f"{geo_of[l]} {k}"; k += 1
-                src = "geocode"
+            elif l in geo_of:   # id stays the generic id; only the display name comes from the geocode
+                pid, src, nm = gen, "geocode", geocode_label(geo_of[l]["name"], cens[l], taken)
+                taken[nm.lower()] = cens[l]
             else:
                 pid, src = gen, "generic"
-        used.add(pid)
-        nm, nsrc = display(pid), src
+        nm, nsrc = nm or display(pid), src
         for k, v in over.items():
             if k == pid or (gen and k == gen):
                 nm, nsrc = v, "override"
@@ -270,7 +291,8 @@ def name_places(cens, sizes, locs, over=None, geocode=None):
                     continue
                 if hav(q, cens[l]) <= PLACE_R:
                     nm, nsrc = v, "override"
-        out[l] = {"id": pid, "name": nm, "src": src, "name_src": nsrc, **({"generic_id": gen} if gen and gen != pid else {})}
+        out[l] = {"id": pid, "name": nm, "src": src, "name_src": nsrc, **({"generic_id": gen} if gen and gen != pid else {}),
+                  **({"geocode_kind": geo_of[l].get("kind")} if src == "geocode" and geo_of[l].get("kind") else {})}
     return out
 
 
@@ -1170,7 +1192,7 @@ def main():
         places[pid] = {"name": nmd["name"], "lat": round(cen[0], 5), "lon": round(cen[1], 5), "n": len(m),
                        "types": dict(collections.Counter(a["type"] for a in m).most_common()),
                        "src": nmd["src"], "name_src": nmd["name_src"],
-                       **({"generic_id": nmd["generic_id"]} if "generic_id" in nmd else {})}
+                       **{k: nmd[k] for k in ("generic_id", "geocode_kind") if k in nmd}}
         for a in m:
             a["place"] = pid
     areas = {}

@@ -23,7 +23,7 @@
 | File | What |
 |---|---|
 | [run-analysis.md](run-analysis.md) | How reps, breaks and splits are found today, and how accurate they are |
-| [session-groups.md](session-groups.md) | Places (landmark names), routes, session types, ski interval detector, legs and pauses, route comparison |
+| [session-groups.md](session-groups.md) | Places (landmark / OSM reverse-geocode names), routes, session types, ski interval detector, legs and pauses, route comparison |
 | [similarity.md](similarity.md) | Similarity engine: named places / regions (Marka), workout hierarchy (6×1000 · rest), search, top-k nearest, map polylines |
 | [distance-calibration.md](distance-calibration.md) | Which distance to trust: Bislet track geometry and certified races |
 | [compare.md](compare.md) | Workout comparison: elapsed / moving / route-position ghost race, rep- and break-aligned intervals |

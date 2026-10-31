@@ -14,6 +14,7 @@ TLS version Garmin requires.
 - `scripts/calibrate_distance.py <person>`: compares distance sources with Bislet track geometry and certified races, writes `calibration.json`
 - `scripts/gps_lap_analysis.py <person>`: GPS-mode manual laps at Bislet vs track geometry (hidden lag, lap booking, lap error), writes `gps_lap_analysis.json`
 - `scripts/session_groups.py <person>`: places, routes, session types, legs, writes `groups.json` ([session-groups.md](session-groups.md))
+- `scripts/geocode_places.py <person> [--dry-run|--repick|--limit N]`: one-off OSM Nominatim reverse geocode of generically named start-cluster centres (≤ 1 request/s, cached, never re-fetched), writes `cache/geocode.json` for session_groups' place names ([session-groups.md](session-groups.md))
 - `scripts/ski_intervals.py <person> <id> ...`: ski interval detector (lap workouts / hard efforts), used by session_groups and compare; the CLI prints reps and work blocks
 - `scripts/similarity.py <person> build|search|nearest|groups|validate`: similarity engine on top of `groups.json`, writes `similarity_index.json` + `tracks.json` ([similarity.md](similarity.md))
 - `scripts/build_report.py <person>`: writes `data/<person>/report.html`, a self-contained overview (template: `scripts/report_template.html`)
@@ -34,6 +35,7 @@ data/<person>/
   similarity_index.json  tracks.json     similarity index + encoded track polylines (similarity.py)
   regions.json  places.json              optional: named places / regions, start-cluster names
   cache/                                 session_groups.pkl, similarity_tracks.pkl
+  cache/geocode.json                     reverse-geocoded start-cluster names (geocode_places.py; raw Nominatim replies kept)
   calibration.json                       distance calibration (calibrate_distance.py)
   gps_lap_analysis.json                  GPS-mode lap analysis (gps_lap_analysis.py)
   candidates/*.txt                       activity id lists (select_activities.py)

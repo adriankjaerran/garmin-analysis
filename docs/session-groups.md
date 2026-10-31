@@ -13,26 +13,41 @@ route (default: the largest ski route, i.e. the Holmenkollen rollerski climb).
   else a curated landmark within 400 m (`LANDMARKS` in the code, offline approximate centres: Marienlyst,
   Majorstuen, Frogner stadion, Frognerparken, Blindern, Ullevål stadion, St. Hanshaugen, Nationaltheatret,
   Aker Brygge, Rådhusplassen, Tryvann; Lerkendal, Øya, Nidarosdomen, Torvet, Moholt, Dragvoll, Tyholt;
-  Fauske sentrum; again only the nearest cluster), else `<Garmin locationName>-<rank by size>`. The
-  name is also the place id. The rank counts every cluster without a KNOWN name, so generic ids stay
+  Fauske sentrum; again only the nearest cluster), else the cached OSM reverse geocode (below), else
+  `<Garmin locationName>-<rank by size>`. Known and landmark names are also the place id; everything else
+  keeps the generic id. The rank counts every cluster without a KNOWN name, so generic ids stay
   stable (`Oslo-3` stays `Oslo-3` although `Oslo-1/2/4/5` got landmark names); a landmark-named place keeps
-  its old id in `generic_id`, `src` = known / landmark / generic. Currently named by landmark: Marienlyst
+  its old id in `generic_id`. Currently named by landmark: Marienlyst
   (was Oslo-1, start of the Holmenkollen climbs, 95 m), Aker Brygge (Oslo-2, 295 m), Øya (Trondheim-2, 56 m),
   Frogner stadion (Oslo-4), Nationaltheatret (Oslo-5), Fauske sentrum (Fauske-2), Frognerparken (Oslo-9),
-  Lerkendal (Trondheim-4), St. Hanshaugen (Oslo-16), Rådhusplassen (Oslo-19). Fauske-1, Trondheim-1 and
-  Oslo-3 have no landmark close enough and stay generic. Where an activity mostly happens (named
-  places / regions by time share) is in [similarity.md](similarity.md). User overrides:
+  Lerkendal (Trondheim-4), St. Hanshaugen (Oslo-16), Rådhusplassen (Oslo-19). Where an activity mostly
+  happens (named places / regions by time share) is in [similarity.md](similarity.md). User overrides:
   `data/adrian/places.json` `{"Oslo-3": "Bogstad"}` (place id or old generic id) or
   `{"59.933,10.719": "name"}` (any place whose centre is within 400 m).
   All naming is one function, `name_places(cens, sizes, locs, over, geocode)`, priority **user override >
-  KNOWN > LANDMARKS > cached reverse geocode > `<loc>-<rank>`**. The geocode source is optional:
-  `data/<p>/cache/geocode.json` `{"source": "...", "points": [{"lat", "lon", "name", "kind"}]}` (one point per
-  cluster centre, e.g. from a one-off OSM / Kartverket reverse geocode — not fetched yet); the nearest point within
-  400 m names a cluster that no KNOWN / LANDMARK claims; a name used twice gets " 2". Ids: known / landmark /
-  geocode name, else the generic id; an override changes only the **display name** (`name`, `name_src: override`),
-  so ids in URLs and other scripts stay stable. `DISPLAY_NAMES` fixes spellings without changing ids
+  KNOWN > LANDMARKS > cached reverse geocode > `<loc>-<rank>`**. An override or a geocode name changes only
+  the **display name** (`name`; `name_src: override` / `src: geocode`), never the id, so ids in URLs, saved
+  filters and other scripts stay stable. `DISPLAY_NAMES` fixes spellings without changing ids
   (`Bislet` → "Bislett"). Place entries: `name, lat, lon, n, types, src` (known / landmark / geocode / generic),
-  `name_src`, `generic_id`.
+  `name_src`, `generic_id`, `geocode_kind` (OSM kind of the geocode name: neighbourhood / suburb / park / ...).
+- **Reverse geocode** (one-off, `uv run scripts/geocode_places.py adrian`): every start-cluster centre whose
+  name is still generic is sent to OSM Nominatim `/reverse?format=jsonv2&zoom=18&addressdetails=1` (only the
+  centre coordinates; User-Agent `garmin-analysis/0.1 (<email>)`, ≤ 1 request/s, ~200 calls / ~4 min for
+  adrian). Replies go into `data/<p>/cache/geocode.json` `{"source", "points": [{"lat", "lon", "name", "kind",
+  "for", "raw"}]}`, saved after every call; a centre with a cached point within 150 m is never re-fetched, so
+  re-running only fetches new clusters. Name choice (`pick()`): the reply object itself if it is a park /
+  stadium / track / lake / nature / place-type feature (not pitches, playgrounds, hotels, buildings, shops,
+  parking), else the most specific area of the address chain (leisure > natural > locality > neighbourhood >
+  quarter > hamlet > village > suburb > borough / city district), else a named trail (path / track / footway)
+  under the point, else town > municipality > city, a street only as last resort. Oslo's bydel "Marka" (all of
+  Nordmarka / Østmarka, and a region name in similarity.py) is too big: those clusters get the road instead
+  ("Maridalsveien", "Holmenkollveien", "Gamle Heggelivei"). `--repick` re-runs the choice offline on the stored raw replies, `--dry-run` lists what would
+  be fetched. In session_groups the nearest point within 400 m names a cluster that no KNOWN / LANDMARK
+  claims. Duplicates (a name already used by a known / landmark / bigger geocoded place, case-insensitive)
+  get the compass direction from the place that has it: "Holmenkollen (SW)", then "Holmenkollen (SW 2)".
+  Result for adrian (2026-10-31, 202 geocoded): Fauske-1 → Brekke (Fauske-3 → Brekke (N)), Trondheim-1 →
+  Eventyrbyen, Brisbane-1 → South Brisbane, Oslo-3 → Jarbakken, Dubai-1 → Al Satwa, Oslo-5 → Bjølsen. Area names
+  and route names use the display names, so they change with it; ids don't.
 - **Areas**: single-link chaining of start points at 2 km.
 - **Routes**: track on a 75 m grid; coverage(A|B) = share of A's cells within one cell of B's;
   similarity = min of both coverages; same sport family, distance ratio ≤ 1.3; average-linkage merge
