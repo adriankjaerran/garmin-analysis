@@ -65,7 +65,7 @@ def test_race_prediction_from_the_curve():
                               [{"day": 10, "date": "2000-01-01", "id": 1, "km": 5.0, "score": 50.0, "kind": "race", "weight": 1.0,
                                 "discipline": "interval", "sigma": 1.0},
                                {"day": 11, "date": "2000-01-02", "id": 2, "km": 10.0, "score": 51.0, "kind": "race", "weight": 1.0,
-                                "discipline": "long", "sigma": 1.0}], 12)
+                                "discipline": "long", "sigma": 1.0}])
     p = fm.race_prediction(blk)
     assert p["vdot"] == 51.0 and p["vdot_by_distance"]["5k"] == 50.0      # 10k = theta + 1 doubling * slope
     assert p["range_10k_s"][0] < p["race_equivalents_s"]["10k"] < p["range_10k_s"][1]

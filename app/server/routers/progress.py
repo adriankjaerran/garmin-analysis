@@ -1,5 +1,5 @@
-"""/api/records (personal records from Garmin's fastest splits), /api/progress (recurring interval workouts and
-their avg rep pace over time) and /api/progress/{id} (the progression of one activity's workout).
+"""/api/records (personal records from Garmin's fastest splits) and /api/progress/{id} (the progression of one
+activity's interval workout: its avg rep pace over time).
 
 Records: Garmin stores the fastest stretch of every distance it covers in the activity summary
 (`activities_index.json` `fastestSplit_<m>`: 1000, 1609, 5000, 10000, 21098, 42195 when present; seconds). Only
@@ -14,11 +14,10 @@ faster, ↘ more than 1 % slower, → in between."""
 
 from __future__ import annotations
 
-import datetime as dt
 import json
 import statistics
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
 from ..deps import get_store
 from ..store import Store, _clean_sig
@@ -164,8 +163,7 @@ def _trend(pts: list[dict], i: int) -> dict | None:
             "word": "faster" if pct > TREND_PCT else "slower" if pct < -TREND_PCT else "level"}
 
 
-def _summary(sport: str, sig: str, pts: list[dict], at: int | None = None) -> dict:
-    i = len(pts) - 1 if at is None else at
+def _summary(sport: str, sig: str, pts: list[dict], i: int) -> dict:
     upto = pts[: i + 1]
     best = max(upto, key=lambda p: p["speed"])
     best_all = max(pts, key=lambda p: p["speed"])
@@ -175,26 +173,13 @@ def _summary(sport: str, sig: str, pts: list[dict], at: int | None = None) -> di
             "is_best": best_all["id"] == pts[i]["id"], "rank": rank, "trend": _trend(pts, i), "points": pts}
 
 
-@router.get("/progress")
-def progress(min_n: int = Query(3, ge=2), days: int = Query(120, ge=1, le=36500, description="last occurrence within this many days of the newest activity"),
-             limit: int = Query(8, ge=1, le=100), store: Store = Depends(get_store)):
-    """Recurring interval workouts (same sport + rep signature, >= min_n occurrences, the last one within `days`),
-    newest first. Each: key, signature, n, first, last, current (= latest occurrence {id, date, speed (avg rep pace,
-    m/s), hr, rest_s}), best (fastest ever), best_before (fastest before the latest; null if the latest is the best),
-    is_best, rank (of n), trend ({arrow ↗/→/↘, vs_median_pct, n_prev}: latest vs the median of the 4 before), points."""
-    acts = store.activities()
-    newest = dt.date.fromisoformat(acts[0]["date"]) if acts else dt.date.today()
-    lo = (newest - dt.timedelta(days=days)).isoformat()
-    rows = [_summary(sp, sig, pts) for (sp, sig), pts in _groups(store).items() if len(pts) >= min_n and pts[-1]["date"] >= lo]
-    rows.sort(key=lambda r: (r["last"], r["n"]), reverse=True)
-    return {"n": len(rows), "workouts": rows[:limit], "definition": __doc__.split("Progress: ", 1)[1].strip()}
-
-
 @router.get("/progress/{aid}")
 def progress_for(aid: str, store: Store = Depends(get_store)):
-    """The progression of this activity's workout (same sport + rep signature): {id, workout} with `workout` as in
-    /api/progress but at this occurrence (current = this one, trend vs the 4 before it, best_before = fastest
-    earlier one, rank among all); `workout` is null when the activity has no clean rep signature or is the only one."""
+    """The progression of this activity's workout (same sport + rep signature): {id, workout} with `workout` =
+    key, signature, n, first, last, current (= this occurrence {id, date, speed (avg rep pace, m/s), hr, rest_s}),
+    best (fastest ever), best_before (fastest earlier one), is_best, rank (of n), trend ({arrow ↗/→/↘, vs_median_pct,
+    n_prev}: vs the median of the 4 before), points; `workout` is null when the activity has no clean rep signature
+    or is the only one."""
     a = store.activity_map().get(aid)
     if not a:
         raise HTTPException(404, "no such activity")

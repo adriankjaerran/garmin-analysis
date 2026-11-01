@@ -111,11 +111,10 @@ def _read_fast(path: Path) -> dict:
                     m["timestamp"] = ts
                 out[_NAMES[gnum]].append(m)
             elif "timestamp" in names:  # keep last_ts in sync for compressed headers
-                if True:
-                    i = names.index("timestamp")
-                    v = st.unpack_from(data, p)[i]
-                    if v != inv[i]:
-                        last_ts = v
+                i = names.index("timestamp")
+                v = st.unpack_from(data, p)[i]
+                if v != inv[i]:
+                    last_ts = v
             p += total
         pos = end + 2
     return out

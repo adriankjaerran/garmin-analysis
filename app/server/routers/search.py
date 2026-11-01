@@ -7,7 +7,6 @@ Activity ids are strings in the API (like the rest of the app); the index uses i
 
 from __future__ import annotations
 
-import math
 import re
 from collections import Counter
 
@@ -32,14 +31,6 @@ def _ix(store: Store):
         return sim.load_index(store.person)
     except FileNotFoundError as e:
         raise HTTPException(503, f"similarity index missing: run scripts/session_groups.py and scripts/similarity.py ({e})")
-
-
-def _f(v):
-    try:
-        f = float(v)
-        return None if math.isnan(f) else f
-    except (TypeError, ValueError):
-        return None
 
 
 def _num(v: str) -> float:

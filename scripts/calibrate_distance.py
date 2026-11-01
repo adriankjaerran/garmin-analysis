@@ -27,7 +27,6 @@ import fitparse
 ROOT = Path(__file__).resolve().parent.parent
 SEMI = 180 / 2**31
 BISLET_GUESS = (59.92527, 10.73306)
-LANE_W = 1.22
 RACES = {  # activityId: (label, certified metres)
     20380305975: ("Copenhagen Half Marathon 2025", 21097.5),
     3533402624: ("Rome Marathon 2019", 42195.0),

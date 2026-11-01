@@ -302,12 +302,6 @@ def fitness(store: Store = Depends(get_store),
     return out
 
 
-@router.get("/fitness/eval")
-def fitness_eval(store: Store = Depends(get_store)):
-    """Pace vs with-HR model comparison from fitness_eval.json (`variants`); null if not evaluated yet."""
-    return _eval_variants(store)
-
-
 @router.get("/fitness/session/{aid}")
 def fitness_session(aid: str, store: Store = Depends(get_store)):
     """Shape evidence for one activity: scores (model_version 1: a 10k race counted for interval and long), components

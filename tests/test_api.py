@@ -26,7 +26,7 @@ SIX_K = "6×1000 · rest ~2:30"     # the Bislett 6×1000 same-workout key
     ("/api/calendar", None),
     ("/api/map/tracks", None),
     ("/api/map/tracks?detail=hi&sport=ski", None),
-    ("/api/places", {"n", "places", "areas"}),
+    ("/api/places", {"n", "places"}),
     ("/api/places?touched=1", {"n", "places"}),
     ("/api/routes", {"n", "routes"}),
     ("/api/search", {"n", "rows", "families"}),
@@ -401,7 +401,6 @@ def test_fitness_variants(client):
     assert all(w["date"] >= "2024-01-01" for w in f["variants"]["hr"]["disciplines"]["long"]["weekly"])
     # eval comparison: null without fitness_eval.json, else pace/hr per discipline
     ev = d["eval_variants"]
-    assert ev == client.get("/api/fitness/eval").json()
     if (DATA / "fitness_eval.json").exists() and ev is not None:
         assert {"pace", "hr"} <= set(ev["default"])
         assert "forecast_mae" in ev["default"]["hr"]["interval"]
@@ -535,21 +534,20 @@ def test_records(client, activities):
         assert all(x["rank"] <= 3 for x in lst)
 
 
-def test_progress_list_and_activity(client, activities):
-    d = client.get("/api/progress?days=36500&limit=100").json()
-    assert d["n"] >= 1
-    six = next(w for w in d["workouts"] if w["signature"] == "6×1000" and w["sport"] == "run")
-    assert six["n"] >= 17
+def test_progress_activity(client, activities):
+    sixes = [a for a in activities if a["workout_label"] == "6×1000" and a["sport"] == "run"]
+    six = client.get(f"/api/progress/{sixes[0]['id']}").json()["workout"]
+    assert six["signature"] == "6×1000" and six["n"] >= 17
     pts = six["points"]
     assert [p["date"] for p in pts] == sorted(p["date"] for p in pts)
     assert six["best"]["speed"] == max(p["speed"] for p in pts)
-    assert six["trend"]["arrow"] in ("↗", "→", "↘")
     # per activity: current = this occurrence, rank among all, trend only from earlier ones
     first = pts[0]["id"]
     w = client.get(f"/api/progress/{first}").json()["workout"]
     assert w["current"]["id"] == first and w["trend"] is None and w["best_before"] is None
     last = client.get(f"/api/progress/{pts[-1]['id']}").json()["workout"]
     assert 1 <= last["rank"] <= last["n"]
+    assert last["trend"]["arrow"] in ("↗", "→", "↘")
     easy = next(a for a in activities if a["workout_label"] == "Easy run")
     assert client.get(f"/api/progress/{easy['id']}").json()["workout"] is None
     assert client.get("/api/progress/1").status_code == 404
@@ -582,8 +580,7 @@ def test_compare_suggest_best_and_last_year(client, activities):
     paces = [d["activities"][i]["rep_pace_ms"] for i in best["ids"][1:]]
     assert paces == sorted(paces, reverse=True)
     # the fastest 6×1000 is in the set, whatever its date (not limited to the latest 8)
-    allp = client.get("/api/progress?days=36500&limit=100").json()
-    w = next(x for x in allp["workouts"] if x["signature"] == "6×1000")
+    w = client.get(f"/api/progress/{six['id']}").json()["workout"]
     if w["best"]["id"] != six["id"]:
         assert w["best"]["id"] in best["ids"]
 

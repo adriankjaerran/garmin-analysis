@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import ROOT  # noqa: F401  (puts scripts/ on sys.path)
+from . import ROOT  # (importing the package puts scripts/ on sys.path)
 import gps_quality as gq  # noqa: E402
 import session_groups as sg  # noqa: E402  (pool_swim; also registers the length / pool-length fields)
 
@@ -51,7 +51,6 @@ TRIGGER = {0: "manual", 1: "time", 2: "distance", 3: "position_start", 4: "posit
 
 
 def person_dir(person: str) -> Path:
-    from . import ROOT
     return ROOT / "data" / person
 
 

@@ -167,20 +167,6 @@ def encode_pairs(pairs):
     return "".join(out)
 
 
-def decode_ints(s):
-    out, i, prev = [], 0, 0
-    while i < len(s):
-        res, sh = 0, 0
-        while True:
-            b = ord(s[i]) - 63; i += 1
-            res |= (b & 0x1F) << sh; sh += 5
-            if b < 0x20:
-                break
-        prev += ~(res >> 1) if res & 1 else (res >> 1)
-        out.append(prev)
-    return out
-
-
 def encode_polyline(lat, lon, prec=5):
     """standard Google encoded polyline (precision 5 = ~1 m), as used by Leaflet / Mapbox plugins"""
     f = 10 ** prec
@@ -189,12 +175,6 @@ def encode_polyline(lat, lon, prec=5):
         a, b = int(round(la * f)), int(round(lo * f))
         out.append(_enc_num(a - pa) + _enc_num(b - po)); pa, po = a, b
     return "".join(out)
-
-
-def decode_polyline(s, prec=5):
-    v = decode_ints_pairs(s)
-    f = 10 ** prec
-    return [(a / f, b / f) for a, b in v]
 
 
 def decode_ints_pairs(s):
@@ -739,9 +719,6 @@ class Index:
                     self._pid.setdefault(k.lower(), pid)
         self._cells = {}
         self._ord = {k: dt.date.fromisoformat(a["date"]).toordinal() for k, a in self.acts.items()}
-        # pace reference: median speed of own runs within +-180 days (like session_groups.easy_ref)
-        rs = [(self._ord[k], a["speed_ms"]) for k, a in self.acts.items() if a["sport"] == "run" and a.get("speed_ms") and a["dist_km"] >= 3]
-        self._rs = (np.array([d for d, _ in rs]), np.array([v for _, v in rs]))
 
     # ---- helpers
     def place_id(self, x):
@@ -764,12 +741,6 @@ class Index:
         if not A or not B:
             return None
         return 0.5 * (len(A & Bd) / len(A) + len(B & Ad) / len(B))
-
-    def rel_speed(self, aid, v):
-        d, s = self._rs
-        m = np.abs(d - self._ord[aid]) <= 180
-        ref = float(np.median(s[m])) if m.sum() >= 5 else (float(np.median(s)) if len(s) else 3.2)
-        return v / ref if v else None
 
     def summary(self, a):
         w = a["workout"]

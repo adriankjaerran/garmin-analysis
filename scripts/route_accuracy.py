@@ -451,7 +451,7 @@ def bislet_laps(person):
     return out
 
 
-def fit_model(devs, bislet, races):
+def fit_model(devs, bislet):
     m = json.loads(json.dumps(DEFAULT_MODEL))
     m["fitted"] = {}
     # scale term: Bislet best case. Line-to-line session sums if available, else 0.5 % (plan)
@@ -502,7 +502,7 @@ def fit_model(devs, bislet, races):
     return m
 
 
-def bias_check(devs, races, clusters_out, bislet):
+def bias_check(races, clusters_out, bislet):
     res = {}
     cert = [x for x in races if x.get("certified") and "garmin_pct" in x]
     nom = [x for x in races if not x.get("certified") and "garmin_pct" in x]
@@ -531,7 +531,7 @@ def main():
     clusters_out, devs = cluster_stats(cands, clusters)
     t_cl = time.time() - t0
     bis = bislet_laps(args.person)
-    model = fit_model(devs, bis, races)
+    model = fit_model(devs, bis)
     model["env_jitter"] = dict(ENV_JITTER)
     osm = osm_part(args.person, acts, cands, clusters, not args.no_osm, min(3, args.osm_clusters), args.osm_fetch)
     # per-era summary of spread
@@ -563,7 +563,7 @@ def main():
            "params": {"end_tol_m": END_TOL, "mean_tol_m": MEAN_TOL, "max_tol_m": MAX_TOL, "dist_tol": DIST_TOL, "align_p90_tol": f"{ALIGN_TOL} m + {100 * ALIGN_REL} % of length", "n_resample": N_RES},
            "uncertainty_model": model, "races": races, "spread_by_era": era, "clusters": clusters_out,
            "cluster_deviations": [{k: (r(v, 3) if isinstance(v, float) else v) for k, v in d.items()} for d in devs],
-           "bislet": bis, "bias": bias_check(devs, races, clusters_out, bis), "osm": osm,
+           "bislet": bis, "bias": bias_check(races, clusters_out, bis), "osm": osm,
            "activities": acts_out,
            "runtime_s": {"load": r(t_load, 1), "load+cluster": r(t_cl, 1), "total": r(time.time() - t0, 1)}}
     f = ROOT / "data" / args.person / "route_accuracy.json"

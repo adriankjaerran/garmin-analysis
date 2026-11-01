@@ -106,11 +106,6 @@ def _clean_text(v, n):
     return v[:n] or None
 
 
-def _week(d: str) -> tuple:
-    y, w, _ = dt.date.fromisoformat(d).isocalendar()
-    return (y, w)
-
-
 def _week_index(d: str) -> int:
     """monotone week number (Monday-based) for streaks"""
     x = dt.date.fromisoformat(d)
@@ -198,11 +193,6 @@ def _save_store(doc: dict):
 def _compact(e: dict) -> dict:
     """drop empty defaults so the file stays readable"""
     return {k: v for k, v in e.items() if v not in (None, [], {}, False, "")}
-
-
-def _canon(gid: str, doc=None) -> str:
-    doc = doc or tg.load(missing_ok=True) or {}
-    return (doc.get("aliases") or {}).get(gid, gid)
 
 
 def entry(gid: str, store=None, tdoc=None) -> dict:

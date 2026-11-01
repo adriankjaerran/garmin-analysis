@@ -55,8 +55,8 @@ REC_DROP_MED = 20             # bpm: median HR drop over the recoveries
 MIN_REC_S = 60                # s: hard blocks closer than this are one rep (a short stop inside a climb)
 END_FRAC = 0.5                # first / last reps shorter than half the median rep are fragments (warm-up ramp, finish)
 DEFAULT_Z4 = 165
-LAP_TIME, LAP_MANUAL = 1, 0   # FIT lap_trigger enum
-INT_ACTIVE, INT_REST, INT_RECOVERY = 0, 1, 4
+LAP_TIME = 1                  # FIT lap_trigger enum
+INT_REST, INT_RECOVERY = 1, 4  # FIT lap intensity enum
 
 
 def hr_hard_floor(fit: Path | None = None) -> float:

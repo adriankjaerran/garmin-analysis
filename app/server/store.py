@@ -178,12 +178,6 @@ def volume_km(a: dict) -> float:
     return 0.0 if a.get("dist_trusted") is False else (a.get("dist_km") or 0.0)
 
 
-def moving_speed(a: dict) -> float | None:
-    """moving speed (m/s) from a trusted distance only"""
-    t = a.get("moving_s") or a.get("dur_s")
-    return round(a["dist_km"] * 1000 / t, 3) if a.get("dist_trusted") is not False and a.get("dist_km") and t else None
-
-
 class Store:
     def __init__(self, person: str):
         self.person = person

@@ -160,10 +160,6 @@ def cs_dprime(vdot):
     return np.interp(vdot, _VG, _CS), np.interp(vdot, _VG, _DP)
 
 
-def vdot_from_cs(cs):
-    return float(np.interp(cs, _CS, _VG))
-
-
 # ------------------------------------------------------------------ grade / ski mechanics
 def minetti_cost(i):
     """Minetti et al. 2002 energy cost of running (J/kg/m) at grade i (fraction)."""
@@ -582,11 +578,6 @@ def apply_hr_intent(ev):
     return out
 
 
-def variant_evidence(acts, feats, variant="pace", **kw):
-    ev = collect_evidence(acts, feats, **kw)
-    return apply_hr_intent(ev) if variant == "hr" else ev
-
-
 # ------------------------------------------------------------------ smoother
 ROBUST = {"race": (2.5, 2.5), "hard": (1.0, 2.5), "bound": (None, 4.0)}  # (below, above) in sigmas
 BOUND_Z = 2.0   # a lower bound only counts when it is > 2 sigma above the estimate (else: no ratchet)
@@ -973,7 +964,7 @@ def _model(ev, today):
         series_off = {**series, "long": (*series["interval"][:3], series["long"][3])}
         best_off = {**best, "long": best["interval"]}
         curve_sub = items
-        pred_block = _predictor_block(days, M, C, items, t1)
+        pred_block = _predictor_block(days, M, C, items)
     # 3) ski
     sub = [e for e in ev if e["discipline"] == "ski" and e["kind"] != "implausible"]
     if sub:
@@ -1093,7 +1084,7 @@ def _assemble(series, best, pred_block, curve_sub, today, flat):
 PRED_DIST = [(5000, "5k"), (10000, "10k"), (21097.5, "half"), (42195, "marathon")]
 
 
-def _predictor_block(days, M, C, items, t1):
+def _predictor_block(days, M, C, items):
     """fitness.json `predictor`: daily RTS-smoothed curve state from the first evidence to today + the evidence."""
     first = min(e["day"] for e in items)
     k0 = int(first - days[0])

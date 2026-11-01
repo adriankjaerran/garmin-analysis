@@ -172,7 +172,7 @@ def boot(fn, n, B=2000, groups=None):
     return np.nanpercentile(res, 2.5, axis=0), np.nanpercentile(res, 97.5, axis=0)
 
 
-def loo_shapes(acts, feats, scores_by_id, tau_key):
+def loo_shapes(acts, feats, scores_by_id):
     """Interval shape on each session's day from a smoother refitted without it (races + other sessions).
     scores_by_id overrides the interval-session scores (any model); other interval evidence (races) stays."""
     base = fm.collect_evidence(acts, feats)
@@ -249,9 +249,9 @@ def part2(person, use_cache):
     models = {f"tau {t}": {r["id"]: r["wbal"][t] for r in R} for t in TAUS}
     models["no rest effect"] = {r["id"]: r["norest"] for r in R}
     print("computing leave-one-out shapes ...", flush=True)
-    loo = {m: loo_shapes(acts, feats, sc, m) for m, sc in models.items()}
+    loo = {m: loo_shapes(acts, feats, sc) for m, sc in models.items()}
 
-    def design(sel, key):
+    def design(sel):
         rest_min = np.array([r["rest_s"] / 60 for r in sel])
         return {"rest per +1 min": rest_min, "log2 rest": np.log2(rest_min * 60),
                 "work:rest": np.array([r["wr"] for r in sel]), "log2 rep_s": np.log2([r["rep_s"] for r in sel])}
@@ -264,7 +264,7 @@ def part2(person, use_cache):
     for m in models:
         sel = [r for r in R if models[m][r["id"]] is not None and r["id"] in loo[m]]
         y = np.array([models[m][r["id"]] - loo[m][r["id"]] for r in sel])
-        D = design(sel, m)
+        D = design(sel)
         cells = []
         for k, x in D.items():
             b = huber(x[:, None], y)[1]

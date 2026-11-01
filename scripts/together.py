@@ -1131,7 +1131,7 @@ def _participants(g):
     return out
 
 
-def _ptab(g, P, info):
+def _ptab(P, info):
     """participant rows for the payload"""
     rows = []
     for p in P:
@@ -1147,7 +1147,7 @@ def _ptab(g, P, info):
     return rows
 
 
-def _caveats(g, P):
+def _caveats(P):
     out = []
     for p in P:
         T, nm = p.get("T"), p["person"]
@@ -1257,7 +1257,7 @@ def _rep_hr(G, a, b):
     return _r(float(w.mean()), 0), _r(float(w.max()), 0), _r(hs, 0)
 
 
-def _intervals(g, P):
+def _intervals(P):
     """cross-person intervals: slots by clock time, results for the set distance, standings, totals, breaks, close-ups"""
     act = [p for p in P if p["role"] != "other" and p.get("T") is not None]
     # ---- own reps per participant (compare engine main reps: strides left out), clock times
@@ -1593,7 +1593,7 @@ def _intervals(g, P):
         if len(cand) >= 2:
             faster.append({"after_slot": i, "after_label": slots[i]["label"], "person": max(cand)[1]})
     # ---- rep close-ups
-    closeups = [_closeup(s, byk, keys) for s in slots]
+    closeups = [_closeup(s, byk) for s in slots]
     # ---- output
     sl = []
     for i, s in enumerate(slots):
@@ -1679,7 +1679,7 @@ def _t0(P):
     return min(p["T"]["base"] for p in P if p.get("T") is not None)
 
 
-def _closeup(s, byk, keys):
+def _closeup(s, byk):
     """metres along the track behind the rep's leader vs seconds into the rep: own-start and clock alignment.
     d_m = own distance since own rep start x scale (to the set distance), capped at the set distance; null after own
     finish; behind_m = leader's d_m - own d_m, null after the leader's finish (no more data for the leader)."""
@@ -1972,14 +1972,14 @@ def session(gid, doc=None, use_cache=True) -> dict:
     if use_cache and hit and hit["key"] == fp:
         return hit["s"]
     info = people_info()
-    out = {"gid": g["gid"], "group": g, "kind": g["kind"], "participants": _ptab(g, P, info),
+    out = {"gid": g["gid"], "group": g, "kind": g["kind"], "participants": _ptab(P, info),
            "people": {p: info[p] for p in g["people"] if p in info} | {p["person"]: info.get(p["person"]) for p in g["participants"]},
-           "caveats": _caveats(g, P), "t0_utc": _iso(_t0(P)) if any(p.get("T") for p in P) else None,
+           "caveats": _caveats(P), "t0_utc": _iso(_t0(P)) if any(p.get("T") for p in P) else None,
            "intervals": None, "continuous": None}
     if any(p.get("T") for p in P):
         if g["kind"] == "intervals":
             try:
-                out["intervals"] = _intervals(g, P)
+                out["intervals"] = _intervals(P)
             except ValueError as e:
                 out["intervals"] = None
                 out["caveats"].append({"kind": "engine", "person": None, "text": str(e)})
@@ -2122,7 +2122,7 @@ def _segment_passes(people, fns, kind):
     return out
 
 
-def _rep_segments(g, P, s, t0):
+def _rep_segments(P, s, t0):
     """interval sessions: one segment per rep slot (start / time per person, passes own / clock, each person's own
     total so far — ranked, with rank changes, only while everyone in it ran the same reps); the whole-session passes
     (clock) with group-clock times"""
@@ -2272,7 +2272,7 @@ def replay(gid, step_s=REPLAY_STEP_S, max_points=4000, doc=None) -> dict:
     segs, allp, route, mode = [], [], {}, None
     try:
         if s and s.get("intervals"):
-            segs, allp = _rep_segments(g, P, s, t0)
+            segs, allp = _rep_segments(P, s, t0)
             mode = "rep"
         elif s and (s.get("continuous") or {}).get("available"):
             km = _km_segments(g, P, t0)

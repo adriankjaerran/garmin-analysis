@@ -1,4 +1,4 @@
-"""/api/together (list), /api/together/{gid} (session), /api/together/{gid}/replay, /api/together/people.
+"""/api/together (list), /api/together/{gid} (session), /api/together/{gid}/replay.
 
 Groups are cross-person (data/together.json from scripts/together.py build), so these endpoints don't use the person
 store: they work unprefixed and under /api/<person>/... alike (the prefix only sets `viewer`). The engine
@@ -67,12 +67,6 @@ def list_together(request: Request,
     key = ("list", tuple(sorted(flt.items())), _mtime())
     r = _memo(key, lambda: _tg().list_payload(doc, viewer=None, **flt))
     return {**r, "viewer": viewer}
-
-
-@router.get("/together/people")
-def together_people():
-    """Display info per person: {person: {name, initials, colour, colour_dark, auto}} (data/people.json + automatic)."""
-    return {"people": _tg().people_info()}
 
 
 @router.get("/together/{gid}")

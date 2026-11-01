@@ -22,11 +22,6 @@ def path(person: str) -> Path:
     return DATA / person / "settings.json"
 
 
-def mtime(person: str) -> int:
-    p = path(person)
-    return p.stat().st_mtime_ns if p.exists() else 0
-
-
 def load(person: str) -> dict:
     """The person's settings with defaults filled in; an unreadable file or a wrongly typed value counts as missing."""
     out = dict(DEFAULTS)

@@ -77,7 +77,7 @@ def max_hr(person: str) -> dict | None:
     return best
 
 
-def rest_hr(person: str, today: dt.date | None = None) -> dict | None:
+def rest_hr(person: str) -> dict | None:
     D = ROOT / "data" / person
     rows = {}
     for f in glob.glob(str(D / "ranges" / "daily_summaries_*.json")):

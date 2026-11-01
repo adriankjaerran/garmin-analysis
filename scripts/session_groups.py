@@ -1157,7 +1157,7 @@ def leg_name(a, b):
     return f"{a} → {b}"
 
 
-def compare_route(rid, R, members, A, series_of, laps):
+def compare_route(R, members, A, series_of, laps):
     """route-aligned comparison: reference = medoid, common waypoints, sessions × legs table"""
     ref_id = R["medoid"]
     Gref = series_of(ref_id)
@@ -1244,7 +1244,6 @@ def compare_route(rid, R, members, A, series_of, laps):
         T = G["T"]
         direc = info[mid]
         tp = p if direc == "fwd" else L - p          # travel-direction progress
-        tb = bnd if direc == "fwd" else (L - bnd)[::-1]
         onix = np.nonzero(on)[0]
         if not len(onix):
             continue
@@ -1605,7 +1604,7 @@ def main():
     for rid, R in routes.items():
         if R["n"] < MIN_ROUTE_N:
             continue
-        cmp_ = compare_route(rid, R, R["members"], A, series_of, R["shape"] == "laps")
+        cmp_ = compare_route(R, R["members"], A, series_of, R["shape"] == "laps")
         if cmp_:
             R.update(cmp_)
         gcache.clear()

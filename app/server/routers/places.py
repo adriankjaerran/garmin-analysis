@@ -33,7 +33,6 @@ def places(touched: int = 0, store: Store = Depends(get_store)):
     Row: id, name, lat, lon, n (= n_main), n_main, n_touched, n_start, kind, src (named | start), types
     (Garmin types of the main-place activities), area, routes (routes whose main place it is), last."""
     ix = _ix(store)
-    g = store.groups()
     acts = store.activities()   # newest first; `place` = main place id
     last: dict[str, str] = {}
     types: dict[str, Counter] = {}
@@ -54,13 +53,11 @@ def places(touched: int = 0, store: Store = Depends(get_store)):
         out.append({"id": pid, "name": p.get("name") or pid, "lat": p["lat"], "lon": p["lon"],
                     "n": p.get("n_main", 0), "n_main": p.get("n_main", 0), "n_touched": p.get("n", 0),
                     "n_start": p.get("n_start", 0), "kind": p.get("kind"), "src": p.get("src"),
-                    "name_src": p.get("name_src"), "types": dict(types.get(pid, Counter()).most_common()),
+                    "types": dict(types.get(pid, Counter()).most_common()),
                     "area": areas[pid].most_common(1)[0][0] if pid in areas else None,
                     "routes": n_routes.get(pid, 0), "last": last.get(pid)})
     out.sort(key=lambda x: (-x["n"], -x["n_touched"], x["id"]))
-    area_rows = [{"id": k, "name": v.get("name"), "lat": v.get("lat"), "lon": v.get("lon"), "n": v.get("n"),
-                  "places": v.get("places", [])} for k, v in g.get("areas", {}).items()]
-    return {"n": len(out), "places": out, "areas": area_rows,
+    return {"n": len(out), "places": out,
             "definition": "n = activities whose main place this is (>= 40 % of the time inside a named place, "
                           "else the start cluster); n_touched = starts, ends or spends >= 5 % / 3 min there"}
 
@@ -178,7 +175,7 @@ def route(rid: str, store: Store = Depends(get_store)):
     trend = sorted(({"id": k, "date": (A.get(k) or {}).get("date"), "route_time_s": v["route_time_s"], "group": v["group"]}
                     for k, v in rk.items()), key=lambda x: x["date"] or "")
     return {**_route_row(rid, r, gr, A), "medoid": gr.get("medoid"), "ref": gr.get("ref"),
-            "waypoints": gr.get("waypoints"), "legs_table": gr.get("legs_table"), "legs_mode": gr.get("legs_mode"),
+            "waypoints": gr.get("waypoints"), "legs_table": gr.get("legs_table"),
             "ranked": bool(rk), "pbs": pbs, "trend": trend,
             "rank_definition": "time on route = moving time over the route's legs (start line to finish; lead-in excluded); "
                                "point-to-point routes are ranked per direction, laps routes not at all",

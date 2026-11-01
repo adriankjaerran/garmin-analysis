@@ -325,7 +325,6 @@ def run(person, out=True):
     qrow = {}
     for disc in fm.DISCIPLINES:
         obs = fm._obs(ev, disc)
-        best = None
         for q in (0.002, 0.005, 0.01, 0.02, 0.05, 0.1):
             e, s = fm.forecast_errors(obs, q)
             if not len(e):
