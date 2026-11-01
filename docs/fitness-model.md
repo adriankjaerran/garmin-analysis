@@ -273,3 +273,55 @@ Check `n_evidence` / `days_well_observed`.
 - The calibration offsets (interval −2.5, tempo +3.0) are in-sample on 6 and 8 cases.
 - Mislabelled sessions are caught only when they're far too fast. A ski session saved as an easy run
   stays a harmless bound.
+
+## Form delta (`scripts/form_delta.py`)
+"How well did this session go compared to the person's form": **delta = session score − shape on the day before,
+from the shape model refitted without this session** (VDOT points; "+2.1 vs form" / "−1.3 vs form"). Used by the
+Community pages (plan decision 5).
+```
+uv run scripts/form_delta.py adrian <activity_id>   # one session (JSON)
+uv run scripts/form_delta.py adrian --series        # weekly shape trend
+uv run scripts/form_delta.py --together             # every participant of every group in data/together.json
+```
+```python
+import form_delta as fd                 # scripts/ on sys.path
+fd.form_delta(person, activity_id)      # -> dict | None
+fd.form_deltas(person)                  # {activity id: dict} for every session with one
+fd.form_series(person, since=None)      # [{date, interval, long, ski, overall, sd: {disc: sd}}], weekly, oldest first
+fd.together_deltas()                    # together.json groups with a `form` per participant
+```
+`form_delta` → `{score, shape, delta, discipline, kind, confidence, text, date, ref_sd, z, weight, flags, basis}`.
+- **Score:** the session's own score from `fitness.json` (race > hard item; then smaller σ, then interval). A 10k race
+  uses its long/race item, a 5k its interval/race item. **None** for easy/long runs (bounds: only lower bounds, not a
+  performance), hikes, rides and anything the model doesn't score (treadmill, multi_sport, implausible).
+- **Reference:** `smooth_series` (same q, σ and robust weights as `fitness.json`) on every *other* evidence item of
+  that discipline, read on the day before. Leaving the session out stops it pulling its own reference (a good session
+  otherwise looks smaller: `score − shape_at` under-states it). Chosen over the forward filter (only earlier
+  sessions): with sparse data the forward filter swings after each odd session (patrik's 2026-09-10 glitch raised
+  his forward shape from 41 to 52, so the next three sessions looked 3–6 points bad) and it fits worse: median
+  |delta| of hard sessions 2.1 (forward) vs 1.8 (leave-one-out) for adrian's intervals, 6.8 vs 5.4 for patrik's.
+  Cost: later sessions inform the reference, so an old delta can shift slightly when `fitness.json` is rebuilt.
+- **Confidence** from the combined sd √(ref_sd² + σ²): high < 2, medium < 3, else low. **z** = delta / that sd.
+- **Flags:** `hr_not_maximal` (the HR-intent variant demoted it), `downweighted` (model weight < 0.5),
+  `sparse_reference` (ref_sd > 3), `outlier` (|z| > 3: confidence low), `no_reference` (the discipline's only
+  race/hard item: shape/delta None, text "no earlier form to compare"). `outlier` + `downweighted` → confidence
+  `none`, text "score unreliable" (delta still returned).
+- **Cache:** reads only `fitness.json`; one refit per race/hard session (~1.5 s for adrian cold), cached in memory
+  and in `data/<person>/cache/form_delta.json`, keyed by `fitness.json` mtime + size + `CODE_VERSION`.
+
+Typical spread (2026-11-01): adrian intervals median −0.7, p10–p90 −5.2…+2.0 (127); long +0.3 (12); ski −3.8,
+p10 −12.6 (15, low confidence). patrik intervals median −3.0, p10 −12.7 (14 sessions over 3.5 years).
+
+**Limits.**
+- It measures the session, not the day's fitness. Hard sessions are often not all-out, so deltas lean negative.
+  Threshold/long-rep sessions score below VO2max sessions (adrian 3×1800 + 2×900: −2.5). A partial session scores
+  only what that person ran: fewer reps mean a lower W′ demand and so a lower score (patrik's 10 of 15 × 400 still
+  came out +2.9 because his 400s were fast).
+- Noise: |delta| < ~2 (adrian) is within test-retest (track 1.5–2.4, road 2.4). Ski deltas carry the ski score noise
+  (sd 3.4 on R3, snow hard sessions ~9 below): always low confidence.
+- The score is only as good as the session label: a run labelled `intervals_*` that wasn't (patrik 2026-10-27, steady
+  while adrian did 6×1000: −5.9, downweighted; patrik 2026-09-10, an easy run together scored 60.4: "score
+  unreliable") is scored as one. patrik's watch records every 5 s, which blurs short reps.
+- No HR fallback for easy runs: the HR-aerobic estimate failed as a score (test-retest 4.7 VDOT, above), and the
+  efficiency factor exists for only 36 of adrian's easy runs and 1 of patrik's, rounded to 3 decimals (≈ 5 % steps).
+- HR-intent parameters (HR max 206, watch trust by date) are adrian's and are applied to patrik too.

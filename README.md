@@ -47,6 +47,7 @@ API keys, tokens and pacing: [docs/garmin-api-guide.md](docs/garmin-api-guide.md
 | [docs/app.md](docs/app.md) | The web app: pages and URLs, endpoints, architecture, place model, tests, known gaps |
 | [docs/compare.md](docs/compare.md) | Compare engine (`scripts/compare.py`) |
 | [docs/together.md](docs/together.md) | Together: workouts run with others (`scripts/together.py`, `/api/together`) |
+| [docs/community.md](docs/community.md) | Community: the running club on top of Together (categories, photos, kudos, records, club dashboard, members; `/api/community`) |
 | [docs/similarity.md](docs/similarity.md) | Similarity index: search, nearest, groups, names |
 | [docs/session-groups.md](docs/session-groups.md) | Places, routes, legs and reps (`groups.json`) |
 | [docs/fitness-model.md](docs/fitness-model.md) | The fitness / shape model |
