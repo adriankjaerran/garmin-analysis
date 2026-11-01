@@ -92,7 +92,7 @@ function paceAxisRange(x: number[], ys: (number | null)[], bands: Band[]): [numb
   return all ? [Math.max(120, all[0]), Math.min(all[1], 900)] : [180, 600];
 }
 
-export const tLabel = (t: number) => (t >= 3600 ? dur(t).slice(0, -3) : t % 60 ? dur(t) : `${Math.round(t / 60)} min`);
+const tLabel = (t: number) => (t >= 3600 ? dur(t).slice(0, -3) : t % 60 ? dur(t) : `${Math.round(t / 60)} min`);
 /** elapsed-time ticks: "10 min" steps below an hour, "h:mm" for every tick once the axis passes 1 h */
 const tTicks = (ts: number[]) => (ts.some((t) => t >= 3600) ? ts.map((t) => (t % 60 ? dur(t) : hmm(t))) : ts.map(tLabel));
 const hmm = (t: number) => `${Math.floor(t / 3600)}:${String(Math.round((t % 3600) / 60)).padStart(2, "0")}`;

@@ -143,7 +143,8 @@ Running is one model since model_version 2 (`smooth_curve`, parameters in `CURVE
   distance on its day.
 - **Staleness** for interval / long: `last_evidence_date` = the latest race / hard item on the curve with weight > 0.5
   (any distance: the two share θ); `long.current.last_distance_evidence_date` = the latest 10k+ race / tempo. The
-  slope's sd still grows without long evidence, so the long band widens slowly (adrian today: ± 1.5 vs ± 1.0 at 5 km).
+  slope's sd grows towards its stationary 1.5 without long evidence, so the long band widens (adrian today: ± 2.1 vs
+  ± 1.0 at 5 km).
 - **Race prediction** (`overall.current.race_prediction`, schema kept): `vdot` / `sd` at 10k (sd = state ⊕ race-day
   noise `race_sd` 1.0), `race_equivalents_s` per distance from the curve (also `overall.current.race_equivalents_s`,
   Home's "Today 10k ≈ …"), `range_10k_s` ±1 sd; new: `vdot_by_distance`, `sd_by_distance`, `ranges_s`,
@@ -385,12 +386,15 @@ So HR is reported as **diagnostics only**: `components.work_hrr` / `hrr` per ses
                long only: last_distance_evidence_date, ref_km},
      yearly: {YYYY: {mean, max, sd_median, n_evidence, mean_well_observed (days with sd<2), days_well_observed}},
      weekly: [{date, mean, sd, n (non-bound evidence that week), days_since_evidence}]},
-   overall: {label, unit, current {date, mean, sd, race_prediction {vdot (10k), sd, weights {}, model, theta, slope,
+   overall: {label, unit, current {date, mean, sd, race_prediction {vdot (10k), sd, weights {}, model, distance_curve, theta, slope,
              vdot_by_distance, sd_by_distance, extrapolated, race_equivalents_s, ranges_s, range_10k_s [fast, slow]}
              | null, race_equivalents_s (= the prediction's)},
              yearly {YYYY: mean}, weekly [{date, mean, sd}]}},
  variants: {pace: {label, hr_used_in_score}, hr: {label, hr_used_in_score, disciplines (same shape as above)}},
- predictor: {ref_km 5, x "log2(km/5)", q {theta, slope}, slope_prior_sd, race_sd, evidence_km [min, max],
+ curve_off: {label, disciplines, hr_disciplines} (the same disciplines read with the distance curve off: long = θ,
+            race equivalents / race_prediction = Daniels equivalents of θ; served instead of `disciplines` /
+            `variants.hr.disciplines` when the person's setting is off; interval / long carry distance_curve true|false),
+ predictor: {ref_km 5, x "log2(km/5)", q {theta, slope}, slope_prior_sd, slope_revert, race_sd, evidence_km [min, max],
              extrap_sd_per_doubling, x_mapping, long_ref_km, last_evidence_date,
              daily [{date, theta, slope, var_theta, var_slope, cov}] (RTS smoothed, first evidence → today),
              evidence [{date, id, km, vdot, kind, weight, discipline, sigma}] (race / hard + bounds with weight ≥ 0.05)} | null,
@@ -412,9 +416,10 @@ Components:
 - `apply_hr_intent(ev)` / `variant_evidence(acts, feats, variant)` → the hr variant's evidence.
 - `collect_evidence(acts, feats, tau=, hr_b=, use_hr_aer=)` and `score_session(act, feat)` → evidence items.
 - `smooth_series(obs, day0, day1, q)` → (days, mean, sd, weights, forecasts). `forecast_errors(obs, q)`.
-- Distance curve: `smooth_curve(obs, day0, day1, q_theta=, q_slope=)` with obs (day, score, sigma, kind, x) →
-  (days, mean (n, 2), cov (n, 2, 2), weights, forecasts); `curve_at(mean, cov, x)`; `curve_predict(theta, slope,
-  var_theta, var_slope, cov, km, evidence_km)` → {vdot, sd_state, sd, extrapolated, …}; `evidence_km(item)`,
+- Distance curve: `smooth_curve(obs, day0, day1, q_theta=, q_slope=, slope_sd=, revert=)` with obs (day, score, sigma,
+  kind, x) → (days, mean (n, 2), cov (n, 2, 2), weights, forecasts); `curve_at(mean, cov, x)`; `curve_predict(theta,
+  slope, var_theta, var_slope, cov, km, evidence_km, flat=False)` → {vdot, sd_state, sd, extrapolated, …} (flat: the
+  distance curve off, slope 0); `evidence_km(item)`,
   `curve_x(km)`, `curve_obs(ev)`, `slope_text`, `dist_label`; parameters `CURVE`.
 - Physiology helpers: `vdot_from_race`, `race_time`, `speed_for`, `daniels_vo2`, `daniels_pct`, `cs_dprime`,
   `vdot_from_cs`.
@@ -423,13 +428,13 @@ Components:
 - Per FIT: `session_series(fit, act)` and `session_features(fit, act, hr_rest)`.
 - `fitness_eval.run(person)` → the eval dict.
 
-## Shape trend (2026-11-01, model_version 2)
+## Shape trend (2026-11-01, model_version 2, mean-reverting slope; distance curve on)
 | | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 | now |
 |---|---|---|---|---|---|---|---|---|---|
-| Interval (VDOT at 5 km, yearly mean) | 47.8 | 51.2 | 51.2 | 49.1 | 52.1 | 53.6 | 54.1 (peak 56.0) | 53.2 | 52.8 ± 1.0 (5k ≈ 19:01, 94.4 % of best) |
-| Long (VDOT at 14.5 km) | 49.8* | 53.2* | 53.0 | 51.0* | 54.2 | 55.9* | 56.9 (peak 59.0) | 56.2* | 55.9 ± 1.5 (no 10k+ evidence in 2026; θ from intervals) |
+| Interval (VDOT at 5 km, yearly mean) | 47.9 | 51.3 | 51.1 | 49.6 | 52.6 | 53.8 | 54.1 (peak 55.9) | 53.2 | 52.8 ± 1.0 (5k ≈ 19:01, 94.5 % of best) |
+| Long (VDOT at 14.5 km) | 49.0* | 51.7* | 50.5 | 49.5* | 53.5 | 55.1* | 56.7 (peak 59.0) | 55.6* | 54.9 ± 2.1 (no 10k+ evidence in 2026; θ from intervals, slope fading) |
 | Ski (VDOT-eq.) | 39.6* | 41.5* | 43.5* | 46.3* | 49.1* | 49.9 | 50.4 | 53.9 | 55.3 ± 2.8 |
-| Overall (% of best) | 81.1 | 86.7 | 87.9 | 86.6 | 92.0 | 93.9 | 95.6 | 95.6 | 95.4 ± 2.0 |
+| Overall (% of best) | 80.5 | 85.5 | 85.9 | 85.8 | 91.7 | 93.3 | 95.2 | 95.4 | 95.1 ± 2.3 |
 
 v1 (separate shapes, 2026-10-31): interval 2025 54.9, long 2025 57.8 / now 58.4 ± 2.8, overall now 95.5 ± 1.6. The
 interval yearly values are 0.1–0.8 lower in v2 because a 10k no longer counts as an interval item at its own VDOT
@@ -445,11 +450,11 @@ Check `n_evidence` / `days_well_observed`.
   model can't tell "less fit" from "ran them as threshold".
 - **Long evidence is sparse:** 0–2 tempos/races per year before 2025, none in 2026. The distance curve lets the
   intervals carry the level (θ), but the slope (how much better at long races) is only learned from 10k+ races and
-  tempos; it is carried forward with a slowly growing sd (q_s 0.001). Before 2025 the slope is mostly last years'
-  slope smoothed backwards (RTS), so old long values (e.g. 2020: 53.2 vs 49.1 in v1) lean on recent races.
+  tempos; without them it fades towards 0 (mean-reverting, ≈ 900-day time constant) with a growing sd. Before 2025
+  the slope is mostly last years' slope smoothed backwards (RTS), shrunk towards 0 further back.
 - **Distance curve:** linear in log-distance is an assumption; the marathon (and anything > 21.1 km or < 5 km) is
   extrapolated with an assumed +1.0 VDOT sd per doubling, and a positive slope is held flat past the longest evidence
-  (adrian's marathon = half VDOT, 2:50:54). Whether the marathon really holds that level is untested. Tempo / interval
+  (adrian's marathon = half VDOT, 2:54:18). Whether the marathon really holds that level is untested. Tempo / interval
   distances inherit the in-sample offsets.
 - **Ski:**
   - μ and η are assumed, so the absolute level is uncertain by ±5–10 %. Snow `ski_hard` sessions sit
@@ -486,7 +491,10 @@ fd.together_deltas()                    # together.json groups with a `form` per
 - **Reference:** `smooth_series` (same q, σ and robust weights as `fitness.json`) on every *other* evidence item of
   that discipline, read on the day before. Running (interval + long, fitness.json with `predictor` and
   `sessions[].km`): `smooth_curve` on every other running item, read on the day before **at the session's own
-  distance** (`_curve_refs`; `CODE_VERSION` 4). Long deltas therefore compare with the curve, which intervals inform:
+  distance** (`_curve_refs`; `CODE_VERSION` 5; same `CURVE` incl. the mean-reverting slope). With the person's
+  distance curve off (`data/<person>/settings.json`, "Distance curve on / off") the reference is θ of the same
+  leave-one-out fit (`ref_flat`, cached next to `ref`; the setting is read per call, Community keys its caches on
+  the settings file's mtime). Long deltas therefore compare with the curve, which intervals inform:
   adrian's 2021 tempos are −7.5 (v1: −3.9) because the intervals said he was fitter than those tempos. Leaving the session out stops it pulling its own reference (a good session
   otherwise looks smaller: `score − shape_at` under-states it). Chosen over the forward filter (only earlier
   sessions): with sparse data the forward filter swings after each odd session (patrik's 2026-09-10 glitch raised

@@ -109,4 +109,4 @@ export function TLine({ x, series, height = 200, xFmt = String, yFmt = (v) => St
   return <div class="tline" ref={box} />;
 }
 
-export { TIME_INCRS };
+{ TIME_INCRS };

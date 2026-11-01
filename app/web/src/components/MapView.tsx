@@ -3,7 +3,7 @@
 import { Map as MLMap, NavigationControl, ScaleControl, AttributionControl, LngLatBounds, setWorkerUrl } from "maplibre-gl";
 // MapLibre 6 loads its worker as a separate module next to the bundle; let Vite emit it and point at it
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
-import type { GeoJSONSource, LayerSpecification } from "maplibre-gl";
+import type { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -16,7 +16,7 @@ const KV = (layer: string) => [`https://cache.kartverket.no/v1/wmts/1.0.0/${laye
 const KV_ATTR = '© <a href="https://www.kartverket.no/" target="_blank">Kartverket</a>';
 const OSM_ATTR = '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors';
 
-export const BASEMAPS = {
+const BASEMAPS = {
   topo: { label: "Topo", tiles: KV("topo"), attribution: KV_ATTR, maxzoom: 18 },
   grey: { label: "Grey", tiles: KV("topograatone"), attribution: KV_ATTR, maxzoom: 18 },
   osm: { label: "OSM", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], attribution: OSM_ATTR, maxzoom: 19 },
@@ -33,7 +33,7 @@ const NORWAY: [number, number][] = [[4, 57.7], [7, 57.7], [8.5, 58], [10.6, 58.7
   [14.8, 65.7], [15.6, 66.2], [16.6, 67], [16.8, 67.5], [18.2, 68.2], [18.4, 68.6], [20.2, 68.55], [20.4, 69], [21.3, 69.3], [22.2, 68.9],
   [23.3, 68.6], [24.9, 68.5], [25.9, 69], [26.6, 69.6], [27.9, 70], [28.8, 69.7], [29.1, 69.2], [28.9, 69], [29.6, 69], [31.5, 69.6],
   [31.5, 71.5], [4, 71.5]];
-export function inNorway(lon: number, lat: number): boolean {
+function inNorway(lon: number, lat: number): boolean {
   let inside = false;
   for (let i = 0, j = NORWAY.length - 1; i < NORWAY.length; j = i++) {
     const [xi, yi] = NORWAY[i], [xj, yj] = NORWAY[j];
@@ -47,7 +47,7 @@ const KEY = "garmin.basemap";
 const EVT = "app:basemap";
 /** the stored choice, else the map's default — except that the bright Topo default becomes Grey in the dark theme
  *  (a beige topo map next to the dark UI is glaring); a stored choice always wins */
-export const getBasemap = (fallback: BasemapId = "topo"): BasemapId => {
+const getBasemap = (fallback: BasemapId = "topo"): BasemapId => {
   const v = localStorage.getItem(KEY) as BasemapId | null;
   if (v && v in BASEMAPS) return v;
   return fallback === "topo" && currentTheme() === "dark" ? "grey" : fallback;
@@ -166,9 +166,6 @@ export function setData(map: MLMap, id: string, data: GeoJSON.GeoJSON) {
   else map.addSource(id, { type: "geojson", data: data as any });
 }
 
-export function addLayer(map: MLMap, layer: LayerSpecification) {
-  if (!map.getLayer(layer.id)) map.addLayer(layer);
-}
 
 export function fitBBox(map: MLMap, b: BBox | null, opts: { padding?: number; maxZoom?: number; animate?: boolean } = {}) {
   if (!b) return;

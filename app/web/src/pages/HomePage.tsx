@@ -18,7 +18,7 @@ interface Shape { label: string; unit: string; mean: number | null; sd: number |
 type HomeRow = SearchRow & { dur_s: number | null; type_label?: string | null; fit: boolean; track: boolean; swim?: Activity["swim"] };
 
 /** "6×1200" -> "6×1.2k", "1×1300 + 2×3000" -> "1×1.3k + 2×3k" (the training log on a phone: never clip digits) */
-export const compactSig = (s: string) => s.replace(/×(\d{4,})(?!\d)/g, (_m, d) => `×${(Number(d) / 1000).toFixed(1).replace(/\.0$/, "")}k`);
+const compactSig = (s: string) => s.replace(/×(\d{4,})(?!\d)/g, (_m, d) => `×${(Number(d) / 1000).toFixed(1).replace(/\.0$/, "")}k`);
 /** a workout label as tokens that wrap only at "×" and before "+" (word-break: keep-all in CSS) */
 function SigTokens({ s }: { s: string }) {
   const parts = s.split(" + ");
@@ -56,7 +56,7 @@ const DISC_SHORT: Record<string, string> = { interval: "Interval", long: "Long",
 /** a shape without a race / hard session for more than this many days is stale: muted, "last evidence 12 mo ago" in the tooltip */
 const STALE_DAYS = 90;
 /** "12 d" / "5 mo" / "2.5 y" */
-export const agoShort = (d: number) => d < 60 ? `${d} d` : d < 730 ? `${Math.round(d / 30.4)} mo` : `${(d / 365).toFixed(1).replace(/\.0$/, "")} y`;
+const agoShort = (d: number) => d < 60 ? `${d} d` : d < 730 ? `${Math.round(d / 30.4)} mo` : `${(d / 365).toFixed(1).replace(/\.0$/, "")} y`;
 
 /** plain text: "Shape · Interval 52.8 · Long 58.4 · Ski 55.3", each value links to Fitness */
 function ShapeLine({ fit }: { fit: Record<string, Shape> }) {

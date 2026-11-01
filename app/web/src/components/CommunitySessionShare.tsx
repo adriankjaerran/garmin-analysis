@@ -69,7 +69,7 @@ function rows(s: TSession, c: CsSession): Row[] {
   return out.sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
 }
 
-export async function drawShareCard(s: TSession, c: CsSession, facts: Facts, replay: Replay | null): Promise<HTMLCanvasElement> {
+async function drawShareCard(s: TSession, c: CsSession, facts: Facts, replay: Replay | null): Promise<HTMLCanvasElement> {
   const cv = document.createElement("canvas");
   cv.width = W; cv.height = H;
   const x = cv.getContext("2d")!;

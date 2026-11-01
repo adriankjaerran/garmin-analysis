@@ -1,4 +1,4 @@
-// Small shared pieces for activities: sport dot, together marker, workout name, speed/pace cell, Day-page table columns, summary kv.
+// Small shared pieces for activities: sport dot, "together with" text, workout name, speed/pace cell, Day-page table columns, summary kv.
 import type { Activity, TogetherLink } from "../lib/api";
 import { SPORT_LABEL, dur, km, num, sportColor, stypeLabel, typeLabel, time, speedText as speedOf, speedLabel } from "../lib/format";
 import type { Col } from "./Table";
@@ -6,15 +6,6 @@ import { personName } from "../lib/people";
 
 /** "Together with Patrik" */
 export const togetherWith = (t: TogetherLink) => `Together with ${t.with.map(personName).join(", ")}`;
-/** "together" marker for an activity done with others: a link to the Together session (title = who + the shared workout) */
-export function TogetherMark({ a }: { a: { together?: TogetherLink | null } }) {
-  const t = a.together;
-  if (!t) return null;
-  return (
-    <a class="tg-mark" href={`/community/${t.gid}`} onClick={(e) => e.stopPropagation()} aria-label={togetherWith(t)}
-       title={`${togetherWith(t)}${t.workout ? ` · ${t.workout}` : ""} — open the session`}>together</a>
-  );
-}
 export const SportDot = ({ sport }: { sport: string }) => <span class="dot" style={{ background: sportColor(sport) }} title={SPORT_LABEL[sport]} />;
 
 // ------------------------------------------------------------------ distance (trusted / estimate / unknown)
@@ -54,7 +45,7 @@ export const speedSort = (a: Activity) => (a.swim?.pace_100m_s ? 100 / a.swim.pa
 export const typeText = (a: Activity) => a.type_label || stypeLabel(a.stype) || typeLabel(a.type);
 /** what the session was: the one workout name (`workout_label`, store.workout_name: "15×400", "1×1300 + 2×3000",
  *  "Easy run"), else the type */
-export const what = (a: Pick<Activity, "workout_label" | "stype" | "type" | "sig">) => a.workout_label || [stypeLabel(a.stype) || typeLabel(a.type), a.sig].filter(Boolean).join(" · ");
+const what = (a: Pick<Activity, "workout_label" | "stype" | "type" | "sig">) => a.workout_label || [stypeLabel(a.stype) || typeLabel(a.type), a.sig].filter(Boolean).join(" · ");
 /** same (the workout name no longer carries a route suffix) */
 export const whatShort = what;
 /** the workout name with the avg rep pace for intervals: "6×1000 @ 3:29 /km" */
@@ -68,7 +59,7 @@ export const workoutTip = (r: { workout_detail?: string | null; name?: string | 
   [r.workout_detail, r.rep_pace_ms ? "@ = avg rep pace (total rep distance / total rep time)" : "", r.name,
     r.together ? togetherWith(r.together) : ""].filter(Boolean).join(" · ");
 /** place display name (id stays in links) */
-export const placeText = (a: Activity) => a.place_name ?? a.place ?? a.location ?? "—";
+const placeText = (a: Activity) => a.place_name ?? a.place ?? a.location ?? "—";
 export const placeHref = (id: string) => `/places?place=${encodeURIComponent(id)}`;
 
 /** one day's activities (Day page): start time, sport (its dot is the day map's legend), workout and the numbers */

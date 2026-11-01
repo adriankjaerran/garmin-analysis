@@ -3,7 +3,6 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 .tg .me { font-weight: var(--fw-semibold); }
 .tg .good { color: var(--state-good); }
 .tg .bad { color: var(--state-duplicate); }
-.tg .warn { color: var(--state-version); }
 
 .tg .pn { font-weight: var(--fw-semibold); }
 
@@ -35,7 +34,6 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 .tg-tbl.mx th.pcol { min-width: 110px; text-align: left; }
 .tg-tbl .cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tg-tbl .cell .m { display: inline-block; width: 20px; text-align: center; font-size: 13px; }
-.tg-tbl .cell .m .tie { font-weight: var(--fw-semibold); color: var(--text-muted); }
 .tg-tbl .cell .m .rk { color: var(--text-muted); font-size: var(--fs-12); }
 .tg-tbl .cell .v b { font-weight: var(--fw-semibold); }
 .tg-tbl .cell .v sup { font-weight: var(--fw-regular); color: var(--text-muted); margin-left: 1px; }
@@ -43,9 +41,6 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 .tg-tbl .cell.partial .v { font-style: italic; font-weight: var(--fw-regular); }
 .tg-tbl .cell.partial, .tg-tbl .cell.unranked { color: var(--text-muted); }
 .tg-tbl .cell.unranked .v { font-weight: var(--fw-regular); }
-.tg-tbl td.bar { width: 90px; }
-.tg-tbl .gb { display: block; height: 6px; border-radius: 3px; background: var(--surface-hover); overflow: hidden; }
-.tg-tbl .gb i { display: block; height: 100%; border-radius: 3px; opacity: 0.7; }
 .tg-tbl.br th.pgrp { border-bottom: 2px solid; text-align: center; }
 .tg-tbl.br td, .tg-tbl.br th { white-space: nowrap; }
 .tg-tbl tbody tr.clickable { cursor: pointer; }
@@ -114,7 +109,6 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 .tg-tbl.lb td.num, .tg-tbl.lb th.num { white-space: nowrap; }
 
 /* polish 2: suspect reps, links, replay standings table, unverified map, mobile tables */
-.tg-tbl .cell .m .sus { color: var(--text-muted); font-weight: var(--fw-semibold); }
 .tg-tbl .cell.suspect .v { text-decoration: underline dotted var(--state-version); text-underline-offset: 3px; }
 .tg-tbl.lb th[title], .tg-tbl.mx th[title] { cursor: help; }
 
@@ -137,12 +131,8 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
   .tg-tbl .opt { display: none; }
   .tg-tbl.mx th.pcol { min-width: 0; }
 }
-.tg-tbl.lb tr.hasub td { border-bottom: 0; }
-.tg-tbl.lb tr.subrow td { height: 20px; padding-bottom: 6px; vertical-align: top; }
 .tg .nm2.r { align-items: flex-end; }
 .tg-tbl.sofar tr.todo td { opacity: 0.6; }
-.tg-tbl.lb tr.subrow td { white-space: normal; line-height: 1.3; }
-@media (max-width: 500px) { .tg-tbl.lb tr.subrow td[colspan] { max-width: 300px; } }
 
 /* replay upgrade: rep / km chips, passes feed, finish card, scrub markers, row ▶ */
 .tg-replay { grid-template-rows: auto auto auto auto; }
@@ -179,7 +169,6 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 .tg-scrub .marks { position: absolute; left: 0; right: 0; top: 2px; height: 6px; pointer-events: none; }
 .tg-scrub .marks i { position: absolute; top: 0; margin-left: -5px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid var(--text); }
 .tg-rp-keys { grid-column: 1 / -1; margin-top: -4px; }
-.tg-tbl.mx th.rp, .tg-tbl.mx td.rp { width: 28px; padding: 0 2px; text-align: center; }
 
 .tg-tbl.live td:nth-child(3) { white-space: nowrap; }
 @media (max-width: 760px) { .tg-rp-keys { display: none; } .tg-rp-chips .tg-rp-align { margin-left: 0; } }

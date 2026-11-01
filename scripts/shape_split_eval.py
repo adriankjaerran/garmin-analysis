@@ -13,6 +13,9 @@ Models (all on the VDOT scale, same per-item sigma, kinds and robust weights as 
            x = log2(km/5) (`fm.evidence_km`); races predicted at their own distance. Variants: interval items at
            7.07 km (the −2.5 offset was fitted on 5k + 10k races), tempo at 10k / half / the window's race-pace
            distance (with the +3.0 offset or a re-fitted +1.0 / 0.0).
+           D uses the current fm.CURVE otherwise (since 2026-11-01 a mean-reverting slope, sd 1.5; the
+           docs/fitness-model.md table of this script was run with the random-walk slope, prior sd 3). Slope prior /
+           q / mean reversion: scripts/slope_prior_eval.py.
 
 Out-of-sample metrics (no look-ahead except the `implausible` cross-check flag, which production computes once):
   - race prediction: model fitted on data strictly before the race day (robust smoother, last day = forward

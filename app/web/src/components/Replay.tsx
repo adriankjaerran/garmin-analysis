@@ -37,7 +37,7 @@ const HOLD_MS = 2600;   // the finish card stays this long (wall time) before au
 const TRAIL_S = 20;
 
 /** local wall-clock "20:16:32" for a group-clock second */
-export function clockText(s: TSession, t: number): string {
+function clockText(s: TSession, t: number): string {
   const ms = Date.parse(s.group.start_local_iso + "Z") + (Date.parse(s.t0_utc) + t * 1000 - Date.parse(s.group.start_utc));
   const d = new Date(ms);
   return [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()].map((x) => String(x).padStart(2, "0")).join(":");

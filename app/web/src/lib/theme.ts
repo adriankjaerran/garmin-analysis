@@ -10,7 +10,7 @@ export type Theme = "light" | "dark";
 const KEY = "theme";
 const mq = window.matchMedia("(prefers-color-scheme: dark)");
 
-export function getPref(): ThemePref {
+function getPref(): ThemePref {
   const v = localStorage.getItem(KEY);
   return v === "light" || v === "dark" ? v : "auto";
 }

@@ -284,9 +284,6 @@ nav.side span.step { color: var(--text-muted); font-size: var(--fs-12); text-tra
 nav.side .tab .badge { display: inline-block; margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center;
   background: var(--accent-surface); color: var(--accent); font-variant-numeric: tabular-nums; }
 nav.side a.current .badge { background: var(--surface); }
-/* "together" marker (ActivityBits.TogetherMark): a link to the Together session, in front of the workout name */
-.tg-mark { margin-right: 4px; font-size: 11px; text-decoration: none; border-radius: 3px; }
-.tg-mark:hover { text-decoration: none; background: var(--accent-surface); }
 
 /* narrow phones: segmented button groups scroll sideways instead of overflowing the page */
 @media (max-width: 500px) {

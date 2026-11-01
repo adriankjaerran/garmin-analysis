@@ -7,8 +7,8 @@ import { bboxOfCoords, decodePolyline, unionBBox, type BBox } from "../lib/geo";
 import { sportColor } from "../lib/format";
 import { coreBBox } from "../lib/search";
 
-export interface GPoint { key: string; lat: number; lon: number; n: number; color?: string }
-export interface GShape { key: string; circle?: [number, number, number]; poly?: [number, number][] }
+interface GPoint { key: string; lat: number; lon: number; n: number; color?: string }
+interface GShape { key: string; circle?: [number, number, number]; poly?: [number, number][] }
 export interface GLine { id: string; key: string; sport: string; poly?: string | null; coords?: [number, number][] }
 
 interface Props {

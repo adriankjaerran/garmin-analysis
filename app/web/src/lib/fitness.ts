@@ -8,7 +8,7 @@ export const DISCS: Disc[] = ["interval", "long", "ski"];
 export const DISC_LABEL: Record<string, string> = { interval: "Interval", long: "Long distance", ski: "Ski", overall: "Overall" };
 /** own palette (tokens in fitness.css), distinct from the sport colours (run blue, ski red, hike green, bike ochre,
  *  swim teal): a discipline is a model quantity, not a sport */
-export const DISC_COLOR: Record<string, string> = { interval: "--disc-interval", long: "--disc-long", ski: "--disc-ski", overall: "--disc-overall" };
+const DISC_COLOR: Record<string, string> = { interval: "--disc-interval", long: "--disc-long", ski: "--disc-ski", overall: "--disc-overall" };
 export const discColor = (d: string) => cssVar(DISC_COLOR[d] ?? "--chart-muted");
 export const KIND_LABEL: Record<Kind, string> = { race: "race", hard: "hard session", bound: "lower bound", implausible: "implausible" };
 export const KIND_HELP: Record<Kind, string> = {
@@ -18,32 +18,32 @@ export const KIND_HELP: Record<Kind, string> = {
   implausible: "rejected: faster than the interval shape allows (mislabelled or bad GPS)",
 };
 
-export type RaceEq = { "5k": number; "10k": number; half: number; marathon: number };
-export interface Weekly { date: string; mean: number; sd: number; n?: number; days_since_evidence?: number | null }
+type RaceEq = { "5k": number; "10k": number; half: number; marathon: number };
+interface Weekly { date: string; mean: number; sd: number; n?: number; days_since_evidence?: number | null }
 export interface Yearly { mean: number; max: number; sd_median: number; n_evidence: number; mean_well_observed: number | null; days_well_observed: number }
-export interface Current { date: string; mean: number; sd: number; confidence?: "high" | "medium" | "low"; pct_of_best?: number;
+interface Current { date: string; mean: number; sd: number; confidence?: "high" | "medium" | "low"; pct_of_best?: number;
   race_equivalents_s?: RaceEq | null; trend_90d: number | null;
   last_evidence?: { date: string; id: number; score: number; kind: Kind } | null }
-export interface Discipline { label: string; unit: string; q_per_day?: number; personal_best?: number; current: Current;
+interface Discipline { label: string; unit: string; q_per_day?: number; personal_best?: number; current: Current;
   yearly: Record<string, Yearly | number>; weekly: Weekly[] }
 export interface FitSession { id: string; date: string; discipline: Disc; type: string; score: number; kind: Kind; sigma: number;
   weight: number | null; shape_at: number | null; confidence: number; components: Record<string, any>; explain: string;
   name?: string | null; dist_km?: number | null; sport?: string | null; hr?: SessionHr | null }
 /** the session as seen by the "hr" model variant (HR decides how maximal a hard session was) */
-export interface SessionHr { kind: Kind; sigma: number; weight: number | null; shape_at: number | null; p_max: number | null; note: string | null }
-export type VariantName = "pace" | "hr";
-export interface Variant { label: string; hr_used_in_score: boolean; disciplines?: Record<string, Discipline> }
+interface SessionHr { kind: Kind; sigma: number; weight: number | null; shape_at: number | null; p_max: number | null; note: string | null }
+type VariantName = "pace" | "hr";
+interface Variant { label: string; hr_used_in_score: boolean; disciplines?: Record<string, Discipline> }
 export interface EvalDisc { n: number; forecast_mae: number; loglik: number; race_n?: number; race_mae?: number; race_mean_err?: number;
   r3_n?: number; r3_corr_prior_shape_vs_log_speed?: number }
-export interface EvalVariants { default: Record<VariantName, Record<Disc, EvalDisc>>;
+interface EvalVariants { default: Record<VariantName, Record<Disc, EvalDisc>>;
   demoted: { date: string; id: string; discipline: Disc; type: string; score: number; p_max: number; note: string }[];
   sensitivity_hr?: Record<string, Record<Disc, Partial<EvalDisc>>> }
 export interface FitnessDoc { built: string; model_version: number; distance_curve?: boolean; params: Record<string, any>; sigma: Record<string, number>;
   scale: string; hr_used_in_score: boolean; disciplines: Record<string, Discipline>; sessions: FitSession[];
   variants?: Partial<Record<VariantName, Variant>>; eval_variants?: EvalVariants | null;
   rebuild: { running: boolean; started: string | null; finished: string | null; error: string | null; seconds: number | null } }
-export interface Explained { key: string; label: string; value?: any; text: string; meaning: string }
-export interface SessionShape extends FitSession { label: string; race_equivalents_s: RaceEq | null; components_explained: Explained[];
+interface Explained { key: string; label: string; value?: any; text: string; meaning: string }
+interface SessionShape extends FitSession { label: string; race_equivalents_s: RaceEq | null; components_explained: Explained[];
   shape: { date: string; mean: number; sd: number } | null; shape_race_equivalents_s: RaceEq | null;
   personal_best: number | null; current: Current | null;
   hr?: (SessionHr & { shape: { date: string; mean: number; sd: number } | null; current: Current | null; label: string | null }) | null }

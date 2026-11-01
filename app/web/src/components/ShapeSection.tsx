@@ -17,7 +17,7 @@ type SessionResp = FitnessSession & { not_scored?: { key: string; text: string }
 
 /** "1.3 above your shape" / "0.4 below" / "at your shape"; a lower bound (easy / long run) below the shape says
  *  nothing about it: "Easy effort: doesn't change your shape" (no number, it isn't a shortfall) */
-export function vsShape(d: number | null, kind?: string): string {
+function vsShape(d: number | null, kind?: string): string {
   if (d === null) return "—";
   if (kind === "bound" && d < 0) return "Easy effort: doesn't change your shape";
   const r = Math.abs(d).toFixed(1);

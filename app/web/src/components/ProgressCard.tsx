@@ -8,27 +8,27 @@ import { Table, type Col } from "./Table";
 import { navigate } from "../lib/router";
 import "./progress.css";
 
-export interface ProgPoint { id: string; date: string; speed: number; hr: number | null; rest_s: number | null; place_name: string | null; label: string | null; together: boolean }
+interface ProgPoint { id: string; date: string; speed: number; hr: number | null; rest_s: number | null; place_name: string | null; label: string | null; together: boolean }
 export interface ProgTrend { vs_median_pct: number; n_prev: number; median_speed: number; arrow: string; word: string }
 export interface ProgWorkout { key: string; sport: string; signature: string; n: number; first: string; last: string; current: ProgPoint;
   best_before: ProgPoint | null; best: ProgPoint; is_best: boolean; rank: number; trend: ProgTrend | null; points: ProgPoint[] }
-export interface RecordRow { id: string; date: string; time_s: number; pace_s_km: number; vdot: number | null; rank?: number; name: string | null;
+interface RecordRow { id: string; date: string; time_s: number; pace_s_km: number; vdot: number | null; rank?: number; name: string | null;
   workout_label: string | null; place_name: string | null; improved_s?: number | null; reason?: string }
-export interface DistRecord { key: string; label: string; dist_m: number; n: number; best: RecordRow; top: RecordRow[]; history: RecordRow[];
+interface DistRecord { key: string; label: string; dist_m: number; n: number; best: RecordRow; top: RecordRow[]; history: RecordRow[];
   rejected: RecordRow[]; n_rejected: number }
 export interface Records { records: DistRecord[]; by_activity: Record<string, { key: string; label: string; rank: number; of: number; time_s: number }[]>;
   vdot_cap: number | null; definition: string }
 
 const NEW_PR_DAYS = 90;
 /** 1 -> "1st", 2 -> "2nd", 11 -> "11th" */
-export const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 /** "fastest" / "2nd fastest" */
 export const fastest = (rank: number) => (rank === 1 ? "fastest" : `${ordinal(rank)} fastest`);
 const trendCls = (t: ProgTrend | null) => (!t ? "muted" : t.arrow === "↗" ? "up" : t.arrow === "↘" ? "down" : "muted");
 const trendTip = (t: ProgTrend | null) => (t ? `${Math.abs(t.vs_median_pct).toFixed(1)} % ${t.word === "level" ? "(level)" : t.word} than the median of the ${t.n_prev} before` : "first time");
 
 /** avg rep pace per occurrence (up = faster), the highlighted one as a dot, the best as a ring */
-export function ProgSpark({ pts, sport, cur, w = 120, h = 26 }: { pts: ProgPoint[]; sport: string; cur?: string; w?: number; h?: number }) {
+function ProgSpark({ pts, sport, cur, w = 120, h = 26 }: { pts: ProgPoint[]; sport: string; cur?: string; w?: number; h?: number }) {
   if (pts.length < 2) return null;
   const v = pts.map((p) => p.speed), lo = Math.min(...v), hi = Math.max(...v), r = hi - lo || 1;
   const x = (i: number) => 3 + (i / (pts.length - 1)) * (w - 6), y = (s: number) => h - 3 - ((s - lo) / r) * (h - 6);

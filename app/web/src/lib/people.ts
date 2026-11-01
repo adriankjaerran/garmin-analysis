@@ -15,7 +15,7 @@ const FALLBACK = ["#2f5fd0", "#c2560c", "#2f8a4c", "#8e44ad", "#1f8fa6", "#b88a0
 const FALLBACK_DARK = ["#6f96ee", "#f0884a", "#5cbf7a", "#b07fd6", "#45b5cc", "#d9ae2a", "#ec6d6d", "#9aa8b6"];
 
 /** "patrik#2" (a 2nd file of the same person) -> "patrik" */
-export const baseKey = (key: string) => key.split("#")[0];
+const baseKey = (key: string) => key.split("#")[0];
 
 export function personInfo(key: string): PersonInfo {
   const p = baseKey(key);

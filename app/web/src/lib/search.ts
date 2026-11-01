@@ -18,7 +18,7 @@ export interface SearchRow {
   workout_label?: string | null; workout_detail?: string | null; rep_pace_ms?: number | null;
 }
 export interface SearchResult { n: number; truncated: boolean; km: number; filters: Record<string, any>; families: Record<string, number>; rows: SearchRow[] }
-export interface Reason { c: string | null; s: number | null; text: string }
+interface Reason { c: string | null; s: number | null; text: string }
 export interface NearRow extends SearchRow { score: number; components: Record<string, number>; reasons: Reason[] }
 export interface NearestResult { query: SearchRow; preset: string; weights: Record<string, number>; components: string[]; presets: string[]; results: NearRow[] }
 export interface Group {
@@ -31,7 +31,7 @@ export interface Group {
 }
 export interface TreeNode { key: string | null; label?: string; n: number; first: string | null; last: string | null;
   places: Record<string, number>; children?: TreeNode[]; ids?: string[] }
-export interface Opt { id: string; n: number; n_main?: number; n_touched?: number; n_start?: number; label?: string; name?: string; kind?: string; src?: string; sport?: string }
+interface Opt { id: string; n: number; n_main?: number; n_touched?: number; n_start?: number; label?: string; name?: string; kind?: string; src?: string; sport?: string }
 export interface SearchOptions {
   sports: Opt[]; places: Opt[]; regions: Opt[]; routes: Opt[]; families: Opt[]; categories: Opt[];
   signatures: Opt[]; exact: Opt[]; rest_modes: Opt[]; presets: string[]; built: string | null;
@@ -57,7 +57,7 @@ export function repLen(r: { rep_dist_m: number | null; rep_time_s: number | null
   if (/×\d+:\d\d/.test(s)) return r.rep_time_s ? mmss(r.rep_time_s) : "—";
   return r.rep_dist_m ? `${Math.round(r.rep_dist_m)} m` : "—";
 }
-export const mmss = (s: number) => { const r = Math.round(s); return `${Math.floor(r / 60)}:${String(r % 60).padStart(2, "0")}`; };
+const mmss = (s: number) => { const r = Math.round(s); return `${Math.floor(r / 60)}:${String(r % 60).padStart(2, "0")}`; };
 
 /** "94 · 108 touched": main-place count first, touched count when it differs (Place model, docs/app.md) */
 export function placeCount(nMain: number | null | undefined, nTouched: number | null | undefined): string {
@@ -99,21 +99,3 @@ export function coreBBox(boxes: BB[], spanKm = 150): { fit: BB | null; out: numb
   return { fit, out: boxes.length - keep.length };
 }
 
-/** rep pace / speed in the unit of the sport: "3:29" (run, /km), "1:52 /100" (swim), "10.7 km/h" (else) */
-export function repSpeedText(sport: string, ms: number | null | undefined): string {
-  if (!ms) return "";
-  if (sport === "run" || sport === "hike") { const s = 1000 / ms; return mmss(s); }
-  if (sport === "swim") return mmss(100 / ms) + " /100";
-  return (ms * 3.6).toFixed(1) + " km/h";
-}
-/** what a session was, in one line: "6×1000 @ 3:29" for intervals (signature @ mean rep pace of the main reps),
- *  else the workout family ("Easy run", "Hike") */
-export function workoutLine(r: Pick<SearchRow, "sport" | "signature" | "rep_count" | "rep_speed_ms" | "family_label"> & { type_label?: string | null }): string {
-  if (r.rep_count && r.signature) {
-    const p = repSpeedText(r.sport, r.rep_speed_ms);
-    return p ? `${r.signature} @ ${p}` : r.signature;
-  }
-  return r.family_label || r.type_label || "—";
-}
-/** short label for a calendar cell: the main rep signature for intervals ("6×1000"), else "" (show km) */
-export const workoutShort = (r: Pick<SearchRow, "rep_count" | "main_sig" | "signature">) => (r.rep_count ? r.main_sig || r.signature || "" : "");

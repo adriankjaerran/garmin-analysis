@@ -359,14 +359,12 @@ function RepCloseup({ s, iv, cu, replay, align, onSel }: {
   );
 }
 
-function Breaks({ s, iv }: { s: TSession; iv: Intervals }) {
+function Breaks({ iv }: { iv: Intervals }) {
   const keys = Object.keys(iv.breaks).filter((k) => iv.breaks[k].length);
   const rows = useMemo(() => {
     const by = new Map<number, { after: string; next: string; slot: number }>();
     for (const k of keys) for (const b of iv.breaks[k]) {
-      const sl = iv.slots[b.after_slot];
       if (!by.has(b.after_slot)) by.set(b.after_slot, { after: b.after_label, next: b.next_label, slot: b.after_slot });
-      void sl;
     }
     const all = [...by.values()].sort((a, b) => a.slot - b.slot);
     // with several people, only the breaks at least two of them had (the rest is one person's own session)
@@ -484,7 +482,7 @@ function IntervalsView({ s, iv, replay, between, more, extra, photos }: ViewProp
           </div>
         </div>
         {extra}
-        <Breaks s={s} iv={iv} />
+        <Breaks iv={iv} />
         <HeartIntervals s={s} iv={iv} cu={cu} replay={replay} />
         {photos}
       </More>

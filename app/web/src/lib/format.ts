@@ -21,12 +21,6 @@ export function dur(s: number | null | undefined): string {
   const t = h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`;
   return neg ? "−" + t : t;
 }
-/** signed duration: "+0:34", "−1:02", "±0:00" */
-export function sdur(s: number | null | undefined): string {
-  if (s === null || s === undefined || !isFinite(s)) return "—";
-  const r = Math.round(s);
-  return r === 0 ? "±" + dur(0) : (r > 0 ? "+" : "−") + dur(Math.abs(r));
-}
 /** m/s -> "m:ss" per 100 m (swim pace) */
 export function pace100(ms: number | null | undefined): string {
   if (!ms || ms <= 0.1) return "—";
@@ -43,10 +37,6 @@ export const num = (v: number | null | undefined, d = 0) =>
 export const km = (v: number | null | undefined) => (v ? v.toFixed(v >= 100 ? 0 : 1) : "—");
 
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-export function dayLabel(date: string): string {
-  const d = new Date(date + "T12:00:00");
-  return `${WD[d.getDay()]} ${date}`;
-}
 export function addDays(date: string, n: number): string {
   const d = new Date(date + "T12:00:00");
   d.setDate(d.getDate() + n);
@@ -93,8 +83,6 @@ export function speedText(sport: string | null | undefined, ms: number | null | 
   const v = speedVal(sport, ms);
   return v === "—" ? v : `${v} ${speedUnit(sport)}`;
 }
-/** sort key so that "faster" sorts the same way for pace and speed (higher = faster) */
-export const speedSortKey = (ms: number | null | undefined) => (ms && isFinite(ms) ? ms : null);
 /** "Pace" or "Speed" for a column / axis header */
 export const speedLabel = (sport: string | null | undefined) => (onFoot(sport) || sport === "swim" ? "Pace" : "Speed");
 /** seconds with a unit: "45 s", "9.4 s" (d decimals below 60 s), ≥ 60 s as "1:17" / "1:02:03" */

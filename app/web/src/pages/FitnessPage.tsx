@@ -25,7 +25,7 @@ const STALE_DAYS = 90;
 interface CurRow { key: string; label: string; mean: number; sd: number; hrMean: number | null; hrSd: number | null; conf: string | null; pct: number | null; pb: number | null;
   r5: number | null; r10: number | null; rh: number | null; trend: number | null; last: string | null; lastId: string | null; lastDays: number | null }
 
-export function KindMark({ kind, disc }: { kind: Kind; disc: string }) {
+function KindMark({ kind, disc }: { kind: Kind; disc: string }) {
   const c = discColor(disc);
   const st = kind === "race" ? { background: c, transform: "rotate(45deg)", borderRadius: 0, width: "7px", height: "7px" }
     : kind === "hard" ? { background: c } : kind === "bound" ? { border: `1.5px solid ${c}`, background: "transparent" }

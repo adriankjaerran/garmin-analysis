@@ -35,21 +35,21 @@ export interface AlignSession {
   /** start=rep1: the session's own number of its rep 1 and the slot it is in (late: its first rep matches a later slot) */
   rep_n?: number; slot?: string;
 }
-export interface Align {
+interface Align {
   applied: boolean; note?: string;
   start?: { kind: "ref" | "session" | "point" | "rep1"; anchor_id: number; lat: N; lon: N; heading_deg: N; radius_m: N;
     t_anchor_s: number; route_m: N };
   finish?: null; pacer_id?: number; sessions?: Record<string, AlignSession>;
   excluded?: { id: number; reason: string; closest_m: N }[]; late?: number[];
 }
-export interface LegRow { moving_s: number; pause_s: number; speed_kmh: number; hr: N; delta_moving_s: N; d_moving_s: N; rank: number; partial?: number }
-export interface Leg { from_m: number; to_m: number; name: string; climb_m: N; sessions: Record<string, LegRow | null> }
-export interface RepRow { n: number; start_s: number; time_s: number; dist_m: number; speed_kmh: N; pace_s_km: N; hr: N; hr_max: N;
+interface LegRow { moving_s: number; pause_s: number; speed_kmh: number; hr: N; delta_moving_s: N; d_moving_s: N; rank: number; partial?: number }
+interface Leg { from_m: number; to_m: number; name: string; climb_m: N; sessions: Record<string, LegRow | null> }
+interface RepRow { n: number; start_s: number; time_s: number; dist_m: number; speed_kmh: N; pace_s_km: N; hr: N; hr_max: N;
   hr_start: N; hr_end: N; d_time_s?: N; d_pace_s_km?: N; d_hr?: N; d_hr_max?: N; d_hr_end?: N }
-export interface BreakRow { start_s: number; dur_s: number; dist_m: number; speed_kmh: number; standing_s: number; kind: string;
+interface BreakRow { start_s: number; dur_s: number; dist_m: number; speed_kmh: number; standing_s: number; kind: string;
   hr_peak: N; hr_30: N; hr_60: N; hr_90: N; drop_30: N; drop_60: N; drop_90: N; hr_min: N; hr_next_start: N;
   after_rep: number; next_slot: string; d_dur_s?: N; d_drop_30?: N; d_drop_60?: N; d_hr_next_start?: N }
-export interface RepSummary { n_reps: number; rep_time_s: number; rep_dist_m: number; rep_pace_s_km: N; rep_hr: N; rep_hr_max: N;
+interface RepSummary { n_reps: number; rep_time_s: number; rep_dist_m: number; rep_pace_s_km: N; rep_hr: N; rep_hr_max: N;
   break_total_s: N; break_median_s: N; drop_60_median: N; matched_slots?: number; d_rep_pace_matched_s_km?: N; d_rep_hr_matched?: N;
   det_mode: string; n_detected: number; n_used: number; match: string }
 export interface Track { t: number[]; lat: number[]; lon: number[] }
@@ -69,7 +69,7 @@ export interface CmpResult {
   /** intervals with rep_series=1: every rep on its own real-time axis, x = x0 + index (s since the rep start) */
   rep_series?: RepSeries;
 }
-export interface RepSeries {
+interface RepSeries {
   lead_s: number; post_s: number;
   slots: { slot: number; width: number; x0: number; n: number;
     series: Record<string, { speed_kmh: N[]; hr: N[]; start_s: number; time_s: number }> }[];
@@ -141,9 +141,9 @@ export function stats(cols: N[][], minN = 3): { med: N[]; lo: N[]; hi: N[] } {
 // ---------------------------------------------------------------- colours
 // Session identity colours: no pure red / green (those mean slower / faster in the tables and bars).
 // Blue, orange, purple, teal, pink, brown, slate, ochre; the reference is neutral (text colour) and drawn thicker.
-export const PALETTE = ["#2563d6", "#e07b00", "#8e44ad", "#0e8c95", "#d0368a", "#8d5a2b", "#5d6d7e", "#a77c00"];
-export const REF_COLOR = "#1d2125";
-export const MUTED = "#b9bfc6";
+const PALETTE = ["#2563d6", "#e07b00", "#8e44ad", "#0e8c95", "#d0368a", "#8d5a2b", "#5d6d7e", "#a77c00"];
+const REF_COLOR = "#1d2125";
+const MUTED = "#b9bfc6";
 /** the highlighted session when the others are grey (many sessions): blue, not red */
 export const FOCUS_MANY = "#2563d6";
 // dark theme (charts, swatches). Maps keep the light set: the basemap tiles are light in both themes.
@@ -284,7 +284,7 @@ export function spans(r: CmpResult): { a: number; b: number }[] {
 }
 
 /** index of the largest t <= v (binary search), -1 if before */
-export function bisect(ts: number[], v: number): number {
+function bisect(ts: number[], v: number): number {
   let lo = 0, hi = ts.length - 1;
   if (!ts.length || v < ts[0]) return -1;
   while (lo < hi) { const m = (lo + hi + 1) >> 1; if (ts[m] <= v) lo = m; else hi = m - 1; }

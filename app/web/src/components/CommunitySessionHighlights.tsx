@@ -6,7 +6,7 @@ import { repTime } from "../lib/together";
 import { useCommunity, type CsSession } from "../lib/communitySession";
 
 /** the previous session at this place to compare with: the same workout if any, else the same type */
-export function lastTimeHere(c: CsSession) {
+function lastTimeHere(c: CsSession) {
   const older = c.same_place.filter((x) => x.date < c.date || (x.date === c.date && x.gid < c.gid));
   const same = older.find((x) => x.workout === c.workout);
   if (same) return { x: same, same: true };

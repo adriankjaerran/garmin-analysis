@@ -7,8 +7,6 @@ type N = number | null | undefined;
 export const TIME_INCRS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1200, 1800, 3600, 7200, 10800, 21600, 43200, 86400];
 /** tick steps for pace axes in seconds per km: 0:05 … 5:00 */
 export const PACE_INCRS = [5, 10, 15, 30, 60, 120, 300, 600];
-/** distance axes in metres */
-export const DIST_INCRS = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
 
 function q(a: number[], p: number) {
   return a[Math.min(a.length - 1, Math.max(0, Math.round(p * (a.length - 1))))];
@@ -45,16 +43,6 @@ export function speedRange(vals: Iterable<N>, opts: { lo?: number; hi?: number; 
   return [Math.max(0, L - pad), H + pad];
 }
 
-/** percentile range for any axis */
-export function pctRange(vals: Iterable<N>, lo = 0.01, hi = 0.99, pad = 0.05): [number, number] | null {
-  const a: number[] = [];
-  for (const v of vals) if (v !== null && v !== undefined && isFinite(v)) a.push(v);
-  if (!a.length) return null;
-  a.sort((x, y) => x - y);
-  const L = q(a, lo), H = q(a, hi);
-  const d = H - L || Math.abs(H) * 0.1 || 1;
-  return [L - d * pad, H + d * pad];
-}
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 

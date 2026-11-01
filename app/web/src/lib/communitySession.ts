@@ -10,9 +10,9 @@ import type { TPlace, TSession, TargetAvg } from "./together";
 
 type N = number | null;
 
-export interface CsCategory { id: string; label: string; description: string; n?: number }
+interface CsCategory { id: string; label: string; description: string; n?: number }
 export interface CsPhoto { id: string; url: string; thumb: string; by: string | null; at: string | null; taken: string | null; name: string | null; w: N; h: N }
-export interface CsMeta {
+interface CsMeta {
   title: string | null; category: string | null; category_auto: string; category_reason: string | null; category_manual: boolean;
   note: string | null; guests: string[]; photos: CsPhoto[]; cover: string | null; kudos: string[]; hidden: boolean;
 }
@@ -20,14 +20,14 @@ export interface CsForm {
   score: N; shape: N; delta: N; discipline: string | null; kind?: string | null; confidence: "high" | "medium" | "low" | "none" | string;
   text: string; flags?: string[]; z?: N; ref_sd?: N;
 }
-export interface CsNumbers { km: N; moving_s: N; dur_s: N; climb_m: N; kcal: N; reps: N; avg_hr: N }
-export interface CsMember {
+interface CsNumbers { km: N; moving_s: N; dur_s: N; climb_m: N; kcal: N; reps: N; avg_hr: N }
+interface CsMember {
   key: string; person: string; display: PersonInfo; role: "full" | "partial" | "other"; activity_id: string; workout: string | null;
   type: string | null; has_fit: boolean; timed: boolean; form: CsForm | null; numbers: CsNumbers | null;
   rank: N; reps_done: N; n_counted: N; of: N; avg_s: N; pace_s_km: N;
   by_target: TargetAvg[] | null; best: { slot: number; label: string; result_s: number } | null;
 }
-export interface CsCollective {
+interface CsCollective {
   km: N; moving_s: N; hours: N; reps: N; climb_m: N; kcal: N; n_members: number; per_person?: Record<string, CsNumbers>;
 }
 export interface CsSession {
@@ -139,25 +139,25 @@ export function hoursMin(s: N): string {
   return h ? `${h} h ${String(m % 60).padStart(2, "0")} min` : `${m} min`;
 }
 
-// ------------------------------------------------------------------ facts: story, highlights, per-person badges
+// ------------------------------------------------------------------ facts: story, highlights
 type Names = (k: string) => string;
 const WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-export const partOfDay = (hhmm: string) => { const h = Number(hhmm.slice(0, 2)); return h < 5 ? "night" : h < 12 ? "morning" : h < 17 ? "afternoon" : h < 22 ? "evening" : "night"; };
-export const andList = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+const partOfDay = (hhmm: string) => { const h = Number(hhmm.slice(0, 2)); return h < 5 ? "night" : h < 12 ? "morning" : h < 17 ? "afternoon" : h < 22 ? "evening" : "night"; };
+const andList = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 const signed = (d: number) => `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d).toFixed(1)}`;
 const sd = (xs: number[]) => { const m = xs.reduce((a, b) => a + b, 0) / xs.length; return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length); };
 const t1 = (s: number) => (s < 59.95 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`);
 
-export interface Highlight { id: string; title: string; person: string | null; value: string; sub: string; rep?: string }
-export interface PersonFacts { bestRep: { label: string; s: number } | null; recoveries: number; breaks: number; even: number | null; strongFinish: number | null }
-export interface Facts { story: string[]; highlights: Highlight[]; people: Record<string, PersonFacts>; sameTarget: boolean }
+interface Highlight { id: string; title: string; person: string | null; value: string; sub: string; rep?: string }
+interface PersonFacts { recoveries: number; even: number | null; strongFinish: number | null }
+export interface Facts { story: string[]; highlights: Highlight[] }
 
 /** everything the session page says in words, from the together session (+ the club layer when loaded) */
 export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Facts {
   const iv = s.intervals, cont = s.continuous, g = s.group;
   const members = s.participants.filter((p) => p.role !== "other");
   const people: Record<string, PersonFacts> = {};
-  for (const p of members) people[p.key] = { bestRep: null, recoveries: 0, breaks: 0, even: null, strongFinish: null };
+  for (const p of members) people[p.key] = { recoveries: 0, even: null, strongFinish: null };
   const hl: Highlight[] = [];
   const story: string[] = [];
   const who = andList([...new Set(members.map((p) => name(p.key)))]);
@@ -201,7 +201,6 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
     for (const l of iv.leaderboard) {
       const pf = people[l.person];
       if (!pf) continue;
-      if (l.best) pf.bestRep = { label: l.best.label, s: l.best.result_s };
       const f = l.fade_s ?? null;
       if (f !== null) pf.strongFinish = f;
       if (sameTarget) {
@@ -218,7 +217,6 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
     const rf = iv.recovered_faster;
     if (rf.length >= 2) {
       for (const r of rf) if (people[r.person]) people[r.person].recoveries++;
-      for (const k of Object.keys(people)) people[k].breaks = rf.length;
       const top = Object.entries(people).sort((a, b) => b[1].recoveries - a[1].recoveries)[0];
       if (top && top[1].recoveries > rf.length / 2) {
         hl.push({ id: "recovery", title: "Faster recovery", person: top[0], value: `${name(top[0])} · ${top[1].recoveries} of ${rf.length}`,
@@ -262,15 +260,15 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
     const jump = [...fs].sort((a, b) => b.d - a.d)[0];
     if (jump && jump.d >= 1 && fs.length > 1) hl.push({ id: "form", title: "Biggest form jump", person: jump.k, value: `${name(jump.k)} · ${signed(jump.d)}`, sub: "vs their shape the day before" });
   }
-  return { story, highlights: hl, people, sameTarget };
+  return { story, highlights: hl };
 }
-/** "39:08" / "1:02:10" / "45 s" */
 /** the slot with the smallest gap between the first two (any rep two or more people ran) */
 export function closestRep(iv: NonNullable<TSession["intervals"]>): { slot: number; label: string; gap_s: number } | null {
   let out: { slot: number; label: string; gap_s: number } | null = null;
   for (const st of iv.standings) if (st.order.length >= 2 && (!out || st.order[1].gap_s < out.gap_s)) out = { slot: st.slot, label: st.label, gap_s: st.order[1].gap_s };
   return out;
 }
+/** "39:08" / "1:02:10" / "45 s" */
 export function hms(s: number): string {
   s = Math.round(s);
   if (s < 60) return `${s} s`;

@@ -9,8 +9,8 @@ import { cssVar } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { dateAxis } from "../lib/chartAxes";
 
-export interface PredDaily { date: string; vdot_5k: number; vdot_10k: number; vdot_half: number; sd_5k: number; sd_10k: number; sd_half: number }
-export interface PredEvidence { date: string; id: string | number; km: number; vdot: number; kind: string; weight: number }
+interface PredDaily { date: string; vdot_5k: number; vdot_10k: number; vdot_half: number; sd_5k: number; sd_10k: number; sd_half: number }
+interface PredEvidence { date: string; id: string | number; km: number; vdot: number; kind: string; weight: number }
 export interface PredictorDoc {
   ref_km: number; evidence_km: [number, number]; daily: PredDaily[]; evidence: PredEvidence[];
   last_evidence_date: string | null; today: string; distance_curve?: boolean;

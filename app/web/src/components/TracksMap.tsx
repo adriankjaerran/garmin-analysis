@@ -8,7 +8,7 @@ import { MapView, setData, fitBBox, EMPTY, type BasemapId } from "./MapView";
 import { decodePolyline, unionBBox, bboxOfCoords, type BBox } from "../lib/geo";
 import { sportColor } from "../lib/format";
 
-export interface MapTrack { id: string; sport: string; poly?: string | null; coords?: [number, number][]; color?: string; width?: number; muted?: boolean }
+interface MapTrack { id: string; sport: string; poly?: string | null; coords?: [number, number][]; color?: string; width?: number; muted?: boolean }
 
 interface Props {
   tracks: MapTrack[];

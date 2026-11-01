@@ -13,7 +13,7 @@ import "../pages/community-session.css";
 const DISC: Record<string, string> = { interval: "interval", long: "long-distance", ski: "ski" };
 
 /** "+2.4": session score minus the shape the day before (VDOT points); coloured only when |delta| ≥ 2 */
-export function FormCell({ f }: { f: CsForm | null | undefined }) {
+function FormCell({ f }: { f: CsForm | null | undefined }) {
   if (!f || f.delta === null || f.delta === undefined) return <span class="muted" title={f?.text ?? "No form score for this session (easy runs, hikes, rides and multi-sport files have none)"}>—</span>;
   const d = f.delta;
   if (f.confidence === "none") return <span class="muted" title="score unreliable: rejected by the fitness model (e.g. HR not maximal, a mislabelled session)">?</span>;

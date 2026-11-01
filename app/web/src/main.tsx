@@ -20,7 +20,7 @@ import { addDays, isoLocal } from "./lib/format";
 import { setPref, useTheme, useThemePref, type ThemePref } from "./lib/theme";
 import "./styles.css";
 
-// Route table. `redirect` entries keep old URLs working (same query).
+// Route table.
 const ROUTES: { path: string; nav?: string; render: (p: Record<string, string>) => preact.JSX.Element | null }[] = [
   { path: "/", nav: "home", render: () => <HomePage /> },
   { path: "/map", nav: "map", render: () => <MapPage /> },
@@ -29,8 +29,6 @@ const ROUTES: { path: string; nav?: string; render: (p: Record<string, string>) 
   { path: "/activities", nav: "activities", render: () => <ActivitiesPage /> },
   { path: "/activities/:id", nav: "activity", render: (p) => <ActivityPage id={p.id} /> },
   { path: "/places", nav: "places", render: () => <PlacesPage /> },
-  // Find & group was merged into Activities: same filters, view=groups, gk, g, pick
-  { path: "/search", nav: "activities", render: () => redirect("/activities") },
   { path: "/compare", nav: "compare", render: () => <ComparePage /> },
   { path: "/fitness", nav: "fitness", render: () => <FitnessPage /> },
   { path: "/predictor", nav: "predictor", render: () => <RacePredictorPage /> },
@@ -39,25 +37,11 @@ const ROUTES: { path: string; nav?: string; render: (p: Record<string, string>) 
   { path: "/community/club", nav: "club", render: () => <ClubPage /> },
   { path: "/community/members", nav: "members", render: () => <MembersPage /> },
   { path: "/community/members/:person", nav: "member", render: (p) => <MemberPage person={p.person} /> },
-  // Wrapped was removed: its URLs go to the Club page
-  { path: "/community/wrapped", nav: "club", render: () => redirect("/community/club") },
-  { path: "/community/wrapped/:year", nav: "club", render: () => redirect("/community/club") },
   { path: "/community/:gid", nav: "community", render: (p) => <TogetherSession gid={p.gid} /> },
-  // Together became Community · Sessions
-  { path: "/together", nav: "community", render: () => redirect("/community") },
-  { path: "/together/:gid", nav: "community", render: (p) => redirect(`/community/${encodeURIComponent(p.gid)}`) },
 ];
 
 /** sections whose paths mean the same for every person (kept on a person switch): a date, a group, the club */
-const GLOBAL_SECTIONS = ["day", "together", "community"];
-
-/** replace the URL with `path` + the current query (after render, so the router picks it up) */
-function Redirect({ to }: { to: string }) {
-  useEffect(() => { navigate(to + location.search, true); }, [to]);
-  return null;
-}
-const redirect = (to: string) => <Redirect to={to} />;
-
+const GLOBAL_SECTIONS = ["day", "community"];
 
 /** coloured initial circle of a person (their fixed colour, lib/people) */
 const Avatar = ({ p }: { p: string }) => (
