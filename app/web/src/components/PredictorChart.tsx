@@ -13,7 +13,7 @@ export interface PredDaily { date: string; vdot_5k: number; vdot_10k: number; vd
 export interface PredEvidence { date: string; id: string | number; km: number; vdot: number; kind: string; weight: number }
 export interface PredictorDoc {
   ref_km: number; evidence_km: [number, number]; daily: PredDaily[]; evidence: PredEvidence[];
-  last_evidence_date: string | null; today: string;
+  last_evidence_date: string | null; today: string; distance_curve?: boolean;
 }
 
 /** the three lines: key suffix in PredDaily, label, colour variable (predictor.css) */

@@ -45,7 +45,7 @@ def _scale(x: dict, f: float) -> dict:
 
 def _fitness(store: Store) -> dict | None:
     try:
-        doc = fitness_router._doc(store)
+        doc = fitness_router._view(store)   # the person's distance-curve setting decides the long shape
     except HTTPException:
         return None
     out = {}
@@ -154,7 +154,7 @@ def home(date: str | None = Query(None, description="anchor date (default: today
     acts = store.activities()
     fit_v = None
     try:
-        fit_v = id(fitness_router._doc(store))
+        fit_v = id(fitness_router._view(store))
     except HTTPException:
         pass
     key = (anchor, id(acts), id(store.index()), fit_v, id(store.daily()), id(store.sleep()))

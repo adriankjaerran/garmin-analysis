@@ -37,11 +37,34 @@ def _fm():
 
 
 def _doc(store: Store) -> dict:
+    """fitness.json as built (distance curve on). Pages that show shapes / predictions use `_view`."""
     p = store.dir / "fitness.json"
     if not p.exists():
         raise HTTPException(404, "no fitness.json yet: run `uv run scripts/fitness_model.py "
                                  f"{store.person}` or POST /api/fitness/rebuild")
     return store._memoize("fitness", lambda: [p], lambda: _prepare(json.loads(p.read_text()), store))
+
+
+def curve_on(store: Store) -> bool:
+    """The person's distance-curve setting (data/<person>/settings.json `distance_curve`, default on)."""
+    import person_settings as ps
+    return store._memoize("settings", lambda: [ps.path(store.person)], lambda: ps.load(store.person))["distance_curve"]
+
+
+def _view(store: Store) -> dict:
+    """fitness.json as the app shows it under the person's setting: with the distance curve off, `disciplines` and
+    `variants.hr.disciplines` are the `curve_off` read-outs (long = theta, race equivalents / race prediction =
+    Daniels equivalents of theta) and `_curve_off` is set. Same object while the file and the setting are unchanged."""
+    doc = _doc(store)
+    if curve_on(store) or not doc.get("curve_off"):
+        return doc
+    if "_off_view" not in doc:
+        off = doc["curve_off"]
+        v = {**doc, "disciplines": off["disciplines"], "_curve_off": True}
+        if (doc.get("variants") or {}).get("hr") and off.get("hr_disciplines"):
+            v["variants"] = {**doc["variants"], "hr": {**doc["variants"]["hr"], "disciplines": off["hr_disciplines"]}}
+        doc["_off_view"] = v
+    return doc["_off_view"]
 
 
 # ------------------------------------------------------------------ formatting helpers
@@ -108,6 +131,11 @@ def _prepare(doc: dict, store: Store | None = None) -> dict:
     for name, v in (doc.get("variants") or {}).items():
         if v.get("disciplines"):
             _prep_discs(v["disciplines"], doc["sessions"], name)
+    off = doc.get("curve_off") or {}
+    if off.get("disciplines"):
+        _prep_discs(off["disciplines"], doc["sessions"])
+    if off.get("hr_disciplines"):
+        _prep_discs(off["hr_disciplines"], doc["sessions"], "hr")
     by_id: dict[str, list] = {}
     for s in doc["sessions"]:
         s["explain"] = explain(s, A.get(str(s["id"])))
@@ -234,7 +262,7 @@ def fitness(store: Store = Depends(get_store),
             discipline: str | None = Query(None, description="comma list: interval,long,ski,overall"),
             date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to"),
             hr: bool = Query(False, description="include hr_diagnostics")):
-    doc = _doc(store)
+    doc = _view(store)
     want = set(discipline.split(",")) if discipline else None
     acts = store.activity_map()
 
@@ -263,7 +291,8 @@ def fitness(store: Store = Depends(get_store),
         a = acts.get(str(s["id"])) or {}
         sessions.append({**s, "id": str(s["id"]), "name": a.get("name"), "dist_km": a.get("dist_km"),
                          "sport": a.get("sport")})
-    out = {k: v for k, v in _strip(doc).items() if k not in ("sessions", "hr_diagnostics", "disciplines", "variants", "predictor")}
+    out = {k: v for k, v in _strip(doc).items() if k not in ("sessions", "hr_diagnostics", "disciplines", "variants", "predictor", "curve_off")}
+    out["distance_curve"] = not doc.get("_curve_off")
     if doc.get("predictor"):   # daily curve / evidence: GET /fitness/predictor
         out["predictor"] = {k: v for k, v in doc["predictor"].items() if k not in ("daily", "evidence") and not k.startswith("_")}
     out.update(disciplines=discs, variants=variants, sessions=sessions, eval_variants=_eval_variants(store),
@@ -283,7 +312,7 @@ def fitness_eval(store: Store = Depends(get_store)):
 def fitness_session(aid: str, store: Store = Depends(get_store)):
     """Shape evidence for one activity: scores (model_version 1: a 10k race counted for interval and long), components
     explained, the shape that day, and HR diagnostics (not used in the score). `scored: false` if none."""
-    doc = _doc(store)
+    doc = _view(store)
     items = []
     for s in doc["_by_id"].get(aid, []):
         d = doc["disciplines"].get(s["discipline"], {})
@@ -342,11 +371,14 @@ def _day_index(pr: dict) -> dict:
 @router.get("/fitness/predictor")
 def fitness_predictor(store: Store = Depends(get_store)):
     """Daily race-predictor curve (RTS smoothed) at 5k / 10k / half with the state sd (chart band: no race-day noise,
-    no extrapolation) and the evidence that fed the curve (km = its effective distance)."""
+    no extrapolation) and the evidence that fed the curve (km = its effective distance). Distance curve off (the
+    person's setting): all three lines are theta (the 5 km VDOT), the band its sd."""
+    on = curve_on(store)
     pr = _predictor(_doc(store))
-    if "_chart" not in pr:
+    key = "_chart" if on else "_chart_flat"
+    if key not in pr:
         rows = []
-        xs = {nm: math.log2(km / pr["ref_km"]) for nm, km in (("5k", 5.0), ("10k", 10.0), ("half", 21.0975))}
+        xs = {nm: math.log2(km / pr["ref_km"]) if on else 0.0 for nm, km in (("5k", 5.0), ("10k", 10.0), ("half", 21.0975))}
         for r in pr["daily"]:
             row = {"date": r["date"]}
             for nm, x in xs.items():
@@ -354,8 +386,8 @@ def fitness_predictor(store: Store = Depends(get_store)):
             for nm, x in xs.items():
                 row[f"sd_{nm}"] = round(math.sqrt(max(r["var_theta"] + 2 * x * r["cov"] + x * x * r["var_slope"], 0)), 2)
             rows.append(row)
-        pr["_chart"] = rows
-    return {"ref_km": pr["ref_km"], "evidence_km": pr["evidence_km"], "daily": pr["_chart"],
+        pr[key] = rows
+    return {"ref_km": pr["ref_km"], "evidence_km": pr["evidence_km"], "daily": pr[key], "distance_curve": on,
             "evidence": [{**e, "id": str(e["id"])} for e in pr["evidence"]],
             "last_evidence_date": pr.get("last_evidence_date"), "today": pr["daily"][-1]["date"]}
 
@@ -365,9 +397,11 @@ def fitness_predict(store: Store = Depends(get_store),
                     date: str | None = Query(None, description="YYYY-MM-DD (default: the latest day, today at build)"),
                     km: str | None = Query(None, description="comma list of distances in km, 0.8-100 (default 3,5,10,21.0975,42.195)")):
     """Race predictions from the distance curve on one day: VDOT, sd (state ⊕ race-day noise ⊕ extrapolation),
-    time / pace and a ±1 sd time range per distance; the curve's shape (theta at 5 km, slope per doubling); and how
-    much evidence is behind it."""
+    time / pace and a ±1 sd time range per distance; the curve's shape (theta at 5 km, slope per doubling; `slope` 0
+    with the distance curve off, `curve_slope` = the model's slope either way); and how much evidence is behind it
+    (`n_races` / `n_tempos` / `n_intervals`: race / hard items that counted, weight > 0.5, up to the date)."""
     fm = _fm()
+    on = curve_on(store)
     doc = _doc(store)
     pr = _predictor(doc)
     first, last = pr["daily"][0]["date"], pr["daily"][-1]["date"]
@@ -395,7 +429,7 @@ def fitness_predict(store: Store = Depends(get_store),
     preds = []
     for k in kms:
         p = fm.curve_predict(r["theta"], r["slope"], r["var_theta"], r["var_slope"], r["cov"], k, pr["evidence_km"],
-                             race_sd=race_sd, extrap_sd=ext)
+                             race_sd=race_sd, extrap_sd=ext, flat=not on)
         t = float(fm.race_time(p["vdot"], k * 1000))
         preds.append({"km": k, "label": fm.dist_label(k), "vdot": round(p["vdot"], 2), "sd": round(p["sd"], 2),
                       "sd_state": round(p["sd_state"], 2), "time_s": round(t),
@@ -407,12 +441,18 @@ def fitness_predict(store: Store = Depends(get_store),
     strong = [e for e in pr["evidence"] if e["kind"] in ("race", "hard") and (e.get("weight") or 0) > 0.5 and e["date"] <= day]
     lev = max((e["date"] for e in strong), default=None)
     n90 = sum(1 for e in strong if d0 - dt.date.fromisoformat(e["date"]).toordinal() < 90)
-    return {"date": day, "predictions": preds,
-            "shape": {"theta": round(r["theta"], 2), "slope": round(r["slope"], 2),
-                      "slope_sd": round(math.sqrt(max(r["var_slope"], 0)), 2), "slope_text": fm.slope_text(r["slope"])},
+    slope_sd = round(math.sqrt(max(r["var_slope"], 0)), 2)
+    return {"date": day, "predictions": preds, "distance_curve": on,
+            "shape": {"theta": round(r["theta"], 2), "slope": round(r["slope"], 2) if on else 0.0,
+                      "slope_sd": slope_sd if on else 0.0, "curve_slope": round(r["slope"], 2), "curve_slope_sd": slope_sd,
+                      "slope_text": fm.slope_text(r["slope"]) if on else
+                      "Distance curve off: same VDOT at every distance (Daniels equivalents of the 5 km shape)"},
             "basis": {"last_evidence_date": lev,
                       "days_since_evidence": d0 - dt.date.fromisoformat(lev).toordinal() if lev else None,
-                      "n_evidence_90d": n90}}
+                      "n_evidence_90d": n90,
+                      "n_races": sum(1 for e in strong if e["kind"] == "race"),
+                      "n_tempos": sum(1 for e in strong if e["kind"] == "hard" and e["discipline"] == "long"),
+                      "n_intervals": sum(1 for e in strong if e["kind"] == "hard" and e["discipline"] == "interval")}}
 
 
 def _not_scored(store: Store, aid: str) -> dict:

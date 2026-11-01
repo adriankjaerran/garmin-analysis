@@ -19,3 +19,5 @@
 .pred-err { padding-top: 0; }
 .pred-x { font-size: var(--fs-12); }
 .pred-basis { margin: var(--space-3) 0 0; max-width: 900px; line-height: 1.5; }
+.pred-check { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; margin-right: var(--space-3); }
+.pred-check input { height: auto; }

@@ -111,6 +111,9 @@ export function get<T>(url: string): Promise<T> {
   return p;
 }
 
+/** drop every memoised GET (after a setting changes what the server returns, e.g. PUT /api/settings) */
+export function forgetAll(): void { memo.clear(); }
+
 export function qs(params: Record<string, string | number | null | undefined>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined && v !== "") q.set(k, String(v));

@@ -1,8 +1,10 @@
 // Race predictor: predicted race times for 3k / 5k / 10k / half / marathon (+ one custom distance) on a chosen
 // day, from the running shape and the personal distance curve (/api/fitness/predictor + /api/fitness/predict).
 // URL state: ?date=YYYY-MM-DD (default = latest day) &km=7.5 (custom distance, 0.8–100 km)
+// The "Personal distance curve" switch is a per-person setting saved on the server (PUT /api/settings
+// distance_curve); off = the same VDOT at every distance, and Fitness / Home / form deltas follow it too.
 import { useEffect, useState } from "preact/hooks";
-import { qs, useApi } from "../lib/api";
+import { apiUrl, forgetAll, qs, useApi } from "../lib/api";
 import { setQuery, useLocation } from "../lib/router";
 import { dur } from "../lib/format";
 import { Table, type Col } from "../components/Table";
@@ -14,10 +16,12 @@ import "./predictor.css";
 interface Prediction { km: number; label: string; vdot: number; sd: number; time_s: number; pace_s_per_km: number;
   range_s: [number, number]; extrapolated: boolean }
 interface PredictDoc {
-  date: string; predictions: Prediction[];
-  shape: { theta: number; slope: number; slope_text: string };
-  basis: { last_evidence_date: string | null; days_since_evidence: number | null; n_evidence_90d: number };
+  date: string; predictions: Prediction[]; distance_curve: boolean;
+  shape: { theta: number; slope: number; slope_sd: number; curve_slope: number; curve_slope_sd: number; slope_text: string };
+  basis: { last_evidence_date: string | null; days_since_evidence: number | null; n_evidence_90d: number;
+    n_races: number; n_tempos: number; n_intervals: number };
 }
+interface Settings { distance_curve: boolean }
 
 const STD_KM = [3, 5, 10, 21.0975, 42.195];
 const KM_MIN = 0.8, KM_MAX = 100;
@@ -33,15 +37,41 @@ const parseKm = (s: string | null) => {
 const kmLabel = (km: number) => `${km} km`;
 const sameKm = (a: number, b: number) => Math.abs(a - b) < 1e-6;
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const signed = (v: number) => (v >= 0.05 ? "+" : v <= -0.05 ? "−" : "±") + Math.abs(v).toFixed(1);
+/** "7 races and 3 tempos": what the slope is learned from (interval sessions only anchor the 5 km end) */
+function slopeFrom(b: PredictDoc["basis"]) {
+  const parts = [b.n_races ? plural(b.n_races, "race") : "", b.n_tempos ? plural(b.n_tempos, "tempo") : ""].filter(Boolean);
+  return parts.length ? parts.join(" and ") : "no race or tempo yet";
+}
 
 export function RacePredictorPage() {
   const { query } = useLocation();
   const qDate = query.get("date");
   const date = qDate && ISO.test(qDate) ? qDate : null;
   const custom = parseKm(query.get("km"));
-  const { data: doc, error } = useApi<PredictorDoc>("/api/fitness/predictor");
+  // rev: bumped after the distance-curve switch so both requests refetch (the server answers per the saved setting)
+  const [rev, setRev] = useState(0);
+  const v = rev || null;
+  const { data: doc, error } = useApi<PredictorDoc>("/api/fitness/predictor" + qs({ v }));
   const kms = custom !== null && !STD_KM.some((k) => sameKm(k, custom)) ? [...STD_KM, custom] : STD_KM;
-  const { data: pred, error: predErr, loading } = useApi<PredictDoc>(doc ? "/api/fitness/predict" + qs({ date, km: kms.join(",") }) : null);
+  const { data: pred, error: predErr, loading } = useApi<PredictDoc>(doc ? "/api/fitness/predict" + qs({ date, km: kms.join(","), v }) : null);
+  const { data: settings } = useApi<Settings>("/api/settings");
+  const [curve, setCurve] = useState<boolean | null>(null);   // local copy once changed here
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const curveOn = curve ?? settings?.distance_curve ?? doc?.distance_curve ?? true;
+  const toggleCurve = async (on: boolean) => {
+    setSaving(true); setSaveErr(null);
+    try {
+      const r = await fetch(apiUrl("/api/settings"), { method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ distance_curve: on }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail || `${r.status} ${r.statusText}`);
+      setCurve((await r.json()).distance_curve);
+      forgetAll();          // Fitness / Home / Community answers change too
+      setRev((x) => x + 1);
+    } catch (e) { setSaveErr(String((e as Error).message || e)); }
+    setSaving(false);
+  };
 
   // the custom-distance field: free text, committed to the URL when valid
   const [kmText, setKmText] = useState(query.get("km") ?? "");
@@ -57,6 +87,8 @@ export function RacePredictorPage() {
         "A personal distance curve turns it into a level per distance: how much you slow down as the race gets longer.",
         "The likely range is ±1 sd of the estimate: the actual race should land in it about two times out of three.",
         "Distances beyond your longest race or hard session (usually the marathon) are extrapolated: less certain, with a wider range.",
+        "The slope of the distance curve (VDOT per doubling of distance) is learned from your races and tempo runs; interval sessions set the 5 km level. It is pulled towards 0 unless the evidence is strong and recent, and an old distance profile slowly fades back to 0.",
+        "Personal distance curve off: the same VDOT at every distance (classic Daniels equivalents of your 5 km shape). The switch is saved for this person and also changes the long-distance shape and race times on Fitness and Home, and form deltas of tempo runs and long races.",
         "Click the chart or pick a date to see the prediction on that day; Today goes back to the latest.",
       ]} />
   );
@@ -108,7 +140,9 @@ export function RacePredictorPage() {
         </div>
         <PredictorChart doc={doc} selected={selected} onSelect={(d) => setQuery({ date: d === last ? null : d })} />
         <div class="legend-row muted">
-          {PRED_LINES.map((l) => <span key={l.k}><span class="line-sw" style={{ borderTopColor: `var(${l.color})` }} />{l.label}</span>)}
+          {doc.distance_curve === false
+            ? <span><span class="line-sw" style={{ borderTopColor: `var(${PRED_LINES[2].color})` }} />5k = 10k = half (distance curve off)</span>
+            : PRED_LINES.map((l) => <span key={l.k}><span class="line-sw" style={{ borderTopColor: `var(${l.color})` }} />{l.label}</span>)}
           <span>bands ± 1 sd</span>
           <span><span class="pred-mk race" />race</span>
           <span title="paler = lower weight"><span class="pred-mk" />hard session</span>
@@ -121,6 +155,9 @@ export function RacePredictorPage() {
           <h2>Predicted times</h2>
           {loading && <span class="sub">loading…</span>}
           <div class="tools">
+            <label class="pred-check" title="Saved for this person; also used on Fitness, Home and in form deltas">
+              <input type="checkbox" checked={curveOn} disabled={saving} onChange={(e) => toggleCurve((e.target as HTMLInputElement).checked)} />
+              {" "}Personal distance curve</label>
             <label class="muted" for="pred-km">Custom distance</label>
             <input id="pred-km" class={"pred-km" + (kmBad ? " bad" : "")} type="text" inputMode="decimal" placeholder="km" value={kmText}
               onInput={(e) => setKmText((e.target as HTMLInputElement).value)} onBlur={commitKm}
@@ -130,12 +167,16 @@ export function RacePredictorPage() {
           </div>
         </div>
         {kmBad && <p class="err pred-err">Enter a distance between {KM_MIN} and {KM_MAX} km.</p>}
+        {saveErr && <p class="err pred-err">Could not save the setting: {saveErr}</p>}
         {predErr ? <p class="err">Could not load the prediction: {predErr}</p>
           : !pred ? <div class="empty">Loading…</div>
           : <>
             <Table rows={rows} rowKey={(p) => String(p.km)} cols={cols} />
-            {rows.some((p) => p.extrapolated) && <p class="note">Extrapolated: longer than your longest race or hard session{longest ? ` (${longest.toFixed(1)} km)` : ""}, so the time follows your distance curve beyond the evidence and the range is wider.</p>}
-            <p class="pred-basis">{pred.shape.slope_text}{basisText ? `; ${basisText}` : ""}.
+            {rows.some((p) => p.extrapolated) && <p class="note">Extrapolated: longer than your longest race or hard session{longest ? ` (${longest.toFixed(1)} km)` : ""}, so the time {pred.distance_curve ? "follows your distance curve beyond the evidence" : "assumes the same VDOT beyond the evidence"} and the range is wider.</p>}
+            <p class="pred-basis">{pred.distance_curve
+                ? <><b>{signed(pred.shape.slope)} VDOT per doubling of distance</b> (from {slopeFrom(pred.basis)}, ± {pred.shape.slope_sd.toFixed(1)})</>
+                : <><b>Distance curve off:</b> same VDOT at every distance <span class="muted">(your curve would be {signed(pred.shape.curve_slope)} per doubling)</span></>}
+              {basisText ? `; ${basisText}` : ""}.
               {uncertain && <span class="muted"> No recent race or hard session, so this estimate is uncertain.</span>}</p>
           </>}
       </section>

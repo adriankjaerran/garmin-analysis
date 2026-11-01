@@ -89,7 +89,8 @@ export function FitnessPage() {
       race_equivalents_s: Record<string, number> } | null | undefined;
     if (pr) rows.push({ key: "pred", label: "Race prediction", mean: pr.vdot, sd: pr.sd, hrMean: null, hrSd: null, conf: null, pct: null, pb: null,
       r5: pr.race_equivalents_s["5k"], r10: pr.race_equivalents_s["10k"], rh: pr.race_equivalents_s.half, trend: null,
-      last: "VDOT at 10k, from the distance curve", lastId: null, lastDays: null });
+      last: doc.distance_curve === false ? "same VDOT at every distance (distance curve off on Race predictor)"
+        : "VDOT at 10k, from the distance curve", lastId: null, lastDays: null });
     const o = doc.disciplines.overall;
     if (o) rows.push({ key: "overall", label: DISC_LABEL.overall, mean: o.current.mean, sd: o.current.sd,
       hrMean: H?.overall?.current.mean ?? null, hrSd: H?.overall?.current.sd ?? null, conf: null, pct: o.current.mean,

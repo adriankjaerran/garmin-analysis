@@ -38,7 +38,7 @@ export interface EvalDisc { n: number; forecast_mae: number; loglik: number; rac
 export interface EvalVariants { default: Record<VariantName, Record<Disc, EvalDisc>>;
   demoted: { date: string; id: string; discipline: Disc; type: string; score: number; p_max: number; note: string }[];
   sensitivity_hr?: Record<string, Record<Disc, Partial<EvalDisc>>> }
-export interface FitnessDoc { built: string; model_version: number; params: Record<string, any>; sigma: Record<string, number>;
+export interface FitnessDoc { built: string; model_version: number; distance_curve?: boolean; params: Record<string, any>; sigma: Record<string, number>;
   scale: string; hr_used_in_score: boolean; disciplines: Record<string, Discipline>; sessions: FitSession[];
   variants?: Partial<Record<VariantName, Variant>>; eval_variants?: EvalVariants | null;
   rebuild: { running: boolean; started: string | null; finished: string | null; error: string | null; seconds: number | null } }

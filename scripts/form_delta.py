@@ -12,7 +12,9 @@ bounds, hikes, rides and unscored types -> None. The reference is `fitness_model
 same q / sigmas / robust weights as fitness.json) on every other evidence item of that discipline, read at the day
 before: the session can't pull its own reference towards itself. Running (interval + long) uses the distance curve
 (`fitness_model.smooth_curve` on every other running item, read at the session's own distance `km`) when fitness.json
-has one (model_version >= 2). It uses later sessions too (like the shape curve),
+has one (model_version >= 2); with the person's distance curve switched off (data/<person>/settings.json
+`distance_curve: false`, scripts/person_settings.py) the reference is theta (the 5 km level) of the same leave-one-out
+fit for every running session (same VDOT at every distance). It uses later sessions too (like the shape curve),
 so an old session's delta can move a little when fitness.json is rebuilt.
 
 Only fitness.json is read (no FIT files). One leave-one-out refit per race/hard session (~1.5 s for adrian, cold),
@@ -30,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fitness_model as fm  # noqa: E402
+import person_settings as pset  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
@@ -37,7 +40,7 @@ KIND_RANK = {"race": 0, "hard": 1}          # bound / implausible never give a d
 CONF_SD = (2.0, 3.0)                        # total sd (reference sd ⊕ session sigma): < 2 high, < 3 medium, else low
 OUTLIER_Z = 3.0                             # |delta| / total sd above this: flagged (glitch, mislabel or partial session)
 SPARSE_SD = 3.0                             # reference sd above this: little evidence near the session
-CODE_VERSION = 4                            # bump when the definition changes (invalidates the disk cache)
+CODE_VERSION = 5                            # bump when the definition changes (invalidates the disk cache)
 
 _memo: dict[str, tuple[list, dict]] = {}
 
@@ -105,10 +108,12 @@ def _curve_refs(rows: list[dict], doc: dict, out: dict) -> None:
         r["n_other"] = sum(1 for i, o in enumerate(obs) if i != j and o[3] != "bound")
         if s["kind"] in KIND_RANK and r["n_other"]:
             _, M, C, _, _ = fm.smooth_curve(obs[:j] + obs[j + 1:], d0, d1, q_theta=cp["q_theta"], q_slope=cp["q_slope"],
-                                            slope_sd=cp["slope_prior_sd"])
+                                            slope_sd=cp["slope_prior_sd"], revert=bool(cp.get("slope_revert", False)))
             k = max(d - 1 - d0, 0)
             m, sd = fm.curve_at(M[k], C[k], obs[j][4])
             r["ref"], r["ref_sd"] = float(m), float(sd)
+            # distance curve off: theta (the 5 km level) at every distance
+            r["ref_flat"], r["ref_flat_sd"] = float(M[k, 0]), float(math.sqrt(max(C[k, 0, 0], 0.0)))
         out.setdefault(str(s["id"]), []).append(r)
 
 
@@ -142,11 +147,14 @@ def _table(person: str) -> dict:
     return res
 
 
-def _delta(rows: list[dict]) -> dict | None:
+def _delta(rows: list[dict], curve: bool = True) -> dict | None:
+    """curve False: the distance curve is switched off (reference = theta for running sessions, `ref_flat`)."""
     cand = [r for r in rows if r["kind"] in KIND_RANK]
     if not cand:
         return None
     r = min(cand, key=lambda r: (KIND_RANK[r["kind"]], r["sigma"], r["discipline"] != "interval"))
+    if not curve and "ref_flat" in r:
+        r = {**r, "ref": r["ref_flat"], "ref_sd": r["ref_flat_sd"]}
     score = r["score"]
     flags = []
     if r.get("hr_kind") == "bound":
@@ -186,26 +194,31 @@ def form_delta(person: str, activity_id: str) -> dict | None:
     (ref_sd > 3), outlier (|z| > 3), no_reference (the only race/hard item of its discipline: shape / delta / z None).
     outlier + downweighted: confidence "none", text "score unreliable" (delta still given)."""
     rows = _table(person).get(str(activity_id))
-    return _delta(rows) if rows else None
+    return _delta(rows, pset.distance_curve(person)) if rows else None
 
 
 def form_deltas(person: str) -> dict[str, dict]:
     """{activity id: form_delta} for every session that has one (memoised by fitness.json mtime)."""
-    return {i: d for i, rows in _table(person).items() if (d := _delta(rows)) is not None}
+    curve = pset.distance_curve(person)
+    return {i: d for i, rows in _table(person).items() if (d := _delta(rows, curve)) is not None}
 
 
 def form_series(person: str, since: str | None = None) -> list[dict]:
-    """Weekly shape trend from fitness.json (RTS-smoothed, the same curve as the fitness page), oldest first:
+    """Weekly shape trend from fitness.json (RTS-smoothed, the same curve as the fitness page, under the person's
+    distance-curve setting), oldest first:
     [{date, interval, long, ski, overall, sd: {discipline: sd}}]; a discipline is None before its first evidence.
     interval / long / ski in VDOT (ski: VDOT-equivalent), overall in % of personal best."""
     p = _fitness_path(person)
     if not p.exists():
         return []
     doc = json.loads(p.read_text())
+    src = doc.get("disciplines") or {}
+    if not pset.distance_curve(person) and (doc.get("curve_off") or {}).get("disciplines"):
+        src = doc["curve_off"]["disciplines"]      # distance curve off: long = theta
     rows: dict[str, dict] = {}
-    discs = [d for d in ("interval", "long", "ski", "overall") if d in (doc.get("disciplines") or {})]
+    discs = [d for d in ("interval", "long", "ski", "overall") if d in src]
     for disc in discs:
-        for w in doc["disciplines"][disc].get("weekly") or []:
+        for w in src[disc].get("weekly") or []:
             if since and w["date"] < since:
                 continue
             r = rows.setdefault(w["date"], {"date": w["date"], **{d: None for d in ("interval", "long", "ski", "overall")}, "sd": {}})

@@ -495,7 +495,7 @@ def _form_module():
 
 
 def form_sig() -> tuple:
-    return (_mt(FORM_PY), *(_mt(DATA / p / "fitness.json") for p in tg.people()))
+    return (_mt(FORM_PY), *((_mt(DATA / p / "fitness.json"), _mt(DATA / p / "settings.json")) for p in tg.people()))
 
 
 def form(person: str, aid: str) -> dict | None:
@@ -503,7 +503,7 @@ def form(person: str, aid: str) -> dict | None:
     mod = _form_module()
     if mod is None:
         return None
-    k = (person, str(aid), _FORM_MOD["mtime"], _mt(DATA / person / "fitness.json"))
+    k = (person, str(aid), _FORM_MOD["mtime"], _mt(DATA / person / "fitness.json"), _mt(DATA / person / "settings.json"))
     if k in _FORM_CACHE:
         return _FORM_CACHE[k]
     try:
@@ -997,7 +997,7 @@ def _form_deltas_all(person) -> dict:
     mod = _form_module()
     if mod is None or not hasattr(mod, "form_deltas"):
         return {}
-    k = ("all", person, _FORM_MOD["mtime"], _mt(DATA / person / "fitness.json"))
+    k = ("all", person, _FORM_MOD["mtime"], _mt(DATA / person / "fitness.json"), _mt(DATA / person / "settings.json"))
     if k not in _FORM_CACHE:
         try:
             _FORM_CACHE[k] = mod.form_deltas(person) or {}

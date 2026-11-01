@@ -115,8 +115,12 @@ inside one pause-free leg.
 Running is one model since model_version 2 (`smooth_curve`, parameters in `CURVE`, fitness.json `curve`):
 - **State per day:** θ_t = VDOT at 5 km (the reference) and s_t = slope, the VDOT change per doubling of distance.
   The prediction at any distance is **VDOT(km, t) = θ_t + s_t · x** with x = log2(km / 5).
-- θ is a random walk with the interval q (0.05 VDOT²/day). s is a slow random walk, **q_s = 0.001** (≈ 0.6 VDOT per
-  doubling per year), prior s ~ N(0, 3²). 2-state Kalman filter + RTS smoother on the daily grid, per-kind σ (`SIG`)
+- θ is a random walk with the interval q (0.05 VDOT²/day). s is **mean-reverting towards 0** (AR(1), `slope_revert`):
+  s_t = φ·s_{t−1} + noise with **q_s = 0.005** and stationary sd **1.5** (= the prior, `slope_prior_sd`), φ = √(1 − q_s/1.5²),
+  time constant ≈ 2·1.5²/q_s ≈ 900 days. The slope is shrunk towards the Daniels default (0, same VDOT at every
+  distance) unless the evidence is strong and recent; an old distance profile fades back towards 0. Choice:
+  "Slope shrinkage" below (until 2026-11-01: a random walk, q_s 0.001, prior N(0, 3²), adrian +2.0).
+  2-state Kalman filter + RTS smoother on the daily grid, per-kind σ (`SIG`)
   and the same asymmetric robust IRLS weights as `smooth_series`, with each residual taken against the curve at the
   item's own distance.
 - **Effective distance per item** (`evidence_km`; `sessions[].km`):
@@ -149,13 +153,14 @@ Running is one model since model_version 2 (`smooth_curve`, parameters in `CURVE
   and the distance is flagged `extrapolated` (adrian: marathon, 1.0 doubling; 3k, 0.74 below 5 km). The 1.0 is an
   assumption: there is no marathon evidence to fit it. The range is all-time, also for past dates.
 - **No gain past the longest evidence:** beyond `evidence_km` max a positive slope stops, so the VDOT is held at its
-  value there (adrian: marathon VDOT = half VDOT, 56.9 → 2:50:54 instead of 58.9 → 2:46:03). Carrying +2.0 further
+  value there (adrian: marathon VDOT = half VDOT, 55.6 → 2:54:18 instead of 56.9 → 2:50:54). Carrying the slope further
   would predict a marathon above the half, optimistic without marathon training. A negative slope keeps applying
   (patrik's marathon still loses vs his 14.5 km level). The extrapolation sd is still added.
 - **Overall** counts running once: the mean of interval and long % of best with the sd of a fully correlated mean
   (they are two readings of one curve), precision-weighted with ski.
 
-**Eval** (`scripts/shape_split_eval.py`, 2026-11-01, adrian; forward filter = data strictly before the race; forecast =
+**Eval** (`scripts/shape_split_eval.py`, 2026-11-01, adrian, run with the random-walk slope of that day — q_s 0.001,
+prior N(0, 3²); rerunning it now uses the mean-reverting `CURVE`; forward filter = data strictly before the race; forecast =
 one-step-ahead of race / hard items, first 3 skipped; loglik with z clipped at 3). A = separate shapes (v1),
 A-blend = v1 `race_prediction`, C = θ + gap (long obs = θ + gap), D = the distance curve.
 
@@ -183,16 +188,78 @@ races improve most (1.07 → 0.84), the long forecast improves (2.38 → 1.90), 
 interval shape: today 52.8 ± 1.0 in both). patrik has no race to back-test; his single long forecast is 1.26 (D) vs
 3.67 (A), today θ 48.7 ± 1.5, slope −0.8 ± 1.2.
 
-Today (2026-11-01, `GET /api/adrian/fitness/predict`):
+### Slope shrinkage (`scripts/slope_prior_eval.py`, 2026-11-01)
+adrian's random-walk slope was +2.0 per doubling; his 2025 races alone give +1.2 (least squares through 5k 56.3,
+10k 57.1 / 59.4, half 58.8; a races-only curve: +2.5 with the soft 19:01 5k, +1.4 without). Grid: prior / stationary
+sd × q_s, random walk (RW) vs mean-reverting (OU). Same out-of-sample metrics as above (forward race prediction from
+data strictly before the race day, 7 races / 6 without the soft 5k / the 4 10k-half races; share of races within
+±1 / ±2 predictive sd; one-step forecasts of the 9 long race / hard items; patrik has one long forecast and no race
+to back-test):
+
+| model | races MAE (7) | w/o soft 5k (6) | 10k / half (4) | ±1 / ±2 sd | long fc MAE / loglik (9) | patrik long fc (1) | adrian slope today |
+|---|---|---|---|---|---|---|---|
+| RW sd 3, q 0.001 (before) | 1.12 | 0.73 | 0.84 | 71 / 86 % | 1.90 / −1.394 | 1.26 | +1.96 ± 0.76 |
+| RW sd 1, q 0.001 | 1.10 | 0.69 | 0.80 | 71 / 86 % | 1.98 / −1.426 | 2.15 | +1.92 ± 0.76 |
+| RW sd 0.5, q 0.001 | 1.12 | 0.70 | 0.84 | 71 / 86 % | 2.01 / −1.440 | 2.43 | +1.90 ± 0.76 |
+| RW sd 1, q 0.0003 | 1.23 | 0.78 | 1.03 | 71 / 86 % | 2.05 / −1.493 | 2.73 | +1.75 ± 0.54 |
+| RW sd 1, q 0 | 1.36 | 0.86 | 1.25 | 71 / 86 % | 2.16 / −1.603 | 3.01 | +1.54 ± 0.37 |
+| RW sd 0.5, q 0 | 1.59 | 1.00 | 1.65 | 43 / 71 % | 2.39 / −1.861 | 3.43 | +1.03 ± 0.32 |
+| OU sd 1, q 0.003 | 1.29 | 0.81 | 1.12 | 71 / 86 % | 2.10 / −1.511 | 3.11 | +1.00 ± 0.86 |
+| OU sd 1.5, q 0.003 | 1.13 | 0.70 | 0.84 | 71 / 86 % | 1.99 / −1.428 | 2.45 | +1.52 ± 1.01 |
+| **OU sd 1.5, q 0.005** | **1.12** | **0.70** | **0.84** | 71 / 86 % | 2.01 / −1.422 | 2.48 | **+1.33 ± 1.18** |
+| OU sd 1.5, q 0.01 | 1.16 | 0.73 | 0.90 | 71 / 86 % | 1.99 / −1.419 | 2.64 | +0.92 ± 1.37 |
+| OU sd 2, q 0.003 | 1.14 | 0.74 | 0.86 | 71 / 86 % | 2.02 / −1.406 | 1.85 | +1.75 ± 1.08 |
+| RW sd 1, q 0.001, interval σ ×1.5 | 1.11 | 0.80 | 0.84 | 71 / 100 % | 2.10 / −1.493 | 0.15 | +2.19 ± 0.78 |
+| RW sd 1, q 0.001, interval σ ×2 | 1.11 | 0.80 | 0.87 | 71 / 100 % | 2.18 / −1.537 | 1.09 | +2.31 ± 0.80 |
+
+- **A stronger prior alone does nothing** with a random-walk slope: the prior only applies at the first evidence
+  (2018), and q_s adds its variance back over the years (sd 0.5 → 3 changes today's slope by 0.06).
+- **Shrinking through a smaller q costs accuracy**: the 10k / half races get worse (0.84 → 1.03 at q 0.0003, 1.65 at
+  q 0) and so does the long forecast, mostly because the 2025 half (58.8) followed two tempos at 59; at the time of
+  the races every setting estimates a slope of ≈ +1.9. The races-only +1.2 is lower because there θ (the 5 km level)
+  sits at the 5k race (56.3); the full model puts θ at 55.4 then (the interval sessions and the soft 5k pull it down).
+- **Interval sessions with less weight** (σ × 1.5 / × 2) make the slope *larger* (+2.2 / +2.3) and the 6-race MAE
+  worse: not used.
+- **Chosen: mean-reverting slope, stationary sd 1.5, q_s 0.005** (`CURVE` `slope_revert`, `slope_prior_sd`,
+  `q_slope`). OU makes the shrinkage hold at every date with no extra parameter (the prior sd becomes the stationary
+  sd). It is within noise of the best on every adrian metric (races 1.12 vs 1.10, 10k / half 0.84 vs 0.80, long
+  loglik −1.422 vs −1.394) and the most shrinking of the settings that are (q 0.01 starts to lose on the races;
+  sd 1 loses 0.2 on the 10k / half races). Today's slope +1.33 ± 1.18 (it was +1.9 right after the autumn 2025
+  races and has faded since: no 10k+ race in a year). patrik: his single long forecast goes 1.26 → 2.48 (any
+  shrinkage does that: his slope moves −0.76 → −0.25; one item, so noise-level, but noted).
+
+### Distance curve on / off (per-person setting)
+`data/<person>/settings.json` `{"distance_curve": false}` (scripts/person_settings.py; `GET` / `PUT
+/api/<person>/settings`; the switch on the Race predictor page; default on, missing file = on). **Off = the same VDOT
+at every distance: the Daniels equivalents of θ (the 5 km shape)**, i.e. the same fit with the slope read as 0 — not a
+refit. θ is the model's best 5 km level and stays the same in both modes, so switching changes only the read-out and
+needs no rebuild (`build()` writes both: `curve_off.disciplines` / `curve_off.hr_disciplines`, and the race
+predictions with `flat=True` in `curve_predict`). With the curve off:
+- `/fitness/predict`: every distance at θ (sd = θ's state sd ⊕ race-day sd ⊕ the same extrapolation sd outside the
+  evidenced distances); `shape.slope` 0, `curve_slope` = the model's slope (shown as "your curve would be …").
+- `/fitness/predictor`: the 5k / 10k / half lines are all θ, band = θ's sd.
+- `/fitness` and `/home`: `long` = θ (same mean / sd / weekly as `interval`, personal best = the interval best),
+  `race_equivalents_s` and `overall.current.race_prediction` = equivalents of θ, `overall` from those (the "with HR"
+  variant likewise); `/fitness` has `distance_curve: false`. The Fitness page's race-prediction row follows.
+- Form deltas (scripts/form_delta.py, also Community): running sessions are compared with θ of the same
+  leave-one-out fit instead of the curve at their distance, so tempo runs and 10k / half races show their full
+  long-distance advantage as "+ vs form" (adrian's 2025 half: −1.3 → +3.3); `form_series` long = θ.
+- Not affected: per-session scores, weights and `shape_at` (the evidence is still read through the curve), the
+  session Shape section on activity pages, the Progress VDOT cap (built model), ski.
+
+Today (2026-11-01, `GET /api/<person>/fitness/predict`; curve on / off):
 
 | | 3k | 5k | 10k | half | marathon |
 |---|---|---|---|---|---|
-| adrian VDOT | 51.4 ± 1.7* | 52.8 ± 1.4 | 54.8 ± 1.6 | 56.9 ± 2.1 | 56.9 ± 2.3* |
-| adrian time (range) | 11:16 (10:57–11:36) | 19:01 (18:35–19:27) | 38:13 (37:17–39:12) | 1:21:49 (1:19:16–1:24:33) | 2:50:54 (2:45:08–2:57:06) |
-| patrik time (range) | 11:42 (11:13–12:13) | 20:23 (19:46–21:03) | 42:50 (41:33–44:12) | 1:36:19* (1:32:08–1:40:56) | 3:23:07* (3:10:22–3:37:49) |
+| adrian VDOT, curve on (+1.33 per doubling) | 51.9 ± 1.8* | 52.8 ± 1.4 | 54.2 ± 1.8 | 55.6 ± 2.8 | 55.6 ± 3.0* |
+| adrian time, curve on | 11:11 | 19:01 | 38:35 | 1:23:29 | 2:54:18* |
+| adrian time, curve off (52.8 everywhere) | 11:00* | 19:01 | 39:25 | 1:27:15 | 3:01:59* |
+| patrik time, curve on (−0.25 per doubling) | 11:54* | 20:36 | 42:53 | 1:35:28* | 3:19:30* |
+| patrik time, curve off (48.1 everywhere) | 11:56* | 20:36 | 42:42 | 1:34:35* | 3:16:51* |
 
-\* extrapolated. Before (v1): adrian one VDOT 53.5 ± 2.0 for every distance (10k 39:01, half 1:26:21), long shape
-58.4 ± 2.8 (stale); patrik 48.2 ± 1.3 (10k 42:40).
+\* extrapolated. With the earlier random-walk slope (+2.0): adrian 10k 38:13, half 1:21:49, marathon 2:50:54; patrik
+(−0.8) 5k 20:23, 10k 42:50. Before (v1): adrian one VDOT 53.5 ± 2.0 for every distance (10k 39:01, half 1:26:21),
+long shape 58.4 ± 2.8 (stale); patrik 48.2 ± 1.3 (10k 42:40).
 
 ## Evaluation (`scripts/fitness_eval.py`, numbers from 2026-10-31)
 Data: 108 interval sessions (track 58, road 47 GPS), 7 races (5k ×3, 10k ×3, half ×1), 8 tempo, 189
