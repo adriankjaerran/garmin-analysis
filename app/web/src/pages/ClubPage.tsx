@@ -13,6 +13,7 @@ import { ago, catVar, CATS, delta, HIGHLIGHT, hrs, kms, MEASURE_LABEL, periods, 
 import { PageHeader } from "../components/PageHeader";
 import { Av, AvStack, CatChip, FormChip, PairCard, PersonLink, Stat } from "../components/CommunityBits";
 import { ClubMonthChart } from "../components/ClubCharts";
+import { CompanyCard, GoalCard, LatestBadges, RivalryCard } from "../components/ClubMotivation";
 import "./community.css";
 
 const MEDAL = ["🥇", "🥈", "🥉"];
@@ -117,11 +118,36 @@ export function ClubPage() {
               <div class="big"><b>{t.this_year.sessions}</b> sessions</div>
               <div class="cm-stats"><Stat v={Math.round(t.this_year.km)} label="km" /><Stat v={t.this_year.hours.toFixed(1)} label="hours" /></div>
               {c.most_loyal && <div class="loyal"><Av p={c.most_loyal.person} size="sm" /><span>Most loyal: <b>{personName(c.most_loyal.person)}</b> · {plural(c.most_loyal.sessions, "session")}</span></div>}
+              {t.this_year.sessions > 0 && <a class="cm-wrapped-link" href={`/community/wrapped/${t.this_year.year}`}>✨ {t.this_year.year} Wrapped ›</a>}
             </div>
           )}
         </div>
 
+        <GoalCard initial={c.goal} />
+
+        {c.latest_badges.length > 0 && (
+          <section class="cm-panel cm-badges-strip">
+            <div class="head"><h2>Latest badges</h2><span class="sub">earned in club sessions · click one for the session</span><a class="sub" href="/community/members">all members ›</a></div>
+            <LatestBadges badges={c.latest_badges} />
+          </section>
+        )}
+
         <div class="cm-grid">
+          {Object.keys(c.company).length > 0 && (
+            <section class="cm-panel span2">
+              <div class="head"><h2>Faster together than alone?</h2><span class="sub">form delta in club sessions vs solo sessions of the same kind (±60 days){per ? ` · ${per.label}` : ""}</span></div>
+              <div class="cc-grid">{c.attendance.filter((a) => c.company[a.person]).map((a) => <CompanyCard p={a.person} c={c.company[a.person]} />)}</div>
+              <div class="cc-note">Form delta = the session's score minus the shape the day before (VDOT points). Rep pace compares interval sessions with reps of similar length (short &lt; 600 m, medium, long ≥ 1.4 km) within ±90 days.</div>
+            </section>
+          )}
+
+          {c.rivalry.length > 0 && (
+            <section class="cm-panel span2">
+              <div class="head"><h2>Rivalry</h2><span class="sub">head-to-head over time: shared reps and races</span></div>
+              <div class="cr-list">{c.rivalry.slice(0, 6).map((r) => <RivalryCard key={r.a + r.b} r={r} viewer={c.viewer} />)}</div>
+            </section>
+          )}
+
           <section class="cm-panel span2">
             <div class="head"><h2>Month by month</h2><span class="sub">{!per && (c.months.length > 36) ? "last 36 months" : ""}</span></div>
             <ClubMonthChart months={months} />

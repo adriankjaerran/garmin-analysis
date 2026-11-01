@@ -13,6 +13,7 @@ import { ago, catVar, CATS, delta, hrs, kms, MEASURE_LABEL, plural, type Attenda
 import { PageHeader } from "../components/PageHeader";
 import { Av, CatChip, FormChip, PairCard, PersonLink, Stat } from "../components/CommunityBits";
 import { ClubFormChart, ClubShapeChart } from "../components/ClubCharts";
+import { BadgeGrid, CompanyCard, RivalryCard } from "../components/ClubMotivation";
 import "./community.css";
 
 const CatBars = ({ by, total }: { by: Attendance["by_category"]; total: number }) => (
@@ -57,6 +58,15 @@ export function MembersPage() {
                 <Stat v={<FormChip v={m.avg_form_delta} showNone info={{ delta: m.avg_form_delta, text: `average over ${plural(m.n_form, "session")} with a score` }} />} label="avg form" />
               </div>
               <div class="cm-mix">{CATS.map((k) => m.by_category[k.id] ? <i style={{ flex: m.by_category[k.id], background: catVar(k.id) }} title={`${k.label}: ${m.by_category[k.id]}`} /> : null)}</div>
+              {(m.company?.text || m.badges) && (
+                <div class="cm-mcard-x">
+                  {m.company?.text && <span class={"cmx-company " + (m.company.verdict ?? "")} title={`together ${delta(m.company.joint_avg)} (${m.company.n_joint}) vs alone ${delta(m.company.solo_avg)} (${m.company.n_solo})${m.company.thin ? " · thin data" : ""}`}>
+                    {m.company.verdict === "company" ? <><b>👯 {delta(m.company.diff)}</b> with company</> : m.company.verdict === "alone" ? <><b>🧘 {Math.abs(m.company.diff ?? 0).toFixed(1)}</b> better alone</> : <><b>⚖️ same</b> together or alone</>}</span>}
+                  {m.badges && <span class="cmx-badges" title={m.badges.latest.map((b) => `${b.emoji} ${b.name} (${b.date})`).join("\n")}>
+                    {m.badges.latest.slice(0, 4).map((b) => <span aria-hidden="true">{b.emoji}</span>)} <b>{m.badges.earned}</b>/{m.badges.total} badges</span>}
+                  {m.badges?.next && <span class="cmx-next muted small">next: {m.badges.next.emoji} {m.badges.next.name} · {Math.round(m.badges.next.progress * 100)} %</span>}
+                </div>
+              )}
               <div class="foot muted small">
                 <span>Last seen {ago(m.days_since)}</span>
                 {m.favourite_place && <span>· ♥ {m.favourite_place}</span>}
@@ -160,6 +170,23 @@ export function MemberPage({ person }: { person: string }) {
       </div>
 
       <div class="cm-grid">
+        <section class="cm-panel span2">
+          <div class="head"><h2>Badges</h2><span class="sub">earned in club sessions · locked ones show how close you are</span></div>
+          <BadgeGrid badges={m.badges.badges} earned={m.badges.earned} total={m.badges.total} />
+        </section>
+
+        <section class="cm-panel">
+          <div class="head"><h2>Faster together than alone?</h2><span class="sub">club vs solo sessions of the same kind, ±{m.company.window_days} days</span></div>
+          <CompanyCard p={m.person} c={m.company} full />
+          <div class="cc-note">Each dot = one session's form delta (score − shape the day before); the bar = the average. Together = club sessions, alone = {personName(m.person)}'s own sessions of the same discipline near a club one. Click a dot to open it.</div>
+        </section>
+
+        <section class="cm-panel">
+          <div class="head"><h2>Rivalry</h2><span class="sub">head-to-head over time</span></div>
+          {m.rivalry.length ? <div class="cr-list one">{m.rivalry.map((r) => <RivalryCard key={r.a + r.b} r={r} viewer={m.person} />)}</div>
+            : <div class="empty">No shared reps or races yet.</div>}
+        </section>
+
         <section class="cm-panel">
           <div class="head"><h2>Form in club sessions</h2><span class="sub">score − shape the day before</span></div>
           {fs.length ? <ClubFormChart series={fs} /> : <div class="empty">No scored sessions yet (easy runs and hikes have no score).</div>}

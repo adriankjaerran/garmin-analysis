@@ -104,7 +104,9 @@ export function ClubMonthChart({ months, height = 220 }: { months: ClubMonth[]; 
   );
 }
 
-/** a member's form delta per session: stems from 0 (green above, red below), low confidence hollow; click = session */
+/** a member's form delta per session: stems from 0 (green above, red below), low confidence hollow; click = session.
+ *  One slot per session (equal spacing: sessions days apart would overlap on a time axis spanning years); dates
+ *  under the slots (thinned), a faint line where the year changes. */
 export function ClubFormChart({ series, height = 200 }: { series: Member["form_series"]; height?: number }) {
   const box = useRef<HTMLDivElement>(null);
   const theme = useTheme();
@@ -112,15 +114,19 @@ export function ClubFormChart({ series, height = 200 }: { series: Member["form_s
   const hl = useRef<number | null>(null);
   useEffect(() => {
     if (!series.length) return;
-    const x = series.map((s) => dayTs(s.date));
+    const x = series.map((_s, i) => i);
     const v = series.map((s) => s.delta);
     const lim = Math.max(2, ...v.map(Math.abs)) * 1.2;
-    const pad = x.length > 1 ? (x[x.length - 1] - x[0]) * 0.04 : 30 * 86400;
+    const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const lab = (i: number) => { const d = series[i].date; return `${Number(d.slice(8, 10))} ${MON[Number(d.slice(5, 7)) - 1]}`; };
     return mount(box.current!, {
       height, padding: [10, 10, 0, 0], legend: { show: false },
       cursor: { drag: { x: false, y: false }, points: { show: false }, y: false, dataIdx: (_u, _s, i) => i },
-      scales: { x: { time: true, range: () => [x[0] - pad, x[x.length - 1] + pad] }, y: { range: () => [-lim, lim] } },
-      axes: [{ ...axisBase(), size: 26, ...dateAxis(56) }, { ...axisBase(), size: 40, values: (_u, ts) => ts.map((t) => delta(t, 0)) }],
+      scales: { x: { time: false, range: () => [-0.6, x.length - 0.4] }, y: { range: () => [-lim, lim] } },
+      axes: [{ ...axisBase(), size: 38, grid: { show: false },
+        splits: (u) => { const step = Math.max(1, Math.ceil(56 / Math.max(1, u.bbox.width / devicePixelRatio / Math.max(1, x.length)))); return x.filter((i) => i % step === 0); },
+        values: (_u, ts) => ts.map((t, k) => { const i = Math.round(t); const y = series[i]?.date.slice(0, 4); const py = k ? series[Math.round(ts[k - 1])]?.date.slice(0, 4) : null; return series[i] ? (y !== py ? `${lab(i)}\n${y}` : lab(i)) : ""; }) },
+        { ...axisBase(), size: 40, values: (_u, ts) => ts.map((t) => delta(t, 0)) }],
       series: [{}, { stroke: "transparent", points: { show: false } }],
       hooks: {
         draw: [(u) => {
@@ -129,8 +135,15 @@ export function ClubFormChart({ series, height = 200 }: { series: Member["form_s
           ctx.save();
           ctx.strokeStyle = cssVar("--text-muted"); ctx.setLineDash([3 * dpr, 3 * dpr]); ctx.lineWidth = dpr;
           ctx.beginPath(); ctx.moveTo(u.bbox.left, y0); ctx.lineTo(u.bbox.left + u.bbox.width, y0); ctx.stroke(); ctx.setLineDash([]);
+          ctx.strokeStyle = cssVar("--hairline"); ctx.lineWidth = dpr; ctx.fillStyle = cssVar("--text-muted"); ctx.font = `${10 * dpr}px ${cssVar("--font")}`;
+          series.forEach((s, i) => {   // year boundaries
+            if (!i || s.date.slice(0, 4) === series[i - 1].date.slice(0, 4)) return;
+            const bx = u.valToPos(i - 0.5, "x", true);
+            ctx.beginPath(); ctx.moveTo(bx, u.bbox.top); ctx.lineTo(bx, u.bbox.top + u.bbox.height); ctx.stroke();
+            ctx.fillText(s.date.slice(0, 4), bx + 3 * dpr, u.bbox.top + 10 * dpr);
+          });
           series.forEach((s, i) => {
-            const cx = u.valToPos(x[i], "x", true), cy = u.valToPos(s.delta, "y", true);
+            const cx = u.valToPos(i, "x", true), cy = u.valToPos(s.delta, "y", true);
             const c = cssVar(s.delta >= 0 ? "--state-good" : "--state-duplicate");
             ctx.strokeStyle = c; ctx.lineWidth = 3 * dpr;
             ctx.beginPath(); ctx.moveTo(cx, y0); ctx.lineTo(cx, cy); ctx.stroke();
@@ -143,7 +156,7 @@ export function ClubFormChart({ series, height = 200 }: { series: Member["form_s
         }],
         setCursor: [(u) => {
           const l = u.cursor.left;
-          let best: number | null = null, bd = 24;
+          let best: number | null = null, bd = Math.max(24, u.bbox.width / devicePixelRatio / Math.max(1, x.length) / 2);
           if (l !== undefined && l >= 0) x.forEach((t, i) => { const d = Math.abs(u.valToPos(t, "x") - l); if (d < bd) { bd = d; best = i; } });
           if (best !== hl.current) { hl.current = best; setIdx(best); u.redraw(false); }
         }],
@@ -151,7 +164,7 @@ export function ClubFormChart({ series, height = 200 }: { series: Member["form_s
           u.over.style.cursor = "pointer";
           u.over.addEventListener("click", () => {
             const l = u.cursor.left ?? -1;
-            let best: number | null = null, bd = 24;
+            let best: number | null = null, bd = Math.max(24, u.bbox.width / devicePixelRatio / Math.max(1, x.length) / 2);
             x.forEach((t, i) => { const d = Math.abs(u.valToPos(t, "x") - l); if (d < bd) { bd = d; best = i; } });
             if (best !== null) navigate(`/community/${series[best].gid}`);
           });

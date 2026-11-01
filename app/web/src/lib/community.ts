@@ -25,13 +25,14 @@ export interface CGroup extends TGroup {
 export interface CTotals { sessions: number; km: number; hours: number; person_hours_together: number; reps: number; photos: number; guests: number }
 export interface CList {
   n: number; viewer: string | null; built: string; people: Record<string, PersonInfo>; categories: Category[]; totals: CTotals;
-  h2h: H2H[]; form_available: boolean; store_error: string | null; groups: CGroup[];
+  h2h: H2H[]; form_available: boolean; store_error: string | null; groups: CGroup[]; goal?: Goal;
 }
 
 export interface Attendance {
   person: string; display: PersonInfo; sessions: number; share: number; first_seen: string | null; last_seen: string | null; last_gid: string | null;
   days_since: N; streak_weeks: number; best_streak_weeks: number; weeks_active: number; km: number; hours: number; reps: number;
   by_category: Partial<Record<CatId, number>>; favourite_place: string | null; avg_form_delta: N; n_form: number;
+  company?: CompanyShort; badges?: BadgesShort;
 }
 export interface ClubMonth { month: string; sessions: number; km: number; hours: number; person_hours_together: number; reps: number; climb_m: number;
   members: string[]; n_members: number; by_category: Partial<Record<CatId, number>>; gids: string[] }
@@ -49,6 +50,8 @@ export interface Club {
   categories: Category[]; records: ClubRecord[]; highlights: Highlight[];
   heatmap: { weekdays: string[]; hours: number[]; n: number[][] };
   places: { id: string; name: string; sessions: number; last: string }[]; guests: { name: string; visits: number }[];
+  company: Record<string, CompanyShort>; rivalry: Rivalry[]; latest_badges: Badge[]; goal: Goal; goals: Goal[];
+  goal_metrics: Goals["metrics"];
   recent: { gid: string; date: string; title: string; category: CatId; people: string[]; km: number; records: number }[];
 }
 export interface MemberSession {
@@ -69,6 +72,7 @@ export interface Member {
   partners: { person: string; display: PersonInfo; sessions: number; last: string; gids: string[]; rep_wins: number; rep_losses: number; rep_ties: number; h2h: H2H }[];
   best_sessions: MemberSession[]; personal_bests: Effort[];
   shape: { built: string; disciplines: Record<string, ShapeDisc> } | null;
+  badges: Badges; company: Company; rivalry: Rivalry[];
 }
 
 /** fixed order + fallback labels (the API sends labels / emoji too) */
@@ -160,3 +164,54 @@ export function resolvePeriod(id: string): { from: string; to: string; label: st
   const p = periods([]).find((x) => x.id === id);
   return p ? { from: p.from, to: p.to, label: p.label } : null;
 }
+
+// ---- motivation: company effect, badges, rivalry, goals, wrapped (docs/community.md "Motivation")
+export interface CompanyPace { family: "short" | "medium" | "long"; label: string; diff_s_km: number; text: string; n_joint: number; n_solo: number; joint_s_km: number; solo_s_km: number;
+  joint?: { gid: string; date: string; pace_s_km: number }[]; solo?: { activity_id: string; date: string; pace_s_km: number }[] }
+export interface CompanyShort { diff: N; verdict: "company" | "alone" | "even" | null; text: string | null; n_joint: number; n_solo: number; n_compared: number;
+  joint_avg: N; solo_avg: N; thin: boolean; pace: CompanyPace[] }
+export interface Company extends CompanyShort {
+  person: string; window_days: number;
+  by_discipline: { discipline: string; n_joint: number; n_solo: number; joint_avg: N; solo_avg: N; diff: N }[];
+  joint: { gid: string; date: string; delta: number; discipline: string; confidence?: string }[];
+  solo: { activity_id: string; date: string; delta: number; discipline: string; confidence?: string; type?: string; name?: string }[];
+}
+export interface Badge { id: string; emoji: string; name: string; description: string; group: string; earned: boolean; date: string | null; gid: string | null;
+  value: number; target: number; progress: number; unit: string; detail: string | null; person?: string }
+export interface Badges { person: string; earned: number; total: number; badges: Badge[] }
+export interface BadgesShort { earned: number; total: number; latest: { id: string; emoji: string; name: string; date: string; gid: string }[];
+  next: { id: string; emoji: string; name: string; progress: number; value: number; target: number; unit: string } | null }
+export interface RivalryPoint { gid: string; date: string; kind: "reps" | "race"; title: string; n: number; wins: Record<string, number>; ties: number;
+  mean_gap_s: number; gap_s_km: N; closest_s: number; cum_wins: Record<string, number>; cum_ties: number }
+export interface Rivalry { a: string; b: string; sessions: number; reps: number; wins: Record<string, number>; ties: number; mean_gap_s_km: N; mean_gap_s: N;
+  leader: string | null; trend: { kind: "closing" | "pulling_away" | "steady" | "turned"; text: string; early: number; late: number; unit: string; leader_now: string; window: number } | null;
+  timeline: RivalryPoint[]; headline: string }
+export type GoalMetric = "sessions" | "km" | "hours" | "person_hours" | "reps" | "climb_m";
+export interface Goal { id: string; title: string; metric: GoalMetric; target: number; from: string; to: string; default?: boolean; unit: string; metric_label: string;
+  value: number; pct: number; expected: number; expected_pct: number; remaining: number; days: number; days_left: number;
+  status: "done" | "ahead" | "on_track" | "behind" | "ended" | "upcoming"; text: string; n_sessions: number; last_gid: string | null;
+  by_member: { person: string; value: number }[] }
+export interface Goals { goal: Goal; goals: Goal[]; metrics: { id: GoalMetric; unit: string; label: string }[] }
+export interface WrappedSession { gid: string; date: string; title: string; place: string; category: CatId; people: string[]; km: number; hours: number; climb_m: number; reps: number }
+export interface WrappedMember {
+  person: string; display: PersonInfo; sessions: number; share: number; km: number; hours: number; reps: number; climb_m: number; top_place: string | null;
+  favourite_category: CatId | null; partner: { person: string; sessions: number } | null; best_session: { gid: string; date: string; title: string; delta: number } | null;
+  avg_form_delta: N; records: number; badges: Badge[]; streak_weeks: number; company: CompanyShort;
+  rivalry: { other: string; won: number; lost: number; ties: number; trend: string | null }[];
+}
+export interface WrappedTotals { sessions: number; km: number; hours: number; person_hours_together: number; reps: number; climb_m: number; kcal: number; members: number; places: number }
+export interface Wrapped {
+  year: number; years: string[]; people: Record<string, PersonInfo>; totals: WrappedTotals; previous: WrappedTotals | null;
+  first: WrappedSession | null; last: WrappedSession | null;
+  top_place: { name: string; sessions: number; others: { name: string; sessions: number }[] } | null;
+  favourite_category: (Category & { mix: Category[] }) | null;
+  months: { month: string; sessions: number; km: number }[]; busiest_month: { month: string; sessions: number; km: number } | null;
+  biggest_day: WrappedSession | null; longest: (WrappedSession & { minutes: number }) | null;
+  form_jump: (WrappedSession & { person: string; delta: number; text: string }) | null;
+  closest_finish: Highlight | null; most_loyal: { person: string; sessions: number; of: number } | null; top_pair: { a: string; b: string; sessions: number } | null;
+  records_set: { kind: string; text: string; person: string; gid: string; date: string }[]; records_standing: ClubRecord[];
+  badges: Badge[]; rivalry: Pick<Rivalry, "a" | "b" | "sessions" | "reps" | "wins" | "ties" | "trend" | "headline">[];
+  members: WrappedMember[];
+}
+/** "3:19" per km from seconds per km */
+export const paceKm = (s: N | undefined) => (s === null || s === undefined ? "—" : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`);

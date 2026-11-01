@@ -161,3 +161,87 @@ def member(person: str, request: Request):
         return _run("member", person, viewer=request.scope.get("person"))
     except KeyError:
         raise HTTPException(404, f"no member {person}")
+
+
+@router.get("/community/wrapped/{year}")
+def wrapped(year: str, request: Request):
+    """the yearly recap (Wrapped): totals vs the year before, top place, favourite category, biggest day, best form
+    jump, most loyal, closest finish, records, badges earned, rivalry, a slide per member. `latest` = the newest year
+    with a club session"""
+    if year == "latest":
+        r = _run("wrapped", "latest", viewer=request.scope.get("person"))
+    elif year.isdigit() and len(year) == 4:
+        r = _run("wrapped", year, viewer=request.scope.get("person"))
+    else:
+        raise HTTPException(422, "year: YYYY or latest")
+    if not r["totals"]["sessions"]:
+        raise HTTPException(404, f"no club sessions in {year} (years: {', '.join(r['years']) or 'none'})")
+    return r
+
+
+@router.get("/community/badges")
+def badges(request: Request):
+    """every member's badges (earned with date + session, locked with progress) and the newest earned ones"""
+    def f():
+        cm = _cm()
+        tdoc = cm.tg.load()
+        B = cm.base(tdoc)
+        M = cm.motivation(B, cm.load_store(), tdoc)
+        return {"people": B["people"], "badges": M["badges"], "latest": cm.latest_badges(M["badges"], n=20),
+                "definitions": list(cm.BADGE_INFO.values())}
+    _doc()
+    with _LOCK:
+        return f()
+
+
+@router.get("/community/rivalry")
+def rivalry(date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to")):
+    """head-to-head per pair over time: sessions with shared reps / the same race, cumulative rep wins, gap trend"""
+    def f():
+        cm = _cm()
+        tdoc = cm.tg.load()
+        B = cm.base(tdoc)
+        store = cm.load_store()
+        return {"people": B["people"], "rivalry": cm.rivalries(B, store, tdoc, cm._visible(B, store, tdoc, date_from, date_to))}
+    _doc()
+    with _LOCK:
+        return f()
+
+
+@router.get("/community/goals")
+def goals():
+    """the club goals with progress; `goal` = the primary one (default "12 sessions this <season>" until one is saved)"""
+    return _run("goals")
+
+
+@router.post("/community/goals")
+def add_goal(body: dict = Body(..., examples=[{"title": "500 km together in 2026", "metric": "km", "target": 500,
+                                               "from": "2026-01-01", "to": "2026-12-31"}])):
+    """new goal {title?, metric: sessions|km|hours|person_hours|reps|climb_m, target, from, to} -> goals payload"""
+    try:
+        _cm().add_goal(body)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return _run("goals")
+
+
+@router.patch("/community/goals/{goal_id}")
+def patch_goal(goal_id: str, body: dict = Body(..., examples=[{"target": 15}])):
+    """edit a goal (id `default` stores the built-in default on first edit) -> goals payload"""
+    try:
+        _cm().patch_goal(goal_id, body)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except KeyError:
+        raise HTTPException(404, f"no goal {goal_id}")
+    return _run("goals")
+
+
+@router.delete("/community/goals/{goal_id}")
+def delete_goal(goal_id: str):
+    """remove a goal -> goals payload"""
+    try:
+        _cm().delete_goal(goal_id)
+    except KeyError:
+        raise HTTPException(404, f"no goal {goal_id}")
+    return _run("goals")

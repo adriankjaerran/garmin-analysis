@@ -19,6 +19,8 @@ cm.list_sessions(category=, person=, date_from=, date_to=, q=, near=, hidden=, v
 cm.get_session(gid); cm.club(date_from=, date_to=); cm.members(); cm.member(person)
 cm.patch(gid, {...}); cm.kudos(gid, person, on=True); cm.add_photo(gid, bytes, filename, by); cm.delete_photo(gid, id)
 cm.auto_category(group) -> (category, reason)
+cm.company_effect(B, store, tdoc, person); cm.badges_for(B, store, tdoc, person); cm.rivalries(B, store, tdoc, gids=None)
+cm.wrapped(year | "latest"); cm.goals(); cm.patch_goal(id, {...}); cm.add_goal({...}); cm.delete_goal(id)
 ```
 
 ## Files
@@ -31,6 +33,8 @@ cm.auto_category(group) -> (category, reason)
 `data/community.json`:
 ```
 {"version": 1, "updated": "2026-11-01T12:00:00Z",
+ "goals": [{"id": "3f9a12bc", "title": "500 km together in 2026", "metric": "km", "target": 500,
+            "from": "2026-01-01", "to": "2026-12-31", "created": "…Z"}],
  "sessions": {"2026-10-20_2007_Bislet": {"title": "Track night", "category": "intervals", "note": "windy",
      "guests": ["Kari", "Ola"], "hidden": true, "cover": "<photo id>", "kudos": ["patrik", "adrian"],
      "photos": [{"id": "3f2a…", "by": "adrian", "at": "…Z", "taken": "2026-10-20T20:31:05", "name": "IMG_1.HEIC",
@@ -79,6 +83,55 @@ On today's data: 6 intervals (incl. the hidden 2026-10-27 near-miss), 3 easy, 1 
   distance is a `club_best`; else, beating the person's own earlier ones a `pb` ("club PB": within community sessions,
   not the person's all-time PB). The first effort at a distance is no record (nobody to beat). On today's data
   (5 interval sessions, hardly a distance twice) no session sets one yet; the club records table has 12 entries.
+
+## Motivation
+Computed per request from the base (cheap: ~3 ms warm for club / member / wrapped). Member sessions = visible
+community sessions (not near-misses, not user-hidden), oldest first.
+
+### Faster together than alone? (`company_effect`)
+- **Form**: the member's form deltas (`form_delta`, confidence ≠ none) in club sessions vs their **solo** sessions
+  (activities in no together group at all, hidden / near-miss ones included) of the **same discipline** within
+  ±60 days of a club session (the "same period"). `diff` = the mean over club sessions of (club delta − mean of its
+  window's solo deltas) — a paired comparison; `joint_avg` / `solo_avg` are the plain means. `verdict`: `company`
+  (diff ≥ +0.3), `alone` (≤ −0.3), `even`; `text` "Patrik runs +1.8 better with company" / "Adrian runs 2.0 better
+  alone". `thin`: fewer than 3 compared club sessions or 3 solo sessions (shown as "thin data").
+- **Rep pace** per family: interval sessions' reps from groups.json (`reps` [dur, dist, …]; reps within 0.6–1.6× the
+  median distance, so warm-up blocks and strides drop out); family by the median rep: short < 600 m ≤ medium < 1.4 km
+  ≤ long. Club interval sessions vs solo interval sessions of the same family within ±90 days: pace s/km each,
+  `diff_s_km` > 0 = faster with company.
+- On today's data: Patrik −1.3 (1 solo session to compare: thin), Adrian −2.0 (5 vs 27); Adrian's medium reps
+  3:19 /km together vs 3:22 alone.
+
+### Badges (`BADGES`, `badges_for`)
+30 badges in groups attendance / places / time / effort / form / rivalry / records / social: first session, 5 / 10 /
+25 sessions, 3- and 8-week streak, comeback (90+ days away), loyal partner (10 with one person), track rat (5 on a
+track: own type `intervals_track` or a place named Bislett / stadion / track), explorer (5 places), globetrotter
+(3 regions ≥ 300 km apart), early bird (start < 08:00), night owl (≥ 20:00), winter warrior (Dec–Feb), hill goat
+(500 m climb in one session), rep machine (20 reps), century (100 km), long haul (500 km), a day out there (24 h
+moving), all-rounder (4 categories), race day, beat your form (+2), day of days (+4), rep winner (10 shared reps won),
+photo finish (a shared rep / race within 1 s), record breaker (a club record or club PB), club record holder (holds
+one now), iron lungs (the club's longest single session by moving time — exactly one holder), kudos magnet (5 kudos
+from others), shutterbug (a session with photos). Earned = the first session where the running value reached the
+target (date + gid + detail, e.g. "+2.9 vs form"); holder badges while held (else "held by Adrian: 4:03 h").
+Locked ones carry `value` / `target` / `progress` (0..1).
+
+### Rivalry (`duels`, `rivalries`)
+Per pair and session: every shared rep both have a result for (together's tie rule: |gap| ≤ max(1 s, tie_s)) — or,
+without intervals, the same race result. Per session `wins`, `ties`, `mean_gap_s` (b − a, positive = a faster),
+`gap_s_km` (gap ÷ the slot's set distance), `closest_s`; over time `cum_wins`. Trend over the gap per km (else per
+rep): mean of the first third vs the last third of the sessions → `closing` ("Patrik is closing in: gap 30 → 17
+s/km"), `pulling_away`, `turned` (the faster one changed), `steady`. Rep wins from reps match together's
+head-to-head exactly (tested); races are added on top.
+
+### Goals
+`goals` in community.json (list; id, title, metric `sessions | km | hours | person_hours | reps | climb_m`, target
+> 0, from ≤ to; unknown keys kept, invalid entries ignored). Progress over the visible sessions in the period: value,
+pct, `expected` (target × elapsed share of the period), status `done | ahead (≥ 110 % of expected) | on_track
+(≥ 90 %) | behind | ended | upcoming`, days left, `by_member` (person-level: sessions attended / own km / …). The
+primary `goal` = the first running one, else the one ending last; none stored → a suggested default
+`{id: "default", title: "12 sessions this <season>", default: true}` (meteorological season of today).
+`PATCH /goals/default` stores it (with a fresh id) on the first edit. Session edits keep `goals` (and any other
+top-level key).
 
 ## API
 All work unprefixed and under `/api/<person>/…` (the prefix sets `viewer`: `kudoed`, `mine`, default kudos / uploader).
@@ -190,11 +243,45 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
          weekly: [{date, mean, sd}] /* from 120 days before the first session */}}} | null}
 ```
 
+### Motivation endpoints
+- `/api/community/club` adds `company: {person: {diff, verdict, text, n_joint, n_solo, n_compared, joint_avg, solo_avg,
+  thin, pace: [{family, label, diff_s_km, text, n_joint, n_solo, joint_s_km, solo_s_km}]}}` (over the period when
+  `from` / `to` are given), `rivalry: [...]` (over the period), `latest_badges` (10 newest, all members, `person` +
+  badge), `goal`, `goals`, `goal_metrics`; each `attendance` row (and `/members` rows) gets `company` and
+  `badges: {earned, total, latest: [4 × {id, emoji, name, date, gid}], next: {id, emoji, name, progress, value, target, unit}}`.
+- `/api/community/sessions` adds `goal` (the primary goal with progress, for the Sessions header).
+- `/api/community/members/{person}` adds `badges: {person, earned, total, badges: [{id, emoji, name, description,
+  group, earned, date, gid, value, target, progress, unit, detail}]}` (earned newest first, then locked by progress),
+  `company` (as above + `window_days`, `by_discipline`, `joint: [{gid, date, delta, discipline}]`,
+  `solo: [{activity_id, date, delta, discipline, type, name}]`, pace `joint` / `solo` lists) and `rivalry` (the
+  member's pairs).
+- `GET /api/community/badges` → `{people, badges: {person: badges}, latest (20), definitions}`.
+- `GET /api/community/rivalry?from=&to=` → `{people, rivalry: [{a, b, sessions, reps, wins, ties, mean_gap_s_km,
+  mean_gap_s, leader, trend: {kind, text, early, late, unit, leader_now, window} | null, headline,
+  timeline: [{gid, date, kind: reps | race, title, n, wins, ties, mean_gap_s, gap_s_km, closest_s, cum_wins, cum_ties}]}]}`.
+- `GET /api/community/goals` → `{goal, goals: [{id, title, metric, target, from, to, default?, unit, metric_label,
+  value, pct, expected, expected_pct, remaining, days, days_left, status, text, n_sessions, last_gid,
+  by_member: [{person, value}]}], metrics: [{id, unit, label}]}`; `POST /api/community/goals` `{title?, metric,
+  target, from, to}`; `PATCH /api/community/goals/{id}` (any of those; `default` materialises the suggestion);
+  `DELETE /api/community/goals/{id}` — all return the goals payload; bad values / unknown fields → 422, unknown id → 404.
+- `GET /api/community/wrapped/{year | latest}` (404 for a year without sessions, 422 for a bad year) →
+  `{year, years, people, totals: {sessions, km, hours, person_hours_together, reps, climb_m, kcal, members, places},
+  previous (the year before | null), first, last, top_place: {name, sessions, others}, favourite_category: {…, n, mix},
+  months: [12 × {month, sessions, km}], busiest_month, biggest_day (most km), longest (+ minutes together),
+  form_jump (+ person, delta, text), closest_finish, most_loyal: {person, sessions, of}, top_pair: {a, b, sessions},
+  records_set, records_standing (club records set this year that still stand), badges (earned this year),
+  rivalry, members: [{person, sessions, share, km, hours, reps, climb_m, top_place, favourite_category, partner,
+  best_session, avg_form_delta, records, badges, streak_weeks, company (this year), rivalry: [{other, won, lost,
+  ties, trend}]}]}`.
+
 ## Tests
 `tests/test_community.py` (skips without data): list / filters / categories, PATCH + kudos + guests + hidden, photo
 upload (resize, thumbnail, dedupe, PNG with alpha, cover, delete, path traversal), a broken / hand-edited
 community.json, club invariants (totals = months = categories = heatmap, symmetric pair matrix), members, records.
 community.json and the photo folder are monkeypatched to a temp dir; the test fails if the real file's mtime changes.
+Motivation: company effect (no joint activity counted as solo), rep families, badges (order, progress, earned →
+own session, one iron-lungs holder), rivalry = together's head-to-head, Wrapped totals = the club for that year,
+goals (default, PATCH default, POST / DELETE, 422 / 404, km goal = club km, goals survive session edits, statuses).
 
 ## Limits / next
 - Records are club records over community sessions only (no all-time PBs from each person's own training).

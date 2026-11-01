@@ -810,6 +810,7 @@ def list_sessions(category=None, person=None, date_from=None, date_to=None, q=No
             "categories": categories_out(counts), "totals": tot,
             "h2h": tg.head_to_head(gs, {g["gid"]: B["sessions"].get(g["gid"]) for g in gs}),
             "form_available": B["form_available"], "store_error": store.get("error"),
+            "goal": goals(B, store, tdoc)["goal"],
             "groups": out, "compute_ms": round((time.time() - T0) * 1000, 1)}
 
 
@@ -1008,6 +1009,17 @@ def club(date_from=None, date_to=None, viewer=None) -> dict:
                    "sessions": n, "last": max(G[g]["date"] for g in gids if G[g]["place"].get("id") == pid)}
                   for pid, n in places.most_common()]
     loyal = attendance[0] if attendance else None
+    M = motivation(B, store, tdoc)
+    company = {}
+    for a in attendance:
+        ce = company_effect(B, store, tdoc, a["person"], M["sessions"].get(a["person"]), date_from, date_to) \
+            if (date_from or date_to) else M["company"].get(a["person"])
+        if ce:
+            company[a["person"]] = _company_short(ce)
+            a["company"] = company[a["person"]]
+        if a["person"] in M["badges"]:
+            a["badges"] = _badges_short(M["badges"][a["person"]])
+    G_ = goals(B, store, tdoc)
     recent = [{"gid": g, "date": G[g]["date"], "title": entry(g, store, tdoc).get("title") or G[g].get("workout"),
                "category": cat_of[g], "people": G[g]["people"], "km": B["collective"][g]["km"],
                "records": len(B["records"].get(g, []))} for g in reversed(gids[-8:])]
@@ -1022,7 +1034,10 @@ def club(date_from=None, date_to=None, viewer=None) -> dict:
             "records": club_records(B, set(gids)), "highlights": highlights,
             "heatmap": {"weekdays": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], "hours": list(range(24)), "n": heat},
             "places": place_rows, "guests": [{"name": n, "visits": v} for n, v in guests.most_common()],
-            "recent": recent, "form_available": B["form_available"], "store_error": store.get("error"),
+            "recent": recent, "company": company, "rivalry": rivalries(B, store, tdoc, gids),
+            "latest_badges": latest_badges(M["badges"], n=10), "goal": G_["goal"], "goals": G_["goals"],
+            "goal_metrics": G_["metrics"],
+            "form_available": B["form_available"], "store_error": store.get("error"),
             "compute_ms": round((time.time() - T0) * 1000, 1)}
 
 
@@ -1080,24 +1095,25 @@ def members(viewer=None) -> dict:
     return {"people": c["people"], "members": c["attendance"]}
 
 
-def member(person: str, viewer=None) -> dict:
-    T0 = time.time()
-    tdoc = tg.load()
-    B = base(tdoc)
-    store = load_store()
+def _member_gids(B, store, tdoc, person) -> list[str]:
     G = B["groups"]
-    gids = [g for g in _visible(B, store, tdoc) if person in G[g]["people"]
+    return [g for g in _visible(B, store, tdoc) if person in G[g]["people"]
             and any(p["person"] == person and p["role"] != "other" for p in G[g]["participants"])]
-    if not gids and person not in B["people"]:
-        raise KeyError(person)
-    info = B["people"]
-    today = dt.date.today().isoformat()
-    sess, form_series, partners = [], [], defaultdict(lambda: {"sessions": 0, "last": None, "gids": []})
+
+
+def _person_sessions(B, store, tdoc, person, gids=None) -> list[dict]:
+    """a member's community sessions, oldest first (the rows of member()["sessions"] + a few fields for badges)"""
+    G = B["groups"]
+    gids = _member_gids(B, store, tdoc, person) if gids is None else gids
+    sess = []
     for gid in gids:
         g = G[gid]
         e = entry(gid, store, tdoc)
         keys = [k for k, p in _keys(g) if p["person"] == person and p["role"] != "other"]
+        if not keys:
+            continue
         k = keys[0]
+        part = next(p for kk, p in _keys(g) if kk == k)
         f = (B["form"].get(gid) or {}).get(k)
         n = B["collective"][gid]["per_person"].get(k) or {}
         s = B["sessions"].get(gid) or {}
@@ -1105,22 +1121,46 @@ def member(person: str, viewer=None) -> dict:
         race = {x["person"]: x for x in (s.get("continuous") or {}).get("race") or []}
         x = lb.get(k) or {}
         sess.append({"gid": gid, "date": g["date"], "start_local": g["start_local"], "place": g["place"].get("name"),
-                     "workout": next((p.get("workout") for kk, p in _keys(g) if kk == k), None),
-                     "group_workout": g.get("workout"), "title": e.get("title"),
+                     "workout": part.get("workout"), "group_workout": g.get("workout"), "title": e.get("title"),
                      "category": e.get("category") or B["cat"][gid][0], "with": [p for p in g["people"] if p != person],
-                     "role": next(p["role"] for kk, p in _keys(g) if kk == k), "form": f, "numbers": n,
+                     "role": part["role"], "form": f, "numbers": n,
                      "rank": x.get("rank") or (race.get(k) or {}).get("rank"), "of_people": len(lb) or len(race) or None,
                      "rep_wins": x.get("rep_wins"), "avg_s": x.get("avg_s"), "pace_s_km": x.get("pace_s_km"),
                      "records": [r for r in B["records"].get(gid, []) if r["person"] == person],
-                     "n_photos": len(e.get("photos") or []), "kudos": len(e.get("kudos") or [])})
+                     "n_photos": len(e.get("photos") or []), "kudos": len(e.get("kudos") or []),
+                     "_key": k, "_aid": str(part["activity_id"]), "_type": part.get("type"),
+                     "_lat": g["place"].get("lat"), "_lon": g["place"].get("lon"), "_place_id": g["place"].get("id"),
+                     "_kudos_from": [x for x in e.get("kudos") or [] if x != person]})
+    return sess
+
+
+def _public(rows):
+    return [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
+
+
+def member(person: str, viewer=None) -> dict:
+    T0 = time.time()
+    tdoc = tg.load()
+    B = base(tdoc)
+    store = load_store()
+    G = B["groups"]
+    gids = _member_gids(B, store, tdoc, person)
+    if not gids and person not in B["people"]:
+        raise KeyError(person)
+    info = B["people"]
+    today = dt.date.today().isoformat()
+    sess = _person_sessions(B, store, tdoc, person, gids)
+    form_series, partners = [], defaultdict(lambda: {"sessions": 0, "last": None, "gids": []})
+    for s_ in sess:
+        f = s_["form"]
         if f and f.get("delta") is not None and f.get("confidence") != "none":
-            form_series.append({"date": g["date"], "gid": gid, **f})
-        for p in g["people"]:
+            form_series.append({"date": s_["date"], "gid": s_["gid"], **f})
+        for p in G[s_["gid"]]["people"]:
             if p != person:
                 pp = partners[p]
                 pp["sessions"] += 1
-                pp["last"] = g["date"]
-                pp["gids"].append(gid)
+                pp["last"] = s_["date"]
+                pp["gids"].append(s_["gid"])
     h2h = tg.head_to_head([G[g] for g in gids], {g: B["sessions"].get(g) for g in gids})
     plist = []
     for p, x in sorted(partners.items(), key=lambda kv: -kv[1]["sessions"]):
@@ -1148,7 +1188,11 @@ def member(person: str, viewer=None) -> dict:
               "avg_form_delta": _r(sum(f["delta"] for f in form_series) / len(form_series), 2) if form_series else None}
     return {"person": person, "display": info.get(person), "viewer": viewer, "totals": totals,
             "by_category": dict(Counter(s["category"] for s in sess)),
-            "sessions": list(reversed(sess)), "form_series": form_series, "partners": plist, "best_sessions": best,
+            "sessions": _public(list(reversed(sess))), "form_series": form_series, "partners": plist,
+            "best_sessions": _public(best),
+            "badges": badges_for(B, store, tdoc, person, sess),
+            "company": company_effect(B, store, tdoc, person, sess),
+            "rivalry": [r for r in rivalries(B, store, tdoc) if person in (r["a"], r["b"])],
             "personal_bests": sorted(pbs.values(), key=lambda e: ({"race": 0, "avg": 1, "rep": 2}[e["measure"]], e["dist_m"])),
             "shape": shape_trend(person, since=sess[0]["date"] if sess else None),
             "form_available": B["form_available"], "compute_ms": round((time.time() - T0) * 1000, 1)}
@@ -1169,6 +1213,726 @@ def shape_trend(person, since=None, pad_days=120) -> dict | None:
         out[k] = {"label": d.get("label"), "unit": d.get("unit"), "personal_best": d.get("personal_best"),
                   "current": d.get("current"), "weekly": w}
     return {"built": f.get("built"), "disciplines": out}
+
+
+# ------------------------------------------------------------------ motivation: company effect, badges, rivalry, wrapped, goals
+COMPANY_WINDOW_D = 60         # solo form deltas of the same discipline within ± this many days of a joint session
+PACE_WINDOW_D = 90            # solo interval sessions of the same rep family within ± this many days
+COMPANY_EVEN = 0.3            # |diff| below this (VDOT) = "about the same"
+REGION_KM = 300               # globetrotter: sessions in places at least this far apart count as different regions
+_TRACK_RE = re.compile(r"bislet|stadion|stadium|track|friidrett|bane\b", re.I)
+
+
+def _form_deltas_all(person) -> dict:
+    """{activity id: form_delta} for every scored session of the person (form_delta.form_deltas), {} without it"""
+    mod = _form_module()
+    if mod is None or not hasattr(mod, "form_deltas"):
+        return {}
+    k = ("all", person, _FORM_MOD["mtime"], _mt(DATA / person / "fitness.json"))
+    if k not in _FORM_CACHE:
+        try:
+            _FORM_CACHE[k] = mod.form_deltas(person) or {}
+        except Exception:  # noqa: BLE001
+            _FORM_CACHE[k] = {}
+    return _FORM_CACHE[k]
+
+
+def _joint_aids(B, person) -> set[str]:
+    """every activity of the person that is in any together group (hidden / near-miss too): never "solo" """
+    return {str(p["activity_id"]) for g in B["groups"].values() for p in g["participants"] if p["person"] == person}
+
+
+def _rep_family(reps) -> tuple[str, float, float] | None:
+    """(family, pace s/km, median rep m) from groups.json reps [[dur_s, dist_m, speed, hr], ...]: the reps near the
+    median distance (warm-up blocks and strides dropped). short < 600 m ≤ medium < 1400 m ≤ long"""
+    rs = [r for r in reps or [] if isinstance(r, (list, tuple)) and len(r) >= 2 and (r[1] or 0) >= 150 and (r[0] or 0) >= 20]
+    if len(rs) < 2:
+        return None
+    ds = sorted(r[1] for r in rs)
+    med = ds[len(ds) // 2]
+    keep = [r for r in rs if 0.6 * med <= r[1] <= 1.6 * med]
+    if len(keep) < 2:
+        return None
+    fam = "short" if med < 600 else "medium" if med < 1400 else "long"
+    return fam, sum(r[0] for r in keep) / sum(r[1] for r in keep) * 1000, med
+
+
+REP_FAMILY = {"short": "short reps (< 600 m)", "medium": "medium reps (600 m – 1.4 km)", "long": "long reps (≥ 1.4 km)"}
+
+
+def _mean(xs):
+    xs = [x for x in xs if x is not None]
+    return sum(xs) / len(xs) if xs else None
+
+
+def company_effect(B, store, tdoc, person, sess=None, date_from=None, date_to=None) -> dict:
+    """"Faster together than alone?": the person's form deltas in joint sessions vs their solo sessions of the same
+    discipline within ±60 days of a joint one (same period), and interval rep pace per rep family (short / medium /
+    long reps) joint vs solo within ±90 days. diff > 0 = better with company."""
+    sess = _person_sessions(B, store, tdoc, person) if sess is None else sess
+    sess = [s for s in sess if (not date_from or s["date"] >= date_from) and (not date_to or s["date"] <= date_to)]
+    nm = (B["people"].get(person) or {}).get("name", person)
+    joint_aids = _joint_aids(B, person)
+    joint = [{"gid": s["gid"], "date": s["date"], "delta": s["form"]["delta"], "discipline": s["form"].get("discipline"),
+              "confidence": s["form"].get("confidence")}
+             for s in sess if s["form"] and s["form"].get("delta") is not None and s["form"].get("confidence") != "none"]
+    solo_all = [{"activity_id": aid, "date": f.get("date"), "delta": f["delta"], "discipline": f.get("discipline"),
+                 "confidence": f.get("confidence")}
+                for aid, f in _form_deltas_all(person).items()
+                if aid not in joint_aids and f.get("delta") is not None and f.get("confidence") != "none" and f.get("date")]
+    dn = lambda d: dt.date.fromisoformat(d).toordinal()  # noqa: E731
+    solo = [x for x in solo_all if any(j["discipline"] == x["discipline"] and abs(dn(j["date"]) - dn(x["date"])) <= COMPANY_WINDOW_D
+                                       for j in joint)]
+    acts = _acts(person)
+    types = {aid: a.get("type") for aid, a in acts.items()}
+    for x in solo:
+        x["type"] = types.get(x["activity_id"])
+        x["name"] = (acts.get(x["activity_id"]) or {}).get("name")
+    by_disc = []
+    for d in sorted({j["discipline"] for j in joint}):
+        js, ss = [j["delta"] for j in joint if j["discipline"] == d], [x["delta"] for x in solo if x["discipline"] == d]
+        ja, sa = _mean(js), _mean(ss)
+        by_disc.append({"discipline": d, "n_joint": len(js), "n_solo": len(ss), "joint_avg": _r(ja, 2), "solo_avg": _r(sa, 2),
+                        "diff": _r(ja - sa, 2) if ja is not None and sa is not None else None})
+    # paired: each joint session against the solo sessions of its discipline in its own window
+    pairs = []
+    for j in joint:
+        w = [x["delta"] for x in solo if x["discipline"] == j["discipline"] and abs(dn(j["date"]) - dn(x["date"])) <= COMPANY_WINDOW_D]
+        if w:
+            pairs.append(j["delta"] - sum(w) / len(w))
+    ja = _mean([j["delta"] for j in joint if any(b["discipline"] == j["discipline"] and b["n_solo"] for b in by_disc)])
+    sa = _mean([x["delta"] for x in solo])
+    diff = _mean(pairs)
+    n_cmp = len(pairs)
+    verdict = None if diff is None else "company" if diff >= COMPANY_EVEN else "alone" if diff <= -COMPANY_EVEN else "even"
+    text = (None if diff is None else f"{nm} runs {diff:+.1f} better with company" if verdict == "company"
+            else f"{nm} runs {abs(diff):.1f} better alone" if verdict == "alone" else f"{nm} runs about the same with company and alone")
+    # rep pace per family
+    pace = []
+    jfam = []
+    for s in sess:
+        if s["category"] != "intervals":
+            continue
+        rf = _rep_family(_reps(person, s["_aid"]))
+        if rf:
+            jfam.append({"gid": s["gid"], "date": s["date"], "family": rf[0], "pace_s_km": rf[1], "rep_m": rf[2]})
+    sfam = []
+    for aid, a in acts.items():
+        if aid in joint_aids or not str(a.get("type") or "").startswith("intervals") or not a.get("start_local"):
+            continue
+        rf = _rep_family(_reps(person, aid))
+        if rf:
+            sfam.append({"activity_id": aid, "date": a["start_local"][:10], "family": rf[0], "pace_s_km": rf[1], "rep_m": rf[2]})
+    for fam in ("short", "medium", "long"):
+        js = [x for x in jfam if x["family"] == fam]
+        ss = [x for x in sfam if x["family"] == fam and any(abs(dn(j["date"]) - dn(x["date"])) <= PACE_WINDOW_D for j in js)]
+        if not js or not ss:
+            continue
+        jp, sp = _mean([x["pace_s_km"] for x in js]), _mean([x["pace_s_km"] for x in ss])
+        d = sp - jp
+        pace.append({"family": fam, "label": REP_FAMILY[fam], "n_joint": len(js), "n_solo": len(ss),
+                     "joint_s_km": _r(jp, 1), "solo_s_km": _r(sp, 1), "diff_s_km": _r(d, 1),
+                     "text": (f"{abs(d):.0f} s/km faster per rep with company" if d >= 1 else
+                              f"{abs(d):.0f} s/km faster per rep alone" if d <= -1 else "same rep pace with company and alone"),
+                     "joint": [{"gid": x["gid"], "date": x["date"], "pace_s_km": _r(x["pace_s_km"], 1)} for x in js],
+                     "solo": [{"activity_id": x["activity_id"], "date": x["date"], "pace_s_km": _r(x["pace_s_km"], 1)}
+                              for x in sorted(ss, key=lambda x: x["date"])]})
+    return {"person": person, "window_days": COMPANY_WINDOW_D, "n_joint": len(joint), "n_solo": len(solo), "n_compared": n_cmp,
+            "joint_avg": _r(ja, 2), "solo_avg": _r(sa, 2), "diff": _r(diff, 2), "verdict": verdict, "text": text,
+            "thin": n_cmp < 3 or len(solo) < 3, "by_discipline": by_disc, "pace": pace,
+            "joint": joint, "solo": sorted(solo, key=lambda x: x["date"])}
+
+
+def _reps(person, aid):
+    pg = DATA / person / "groups.json"
+    return (((_json(pg) or {}).get("activities") or {}).get(str(aid)) or {}).get("reps")
+
+
+# ---- head-to-head per session (rivalry, badges)
+def duels(B) -> dict:
+    """{gid: [{a, b, kind: reps|race, n, wins: {a, b}, ties, gaps: [b - a s], gaps_km: [s/km], mean_gap_s,
+    gap_s_km, closest_s}]} per pair of people with shared reps (or the same race) in the group; memoised on the base"""
+    if "duels" in B:
+        return B["duels"]
+    out = {}
+    for gid in B["order"]:
+        g, s = B["groups"][gid], B["sessions"].get(gid) or {}
+        if g["hidden"] or not s:
+            continue
+        iv = s.get("intervals")
+        rows = []
+        for a, b in itertools.combinations(sorted(set(g["people"])), 2):
+            d = {"a": a, "b": b, "kind": "reps", "n": 0, "wins": {a: 0, b: 0}, "ties": 0, "gaps": [], "gaps_km": []}
+            if iv and iv["reps"].get(a) and iv["reps"].get(b):
+                for sl, ca, cb in zip(iv["slots"], iv["reps"][a], iv["reps"][b]):
+                    if not ca or not cb or ca.get("result_s") is None or cb.get("result_s") is None:
+                        continue
+                    gap = cb["result_s"] - ca["result_s"]
+                    tie = abs(gap) <= max(ca.get("tie_s") or tg.TIE_MIN_S, tg.TIE_MIN_S, cb.get("tie_s") or 0)
+                    d["n"] += 1
+                    if tie:
+                        d["ties"] += 1
+                    else:
+                        d["wins"][a if gap > 0 else b] += 1
+                    d["gaps"].append(round(gap, 1))
+                    t = sl.get("target") or {}
+                    dist = t.get("value") if t.get("kind") == "dist" else None
+                    if dist:
+                        d["gaps_km"].append(gap / dist * 1000)
+            else:
+                race = {x["person"]: x for x in (s.get("continuous") or {}).get("race") or []}
+                if a in race and b in race and race[a].get("time_s") and race[b].get("time_s"):
+                    gap = race[b]["time_s"] - race[a]["time_s"]
+                    d.update(kind="race", n=1, gaps=[round(gap, 1)])
+                    if abs(gap) <= tg.TIE_MIN_S:
+                        d["ties"] = 1
+                    else:
+                        d["wins"][a if gap > 0 else b] = 1
+                    km = race[a].get("dist_km") or race[b].get("dist_km")
+                    if km:
+                        d["gaps_km"].append(gap / km)
+            if d["n"]:
+                d["mean_gap_s"] = _r(sum(d["gaps"]) / len(d["gaps"]), 1)
+                d["gap_s_km"] = _r(sum(d["gaps_km"]) / len(d["gaps_km"]), 1) if d["gaps_km"] else None
+                d["closest_s"] = min(abs(x) for x in d["gaps"])
+                rows.append(d)
+        if rows:
+            out[gid] = rows
+    B["duels"] = out
+    return out
+
+
+def rivalries(B, store, tdoc, gids=None) -> list[dict]:
+    """per pair over time: every session with shared reps / the same race, cumulative rep wins, the gap per rep and
+    per km (b - a; positive = a faster), and a trend line "Patrik is closing in: gap 21 → 8 s/km"."""
+    D = duels(B)
+    vis = set(_visible(B, store, tdoc)) if gids is None else set(gids)
+    nm = lambda p: (B["people"].get(p) or {}).get("name", p)  # noqa: E731
+    acc = defaultdict(list)
+    for gid in B["order"]:
+        if gid in vis:
+            for d in D.get(gid, []):
+                acc[(d["a"], d["b"])].append((gid, d))
+    out = []
+    for (a, b), xs in acc.items():
+        cum = {a: 0, b: 0}
+        ties = 0
+        tl = []
+        for gid, d in xs:
+            cum[a] += d["wins"][a]
+            cum[b] += d["wins"][b]
+            ties += d["ties"]
+            e = entry(gid, store, tdoc)
+            tl.append({"gid": gid, "date": B["groups"][gid]["date"], "kind": d["kind"],
+                       "title": e.get("title") or B["groups"][gid].get("workout"), "n": d["n"], "wins": d["wins"],
+                       "ties": d["ties"], "mean_gap_s": d["mean_gap_s"], "gap_s_km": d["gap_s_km"],
+                       "closest_s": d["closest_s"], "cum_wins": dict(cum), "cum_ties": ties})
+        g_km = [t["gap_s_km"] for t in tl if t["gap_s_km"] is not None]
+        g_rep = [t["mean_gap_s"] for t in tl]
+        overall = _mean(g_km) if g_km else _mean(g_rep)
+        leader = None if overall is None or abs(overall) < 0.5 else (a if overall > 0 else b)
+        trend = None
+        series = g_km or g_rep
+        unit = "s/km" if g_km else "s/rep"
+        if len(series) >= 2:
+            k = max(1, len(series) // 3)
+            early, late = _mean(series[:k]), _mean(series[-k:])
+            lead_now = a if late > 0 else b
+            trail_now = b if lead_now == a else a
+            if (early > 0) != (late > 0) and abs(early) >= 1 and abs(late) >= 1:
+                kind, text = "turned", f"{nm(lead_now)} has turned it around: now {abs(late):.0f} {unit} ahead"
+            elif abs(late) < abs(early) - 1:
+                kind, text = "closing", f"{nm(trail_now)} is closing in: gap {abs(early):.0f} → {abs(late):.0f} {unit}"
+            elif abs(late) > abs(early) + 1:
+                kind, text = "pulling_away", f"{nm(lead_now)} is pulling away: gap {abs(early):.0f} → {abs(late):.0f} {unit}"
+            else:
+                kind, text = "steady", f"Steady: {nm(lead_now)} about {abs(late):.0f} {unit} ahead"
+            trend = {"kind": kind, "text": text, "early": _r(abs(early), 1), "late": _r(abs(late), 1), "unit": unit,
+                     "leader_now": lead_now, "window": k}
+        out.append({"a": a, "b": b, "sessions": len(tl), "reps": sum(t["n"] for t in tl), "wins": dict(cum), "ties": ties,
+                    "mean_gap_s_km": _r(overall, 1) if g_km else None, "mean_gap_s": _r(_mean(g_rep), 1),
+                    "leader": leader, "trend": trend, "timeline": tl,
+                    "headline": (f"{nm(a)} {cum[a]}–{cum[b]} {nm(b)} in shared reps" + (f" · {trend['text']}" if trend else ""))})
+    out.sort(key=lambda r: -r["reps"])
+    return out
+
+
+# ---- badges
+def _hav_km(a, b):
+    import math
+    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(min(1.0, h)))
+
+
+BADGES = [  # id, emoji, name, description, group
+    ("first_session", "👋", "First session", "your first club session", "attendance"),
+    ("sessions_5", "🖐️", "High five", "5 club sessions", "attendance"),
+    ("sessions_10", "🔟", "Regular", "10 club sessions", "attendance"),
+    ("sessions_25", "💯", "Club stalwart", "25 club sessions", "attendance"),
+    ("streak_3", "🔥", "On fire", "a club session 3 weeks in a row", "attendance"),
+    ("streak_8", "☄️", "Unstoppable", "a club session 8 weeks in a row", "attendance"),
+    ("comeback", "🔄", "Comeback", "back for a club session after 90+ days away", "attendance"),
+    ("loyal", "🤝", "Loyal partner", "10 sessions with the same partner", "attendance"),
+    ("track_rat", "🐀", "Track rat", "5 sessions on a track (Bislett, a stadium)", "places"),
+    ("explorer", "🧭", "Explorer", "club sessions at 5 different places", "places"),
+    ("globetrotter", "🌍", "Globetrotter", f"club sessions in 3 regions ≥ {REGION_KM} km apart", "places"),
+    ("early_bird", "🐦", "Early bird", "a session starting before 08:00", "time"),
+    ("night_owl", "🦉", "Night owl", "a session starting at 20:00 or later", "time"),
+    ("winter_warrior", "❄️", "Winter warrior", "a club session in December, January or February", "time"),
+    ("hill_goat", "🐐", "Hill goat", "500 m of climbing in one session", "effort"),
+    ("rep_machine", "🔁", "Rep machine", "20 reps in one session", "effort"),
+    ("century", "💪", "Century", "100 km in club sessions", "effort"),
+    ("km_500", "🛤️", "Long haul", "500 km in club sessions", "effort"),
+    ("day_together", "⏰", "A day out there", "24 hours moving in club sessions", "effort"),
+    ("all_rounder", "🎨", "All-rounder", "sessions in 4 different categories", "effort"),
+    ("racer", "🏁", "Race day", "a race together with the club", "effort"),
+    ("beat_form", "🚀", "Beat your form", "+2 or more vs your form in a session", "form"),
+    ("career_day", "⚡", "Day of days", "+4 or more vs your form in a session", "form"),
+    ("rep_winner", "🥇", "Rep winner", "10 shared reps won head-to-head", "rivalry"),
+    ("photo_finish", "🤏", "Photo finish", "a shared rep or race decided by ≤ 1 s", "rivalry"),
+    ("record_breaker", "💥", "Record breaker", "set a club record or a club PB", "records"),
+    ("club_record", "🏆", "Club record holder", "hold at least one club record right now", "records"),
+    ("iron_lungs", "🫁", "Iron lungs", "the club's longest session (moving time) is yours", "records"),
+    ("kudos_magnet", "❤️", "Kudos magnet", "5 kudos received on your sessions", "social"),
+    ("shutterbug", "📷", "Shutterbug", "a session with photos", "social"),
+]
+BADGE_INFO = {b[0]: {"id": b[0], "emoji": b[1], "name": b[2], "description": b[3], "group": b[4]} for b in BADGES}
+
+
+def badges_for(B, store, tdoc, person, sess=None) -> dict:
+    """{earned: n, total, badges: [{id, emoji, name, description, group, earned, date?, gid?, value, target, progress
+    (0..1), unit, detail}]} — earned ones first (newest first), then locked ones by progress. Earned = the first
+    session where the running value reached the target (holder badges: while held)."""
+    sess = _person_sessions(B, store, tdoc, person) if sess is None else sess
+    D = duels(B)
+    nm = lambda p: (B["people"].get(p) or {}).get("name", p)  # noqa: E731
+    state: dict = {}         # id -> {value, target, unit, date, gid, detail}
+
+    def track(bid, value, target, s, unit="", detail=None):
+        st = state.setdefault(bid, {"value": 0, "target": target, "unit": unit, "date": None, "gid": None, "detail": None})
+        if value is not None and value > st["value"]:
+            st["value"] = value
+        if st["date"] is None and value is not None and value >= target and s is not None:
+            st.update(date=s["date"], gid=s["gid"], detail=detail)
+
+    km = hours = 0.0
+    places, cats, regions = set(), set(), []
+    track_n = rep_wins = kudos_n = 0
+    partners = Counter()
+    dates = []
+    for i, s in enumerate(sess):
+        n = s["numbers"] or {}
+        f = s["form"] or {}
+        when = f"{s['date']}"
+        track("first_session", i + 1, 1, s, "session")
+        for bid, t in (("sessions_5", 5), ("sessions_10", 10), ("sessions_25", 25)):
+            track(bid, i + 1, t, s, "sessions")
+        dates.append(s["date"])
+        st = _streaks(dates, s["date"])
+        track("streak_3", st["streak_weeks"], 3, s, "weeks")
+        track("streak_8", st["streak_weeks"], 8, s, "weeks")
+        if i:
+            gap = dt.date.fromisoformat(s["date"]).toordinal() - dt.date.fromisoformat(sess[i - 1]["date"]).toordinal()
+            track("comeback", gap, 90, s, "days away", f"back after {gap} days")
+        for p in s["with"]:
+            partners[p] += 1
+        if partners:
+            p, c = partners.most_common(1)[0]
+            track("loyal", c, 10, s, "sessions", f"with {nm(p)}")
+        if s["_type"] == "intervals_track" or _TRACK_RE.search(s["place"] or ""):
+            track_n += 1
+        track("track_rat", track_n, 5, s, "track sessions")
+        places.add(s["_place_id"])
+        track("explorer", len(places), 5, s, "places")
+        if s["_lat"] is not None and not any(_hav_km((s["_lat"], s["_lon"]), r) < REGION_KM for r in regions):
+            regions.append((s["_lat"], s["_lon"]))
+        track("globetrotter", len(regions), 3, s, "regions", s["place"])
+        h = int((s["start_local"] or "12:00")[:2])
+        track("early_bird", 1 if h < 8 else 0, 1, s, "", f"started {s['start_local']}")
+        track("night_owl", 1 if h >= 20 else 0, 1, s, "", f"started {s['start_local']}")
+        track("winter_warrior", 1 if s["date"][5:7] in ("12", "01", "02") else 0, 1, s, "", when)
+        track("hill_goat", n.get("climb_m") or 0, 500, s, "m", f"{n.get('climb_m') or 0} m climbed")
+        track("rep_machine", n.get("reps") or 0, 20, s, "reps", f"{n.get('reps') or 0} reps")
+        km += n.get("km") or 0
+        hours += (n.get("moving_s") or 0) / 3600
+        track("century", round(km, 1), 100, s, "km")
+        track("km_500", round(km, 1), 500, s, "km")
+        track("day_together", round(hours, 1), 24, s, "h")
+        cats.add(s["category"])
+        track("all_rounder", len(cats), 4, s, "categories")
+        track("racer", 1 if s["category"] == "race" else 0, 1, s, "", s["title"] or s["group_workout"])
+        if f.get("delta") is not None and f.get("confidence") != "none":
+            track("beat_form", f["delta"], 2, s, "VDOT", f"{f['delta']:+.1f} vs form")
+            track("career_day", f["delta"], 4, s, "VDOT", f"{f['delta']:+.1f} vs form")
+        else:
+            track("beat_form", None, 2, None, "VDOT")
+            track("career_day", None, 4, None, "VDOT")
+        close = None
+        for d in D.get(s["gid"], []):
+            if person in (d["a"], d["b"]):
+                rep_wins += d["wins"][person]
+                other = d["b"] if d["a"] == person else d["a"]
+                if close is None or d["closest_s"] < close[0]:
+                    close = (d["closest_s"], other)
+        track("rep_winner", rep_wins, 10, s, "reps won")
+        track("photo_finish", 1 if close and close[0] <= 1.0 else 0, 1, s, "",
+              f"{close[0]:.1f} s from {nm(close[1])}" if close else None)
+        track("record_breaker", len(s["records"]), 1, s, "records", (s["records"][0]["text"] if s["records"] else None))
+        kudos_n += len(s["_kudos_from"])
+        track("kudos_magnet", kudos_n, 5, s, "kudos")
+        track("shutterbug", 1 if s["n_photos"] else 0, 1, s, "", f"{s['n_photos']} photos" if s["n_photos"] else None)
+    # holder badges: club-wide, over the visible sessions
+    vis = _visible(B, store, tdoc)
+    mine = {s["gid"]: s for s in sess}
+    held = [r for r in club_records(B, set(vis)) if r["person"] == person]
+    st = state.setdefault("club_record", {"value": len(held), "target": 1, "unit": "records", "date": None, "gid": None, "detail": None})
+    if held:
+        r = min(held, key=lambda r: r["date"])
+        st.update(date=r["date"], gid=r["gid"], detail=f"{r['label']} {MEASURE_TEXT.get(r['measure'], r['measure'])} {r['text']}"
+                  + (f" (+{len(held) - 1} more)" if len(held) > 1 else ""))
+    longest = max(((B["collective"][g]["per_person"].get(k) or {}).get("moving_s") or 0, g, k.split("#")[0])
+                  for g in vis for k in B["collective"][g]["per_person"]) if vis else None
+    mx = max(((s["numbers"] or {}).get("moving_s") or 0 for s in sess), default=0)
+    st = state.setdefault("iron_lungs", {"value": round(mx / 3600, 1), "target": round((longest[0] if longest else 1) / 3600, 1),
+                                         "unit": "h", "date": None, "gid": None, "detail": None})
+    if longest and longest[2] == person and longest[1] in mine:
+        st.update(date=mine[longest[1]]["date"], gid=longest[1], detail=f"{dur_text(longest[0])} moving")
+    elif longest:
+        st["detail"] = f"held by {nm(longest[2])}: {dur_text(longest[0])}"
+    out = []
+    for bid, _e, _n, _d, _g in BADGES:
+        x = state.get(bid) or {"value": 0, "target": 1, "unit": "", "date": None, "gid": None, "detail": None}
+        tgt = x["target"] or 1
+        out.append({**BADGE_INFO[bid], "earned": x["date"] is not None, "date": x["date"], "gid": x["gid"],
+                    "value": _r(x["value"], 1) if isinstance(x["value"], float) else x["value"], "target": tgt,
+                    "progress": 1.0 if x["date"] else _r(min(1.0, max(0.0, (x["value"] or 0) / tgt)), 2),
+                    "unit": x["unit"], "detail": x["detail"]})
+    out = (sorted([b for b in out if b["earned"]], key=lambda b: (b["date"], b["id"]), reverse=True)
+           + sorted([b for b in out if not b["earned"]], key=lambda b: -(b["progress"] or 0)))
+    return {"person": person, "earned": sum(1 for b in out if b["earned"]), "total": len(out), "badges": out}
+
+
+MEASURE_TEXT = {"race": "race", "avg": "avg rep", "rep": "best rep"}
+
+
+def dur_text(s):
+    s = int(round(s or 0))
+    return f"{s // 3600}:{s % 3600 // 60:02d} h" if s >= 3600 else f"{s // 60} min"
+
+
+def latest_badges(all_badges: dict, n=10, year=None) -> list[dict]:
+    """newest earned badges over every member: [{person, ...badge}]"""
+    rows = [{"person": p, **b} for p, bs in all_badges.items() for b in bs["badges"]
+            if b["earned"] and (not year or b["date"][:4] == str(year))]
+    rows.sort(key=lambda b: (b["date"], b["gid"] or "", b["id"]), reverse=True)
+    return rows[:n] if n else rows
+
+
+def _all_members(B, store, tdoc) -> list[str]:
+    G = B["groups"]
+    return sorted({p["person"] for g in _visible(B, store, tdoc) for p in G[g]["participants"] if p["role"] != "other"})
+
+
+def motivation(B, store, tdoc) -> dict:
+    """per member: sessions (oldest first), badges, company effect; per pair: rivalry (shared by club / members / wrapped)"""
+    ps = _all_members(B, store, tdoc)
+    sess = {p: _person_sessions(B, store, tdoc, p) for p in ps}
+    return {"sessions": sess, "badges": {p: badges_for(B, store, tdoc, p, sess[p]) for p in ps},
+            "company": {p: company_effect(B, store, tdoc, p, sess[p]) for p in ps}, "rivalry": rivalries(B, store, tdoc)}
+
+
+def _company_short(c):
+    return {k: c.get(k) for k in ("diff", "verdict", "text", "n_joint", "n_solo", "n_compared", "joint_avg", "solo_avg", "thin")} \
+        | {"pace": [{k: x[k] for k in ("family", "label", "diff_s_km", "text", "n_joint", "n_solo", "joint_s_km", "solo_s_km")}
+                    for x in c.get("pace") or []]}
+
+
+def _badges_short(b):
+    e = [x for x in b["badges"] if x["earned"]]
+    return {"earned": b["earned"], "total": b["total"], "latest": [{k: x[k] for k in ("id", "emoji", "name", "date", "gid")} for x in e[:4]],
+            "next": next(({k: x[k] for k in ("id", "emoji", "name", "progress", "value", "target", "unit")}
+                          for x in b["badges"] if not x["earned"] and x["id"] not in ("iron_lungs", "club_record")), None)}
+
+
+# ---- goals (community.json "goals": [{id, title, metric, target, from, to, created}])
+GOAL_METRICS = {"sessions": ("sessions", "sessions"), "km": ("km", "km together"), "hours": ("h", "hours moving"),
+                "person_hours": ("person-h", "person-hours out there together"), "reps": ("reps", "reps"),
+                "climb_m": ("m", "metres climbed")}
+
+
+def _season(today: dt.date):
+    y, m = today.year, today.month
+    if m in (12, 1, 2):
+        y0 = y if m == 12 else y - 1
+        return "Winter", dt.date(y0, 12, 1), dt.date(y0 + 1, 3, 1) - dt.timedelta(days=1)
+    for name, a, b in (("Spring", 3, 5), ("Summer", 6, 8), ("Autumn", 9, 11)):
+        if a <= m <= b:
+            return name, dt.date(y, a, 1), (dt.date(y, b + 1, 1) - dt.timedelta(days=1))
+    raise AssertionError
+
+
+def default_goal(today=None) -> dict:
+    today = today or dt.date.today()
+    name, a, b = _season(today)
+    return {"id": "default", "title": f"12 sessions this {name.lower()}", "metric": "sessions", "target": 12,
+            "from": a.isoformat(), "to": b.isoformat(), "default": True}
+
+
+def _norm_goal(g) -> dict | None:
+    if not isinstance(g, dict):
+        return None
+    try:
+        tgt = float(g.get("target"))
+        a, b = dt.date.fromisoformat(str(g.get("from"))[:10]), dt.date.fromisoformat(str(g.get("to"))[:10])
+    except (TypeError, ValueError):
+        return None
+    if g.get("metric") not in GOAL_METRICS or tgt <= 0 or b < a:
+        return None
+    gid = str(g.get("id") or "") or hashlib.sha1(json.dumps(g, sort_keys=True, default=str).encode()).hexdigest()[:8]
+    return {**g, "id": gid, "title": _clean_text(g.get("title"), TEXT_MAX["title"]) or f"{tgt:g} {GOAL_METRICS[g['metric']][1]}",
+            "target": int(tgt) if tgt == int(tgt) else tgt, "from": a.isoformat(), "to": b.isoformat()}
+
+
+def stored_goals(store=None) -> list[dict]:
+    store = store or load_store()
+    return [x for x in (_norm_goal(g) for g in store.get("goals") or []) if x]
+
+
+def goal_progress(B, store, tdoc, g, today=None) -> dict:
+    today = today or dt.date.today()
+    gids = _visible(B, store, tdoc, g["from"], g["to"])
+    C = B["collective"]
+    m = g["metric"]
+
+    def val(gid, per=None):
+        c = C[gid] if per is None else (C[gid]["per_person"].get(per) or {})
+        if m == "sessions":
+            return 1
+        if m == "km":
+            return c.get("km") or 0
+        if m == "hours":
+            return (c.get("moving_s") or 0) / 3600
+        if m == "person_hours":
+            return ((c.get("person_min_shared") if per is None else c.get("shared_min")) or 0) / 60
+        if m == "reps":
+            return c.get("reps") or 0
+        return c.get("climb_m") or 0
+    v = sum(val(x) for x in gids)
+    per = Counter()
+    for x in gids:
+        for k in C[x]["per_person"]:
+            if "#" not in k:
+                per[k] += val(x, k)
+    a, b = dt.date.fromisoformat(g["from"]), dt.date.fromisoformat(g["to"])
+    days = (b - a).days + 1
+    gone = min(days, max(0, (today - a).days + 1))
+    expected = g["target"] * gone / days
+    left = max(0, (b - today).days) if today <= b else 0
+    status = ("done" if v >= g["target"] else "upcoming" if today < a else "ended" if today > b
+              else "ahead" if v >= expected * 1.1 else "on_track" if v >= expected * 0.9 else "behind")
+    unit, what = GOAL_METRICS[m]
+    fmt = lambda x: f"{x:.0f}" if m in ("sessions", "reps", "climb_m") or x >= 100 else f"{x:.1f}"  # noqa: E731
+    togo = max(0.0, g["target"] - v)
+    text = (f"{fmt(v)} of {fmt(g['target'])} {unit}" + (" · done 🎉" if status == "done" else
+            f" · {fmt(togo)} to go · {left} days left" if status not in ("ended", "upcoming") else
+            " · ended" if status == "ended" else f" · starts {g['from']}"))
+    return {**g, "unit": unit, "metric_label": what, "value": _r(v, 1), "pct": _r(min(1.0, v / g["target"]), 3),
+            "expected": _r(expected, 1), "expected_pct": _r(min(1.0, expected / g["target"]), 3), "remaining": _r(togo, 1),
+            "days": days, "days_left": left, "status": status, "text": text, "n_sessions": len(gids),
+            "last_gid": gids[-1] if gids else None,
+            "by_member": [{"person": p, "value": _r(x, 1)} for p, x in per.most_common()],
+            "default": bool(g.get("default"))}
+
+
+def goals(B=None, store=None, tdoc=None, today=None) -> dict:
+    """{goal: the primary goal with progress (first running one, else the newest; default "12 sessions this <season>"
+    when none is stored), goals: [all with progress], metrics}"""
+    tdoc = tdoc or tg.load()
+    B = B or base(tdoc)
+    store = store or load_store()
+    today = today or dt.date.today()
+    gs = stored_goals(store) or [default_goal(today)]
+    rows = [goal_progress(B, store, tdoc, g, today) for g in gs]
+    running = [r for r in rows if r["from"] <= today.isoformat() <= r["to"]]
+    prim = running[0] if running else max(rows, key=lambda r: r["to"])
+    return {"goal": prim, "goals": rows, "metrics": [{"id": k, "unit": u, "label": w} for k, (u, w) in GOAL_METRICS.items()]}
+
+
+def _validate_goal_body(body, partial=True):
+    allowed = {"title", "metric", "target", "from", "to"}
+    bad = set(body) - allowed
+    if bad:
+        raise ValueError(f"unknown fields: {', '.join(sorted(bad))} (allowed: {', '.join(sorted(allowed))})")
+    if not partial and not {"metric", "target", "from", "to"} <= set(body):
+        raise ValueError("metric, target, from and to are required")
+    if "metric" in body and body["metric"] not in GOAL_METRICS:
+        raise ValueError(f"metric must be one of {', '.join(GOAL_METRICS)}")
+    if "target" in body:
+        try:
+            if float(body["target"]) <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("target: a positive number")
+    for k in ("from", "to"):
+        if k in body:
+            try:
+                dt.date.fromisoformat(str(body[k]))
+            except ValueError:
+                raise ValueError(f"{k}: a date YYYY-MM-DD")
+
+
+def _mutate_goals(fn):
+    with _WLOCK:
+        _STORE_MEMO["key"] = None
+        doc = load_store()
+        gs = stored_goals(doc)
+        gs = fn(gs)
+        doc["goals"] = gs
+        _save_store(doc)
+        return gs
+
+
+def patch_goal(goal_id: str, body: dict) -> dict:
+    """edit a goal (id "default" = the built-in default: stored on first edit) -> the stored goal"""
+    _validate_goal_body(body)
+    out = {}
+
+    def fn(gs):
+        cur = next((g for g in gs if g["id"] == goal_id), None)
+        if cur is None:
+            if goal_id != "default":
+                raise KeyError(goal_id)
+            cur = {k: v for k, v in default_goal().items() if k != "default"}
+            cur["id"] = hashlib.sha1(_now_iso().encode()).hexdigest()[:8]
+            cur["created"] = _now_iso()
+            gs = [cur] + gs
+        new = _norm_goal({**cur, **body, **({"title": body["title"]} if "title" in body else {})})
+        if new is None:
+            raise ValueError("invalid goal (from must be ≤ to)")
+        gs = [new if g["id"] == cur["id"] else g for g in gs]
+        out["g"] = new
+        return gs
+    _mutate_goals(fn)
+    return out["g"]
+
+
+def add_goal(body: dict) -> dict:
+    _validate_goal_body(body, partial=False)
+    g = _norm_goal({**body, "id": hashlib.sha1((_now_iso() + json.dumps(body, sort_keys=True, default=str)).encode()).hexdigest()[:8],
+                    "created": _now_iso()})
+    if g is None:
+        raise ValueError("invalid goal (from must be ≤ to)")
+    _mutate_goals(lambda gs: [g] + gs)
+    return g
+
+
+def delete_goal(goal_id: str):
+    found = {}
+
+    def fn(gs):
+        found["x"] = any(g["id"] == goal_id for g in gs)
+        return [g for g in gs if g["id"] != goal_id]
+    _mutate_goals(fn)
+    if not found["x"]:
+        raise KeyError(goal_id)
+
+
+# ---- wrapped
+def wrapped(year: int | str, viewer=None) -> dict:
+    """the yearly recap: totals (vs the year before), top place, favourite category, biggest day, best form jump, most
+    loyal member / pair, closest finish, records, badges earned, months, and a slide per member"""
+    T0 = time.time()
+    tdoc = tg.load()
+    B = base(tdoc)
+    store = load_store()
+    G, C = B["groups"], B["collective"]
+    vis_all = _visible(B, store, tdoc)
+    years = sorted({G[g]["date"][:4] for g in vis_all}, reverse=True)
+    year = (years[0] if years else str(dt.date.today().year)) if str(year) == "latest" else str(year)
+    gids = [g for g in vis_all if G[g]["date"][:4] == year]
+    prev = [g for g in vis_all if G[g]["date"][:4] == str(int(year) - 1)]
+    info = B["people"]
+    nm = lambda p: (info.get(p) or {}).get("name", p)  # noqa: E731
+    cat_of = {g: entry(g, store, tdoc).get("category") or B["cat"][g][0] for g in gids}
+    title = lambda g: entry(g, store, tdoc).get("title") or G[g].get("workout") or G[g]["label_text"]  # noqa: E731
+
+    def tot(gs):
+        return {"sessions": len(gs), "km": _r(sum(C[g]["km"] for g in gs), 1), "hours": _r(sum(C[g]["moving_s"] for g in gs) / 3600, 1),
+                "person_hours_together": _r(sum(C[g]["person_min_shared"] or 0 for g in gs) / 60, 1),
+                "reps": sum(C[g]["reps"] for g in gs), "climb_m": sum(C[g]["climb_m"] for g in gs),
+                "kcal": sum(C[g]["kcal"] or 0 for g in gs),
+                "members": len({p["person"] for g in gs for p in _members(G[g])}),
+                "places": len({G[g]["place"].get("id") for g in gs})}
+    T = tot(gids)
+    P = tot(prev) if prev else None
+    places = Counter(G[g]["place"].get("name") for g in gids)
+    cats = Counter(cat_of.values())
+    months = [{"month": f"{year}-{m:02d}", "sessions": sum(1 for g in gids if G[g]["date"][5:7] == f"{m:02d}"),
+               "km": _r(sum(C[g]["km"] for g in gids if G[g]["date"][5:7] == f"{m:02d}"), 1)} for m in range(1, 13)]
+    sess_row = lambda g: {"gid": g, "date": G[g]["date"], "title": title(g), "place": G[g]["place"].get("name"),  # noqa: E731
+                          "category": cat_of.get(g) or B["cat"][g][0], "people": G[g]["people"], "km": C[g]["km"],
+                          "hours": C[g]["hours"], "climb_m": C[g]["climb_m"], "reps": C[g]["reps"]}
+    biggest = max(gids, key=lambda g: C[g]["km"]) if gids else None
+    longest = max(gids, key=lambda g: _together_s(G[g])) if gids else None
+    fj = [(f["delta"], g, k) for g in gids for k, f in (B["form"].get(g) or {}).items()
+          if f and f.get("delta") is not None and f.get("confidence") not in ("none", "low")]
+    jump = None
+    if fj:
+        d, g, k = max(fj)
+        jump = {**sess_row(g), "person": k.split("#")[0], "delta": d, "text": f"{nm(k.split('#')[0])} {d:+.1f} vs form"}
+    M = motivation(B, store, tdoc)
+    att = Counter(p["person"] for g in gids for k, p in _keys(G[g]) if p["role"] != "other" and "#" not in k)
+    pairs = Counter()
+    for g in gids:
+        for a, b in itertools.combinations(sorted({p["person"] for p in _members(G[g])}), 2):
+            pairs[(a, b)] += 1
+    hl = {h["kind"]: h for h in _highlights(B, gids, info)} if gids else {}
+    recs = [{**r, "gid": g, "date": G[g]["date"]} for g in gids for r in B["records"].get(g, [])]
+    standing = [r for r in club_records(B, set(vis_all)) if r["date"][:4] == year]
+    badges = latest_badges(M["badges"], n=0, year=year)
+    riv = rivalries(B, store, tdoc, gids)
+    per = []
+    for p, n in att.most_common():
+        ss = [s for s in M["sessions"].get(p, []) if s["date"][:4] == year]
+        scored = [s for s in ss if s["form"] and s["form"].get("delta") is not None and s["form"].get("confidence") not in ("none",)]
+        best = max(scored, key=lambda s: s["form"]["delta"]) if scored else None
+        pl = Counter(s["place"] for s in ss)
+        ca = Counter(s["category"] for s in ss)
+        partner = Counter(q for s in ss for q in s["with"])
+        ce = company_effect(B, store, tdoc, p, M["sessions"].get(p, []), f"{year}-01-01", f"{year}-12-31")
+        my_riv = [{"other": r["b"] if r["a"] == p else r["a"], "won": r["wins"][p], "lost": r["wins"][r["b"] if r["a"] == p else r["a"]],
+                   "ties": r["ties"], "trend": (r["trend"] or {}).get("text")} for r in riv if p in (r["a"], r["b"])]
+        per.append({"person": p, "display": info.get(p), "sessions": n, "share": _r(n / len(gids), 3) if gids else None,
+                    "km": _r(sum((s["numbers"] or {}).get("km") or 0 for s in ss), 1),
+                    "hours": _r(sum((s["numbers"] or {}).get("moving_s") or 0 for s in ss) / 3600, 1),
+                    "reps": sum((s["numbers"] or {}).get("reps") or 0 for s in ss),
+                    "climb_m": sum((s["numbers"] or {}).get("climb_m") or 0 for s in ss),
+                    "top_place": pl.most_common(1)[0][0] if pl else None,
+                    "favourite_category": ca.most_common(1)[0][0] if ca else None,
+                    "partner": ({"person": partner.most_common(1)[0][0], "sessions": partner.most_common(1)[0][1]} if partner else None),
+                    "best_session": ({"gid": best["gid"], "date": best["date"], "title": best["title"] or best["group_workout"],
+                                      "delta": best["form"]["delta"]} if best else None),
+                    "avg_form_delta": _r(_mean([s["form"]["delta"] for s in scored]), 2),
+                    "records": sum(len(s["records"]) for s in ss),
+                    "badges": [b for b in badges if b["person"] == p],
+                    "streak_weeks": _streaks([s["date"] for s in ss], f"{year}-12-31")["best_streak_weeks"],
+                    "company": _company_short(ce), "rivalry": my_riv})
+    return {"year": int(year), "years": years, "viewer": viewer, "people": info, "totals": T, "previous": P,
+            "first": sess_row(gids[0]) if gids else None, "last": sess_row(gids[-1]) if gids else None,
+            "top_place": {"name": places.most_common(1)[0][0], "sessions": places.most_common(1)[0][1],
+                          "others": [{"name": k, "sessions": v} for k, v in places.most_common()[1:6]]} if places else None,
+            "favourite_category": {**CAT_INFO[cats.most_common(1)[0][0]], "n": cats.most_common(1)[0][1],
+                                   "mix": [{**CAT_INFO[c], "n": n} for c, n in cats.most_common()]} if cats else None,
+            "months": months, "busiest_month": max(months, key=lambda m: (m["sessions"], m["km"])) if gids else None,
+            "biggest_day": sess_row(biggest) if biggest else None,
+            "longest": {**sess_row(longest), "minutes": round(_together_s(G[longest]) / 60)} if longest else None,
+            "form_jump": jump, "closest_finish": hl.get("closest_finish"),
+            "most_loyal": {"person": att.most_common(1)[0][0], "sessions": att.most_common(1)[0][1], "of": len(gids)} if att else None,
+            "top_pair": {"a": pairs.most_common(1)[0][0][0], "b": pairs.most_common(1)[0][0][1], "sessions": pairs.most_common(1)[0][1]} if pairs else None,
+            "records_set": recs, "records_standing": standing, "badges": badges,
+            "rivalry": [{k: r[k] for k in ("a", "b", "sessions", "reps", "wins", "ties", "trend", "headline")} for r in riv],
+            "members": per, "compute_ms": round((time.time() - T0) * 1000, 1)}
 
 
 # ------------------------------------------------------------------ CLI

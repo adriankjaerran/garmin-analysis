@@ -195,3 +195,132 @@ def test_session_records_synthetic(cm):
     assert "g1" not in r and "g4" not in r
     assert [(x["kind"], x["person"], x["prev_s"]) for x in r["g2"]] == [("pb", "b", 85)]
     assert [(x["kind"], x["person"], x["improvement_s"]) for x in r["g3"]] == [("club_best", "a", 1.0)]
+
+
+# ------------------------------------------------------------------ motivation: company, badges, rivalry, wrapped, goals
+def test_company_effect(client, cm):
+    c = client.get("/api/community/club").json()
+    assert set(c["company"]) <= {a["person"] for a in c["attendance"]}
+    for x in c["company"].values():
+        assert {"diff", "verdict", "text", "n_joint", "n_solo", "pace"} <= set(x)
+        assert x["verdict"] in (None, "company", "alone", "even")
+        if x["diff"] is not None:
+            assert x["text"] and x["n_compared"] >= 1
+    m = client.get(f"/api/community/members/{c['attendance'][0]['person']}").json()["company"]
+    joint_aids = set()
+    import together as tg
+    for g in tg.load()["groups"]:
+        joint_aids |= {str(q["activity_id"]) for q in g["participants"] if q["person"] == m["person"]}
+    assert not {x["activity_id"] for x in m["solo"]} & joint_aids, "a joint activity counted as solo"
+    for x in m["pace"]:
+        assert x["joint_s_km"] > 0 and x["solo_s_km"] > 0 and x["family"] in ("short", "medium", "long")
+
+
+def test_rep_family(cm):
+    assert cm._rep_family([[75, 400, 0, 0]] * 10 + [[600, 2000, 0, 0]])[0] == "short"   # warm-up block dropped
+    assert cm._rep_family([[200, 1000, 0, 0], [198, 1000, 0, 0]]) == ("medium", 199.0, 1000)
+    assert cm._rep_family([[420, 1800, 0, 0], [430, 1800, 0, 0]])[0] == "long"
+    assert cm._rep_family([[60, 300, 0, 0]]) is None
+
+
+def test_badges(client, cm):
+    ms = client.get("/api/community/members").json()["members"]
+    for row in ms:
+        m = client.get(f"/api/community/members/{row['person']}").json()
+        b = m["badges"]
+        assert b["total"] == len(cm.BADGES) == len(b["badges"]) and b["earned"] == row["badges"]["earned"]
+        gids = {s["gid"] for s in m["sessions"]}
+        earned = [x for x in b["badges"] if x["earned"]]
+        assert [x["earned"] for x in b["badges"]] == [True] * len(earned) + [False] * (len(b["badges"]) - len(earned))
+        assert [x["date"] for x in earned] == sorted((x["date"] for x in earned), reverse=True)
+        for x in b["badges"]:
+            assert 0 <= x["progress"] <= 1
+            if x["earned"]:
+                assert x["gid"] in gids and x["progress"] == 1
+        first = next(x for x in b["badges"] if x["id"] == "first_session")
+        assert first["earned"] and first["date"] == m["totals"]["first"]
+        n = next(x for x in b["badges"] if x["id"] == "sessions_5")
+        assert n["earned"] == (m["totals"]["sessions"] >= 5)
+    iron = [p for p in ms if next(x for x in client.get(f"/api/community/members/{p['person']}").json()["badges"]["badges"]
+                                  if x["id"] == "iron_lungs")["earned"]]
+    assert len(iron) == 1, "exactly one holder of the longest session"
+    lb = client.get("/api/community/club").json()["latest_badges"]
+    assert lb and [x["date"] for x in lb] == sorted((x["date"] for x in lb), reverse=True)
+    assert client.get("/api/community/badges").json()["latest"]
+
+
+def test_rivalry_matches_h2h(client, cm):
+    c = client.get("/api/community/club").json()
+    assert c["rivalry"]
+    for r in c["rivalry"]:
+        tl = r["timeline"]
+        assert [t["date"] for t in tl] == sorted(t["date"] for t in tl)
+        assert tl[-1]["cum_wins"] == r["wins"]
+        pair = next(p for p in c["pairs"] if {p["a"], p["b"]} == {r["a"], r["b"]})
+        reps = {k: sum(t["wins"][k] for t in tl if t["kind"] == "reps") for k in (r["a"], r["b"])}
+        assert reps == pair["h2h"]["rep_wins"], "rivalry rep wins disagree with together's head-to-head"
+        if r["trend"]:
+            assert r["trend"]["kind"] in ("closing", "pulling_away", "steady", "turned") and r["trend"]["text"]
+    assert client.get("/api/community/rivalry").json()["rivalry"]
+
+
+def test_wrapped(client, cm):
+    c = client.get("/api/community/club").json()
+    y = c["totals"]["last"][:4]
+    r = client.get(f"/api/community/wrapped/{y}")
+    assert r.status_code == 200, r.text[:300]
+    w = r.json()
+    yc = client.get(f"/api/community/club?from={y}-01-01&to={y}-12-31").json()["totals"]
+    assert w["totals"]["sessions"] == yc["sessions"] == sum(m["sessions"] for m in w["months"])
+    assert w["totals"]["km"] == yc["km"]
+    assert y in w["years"] and w["members"] and w["top_place"]["sessions"] >= 1
+    assert all(b["date"].startswith(y) for b in w["badges"])
+    assert client.get("/api/community/wrapped/1990").status_code == 404
+
+
+def test_goals(client, cm):
+    g = client.get("/api/community/goals").json()
+    assert g["goal"]["default"] and g["goal"]["metric"] == "sessions" and 0 <= g["goal"]["pct"] <= 1
+    assert client.get("/api/community/sessions").json()["goal"]["id"] == "default"
+    assert client.get("/api/community/club").json()["goal"]["title"] == g["goal"]["title"]
+    r = client.patch("/api/community/goals/default", json={"target": 15, "title": "15 this autumn"}).json()
+    assert r["goal"]["target"] == 15 and not r["goal"]["default"] and r["goal"]["id"] != "default"
+    on_disk = json.loads(cm.STORE.read_text())
+    assert on_disk["goals"][0]["target"] == 15
+    r = client.post("/api/community/goals", json={"title": "500 km in 2026", "metric": "km", "target": 500,
+                                                  "from": "2026-01-01", "to": "2026-12-31"}).json()
+    assert len(r["goals"]) == 2
+    km = next(x for x in r["goals"] if x["metric"] == "km")
+    assert km["value"] == client.get("/api/community/club?from=2026-01-01&to=2026-12-31").json()["totals"]["km"]
+    assert sum(x["value"] for x in km["by_member"]) == pytest.approx(km["value"], abs=0.5)
+    assert client.patch(f"/api/community/goals/{km['id']}", json={"metric": "bogus"}).status_code == 422
+    assert client.patch(f"/api/community/goals/{km['id']}", json={"from": "2027-01-01"}).status_code == 422   # from > to
+    assert client.patch(f"/api/community/goals/{km['id']}", json={"nope": 1}).status_code == 422
+    assert client.post("/api/community/goals", json={"metric": "km"}).status_code == 422
+    assert client.patch("/api/community/goals/zzz", json={"target": 3}).status_code == 404
+    assert client.delete(f"/api/community/goals/{km['id']}").status_code == 200
+    assert client.delete(f"/api/community/goals/{km['id']}").status_code == 404
+    # session edits keep the goals
+    gid = client.get("/api/community/sessions").json()["groups"][0]["gid"]
+    client.patch(f"/api/community/sessions/{gid}", json={"note": "x"})
+    assert json.loads(cm.STORE.read_text())["goals"][0]["target"] == 15
+
+
+def test_goal_status(cm):
+    import datetime as dt
+    B = cm.base()
+    store = cm.load_store()
+    import together as tg
+    tdoc = tg.load()
+    g = {"id": "t", "title": "t", "metric": "sessions", "target": 1, "from": "2000-01-01", "to": "2000-12-31"}
+    assert cm.goal_progress(B, store, tdoc, g, dt.date(2026, 1, 1))["status"] == "ended"
+    assert cm.goal_progress(B, store, tdoc, {**g, "from": "2030-01-01", "to": "2030-02-01"}, dt.date(2026, 1, 1))["status"] == "upcoming"
+    full = {**g, "from": "2000-01-01", "to": "2099-12-31", "target": 1}
+    assert cm.goal_progress(B, store, tdoc, full, dt.date(2026, 11, 1))["status"] == "done"
+    assert cm.default_goal(dt.date(2026, 1, 10))["from"] == "2025-12-01"
+
+
+def test_wrapped_latest(client, cm):
+    w = client.get("/api/community/wrapped/latest").json()
+    assert str(w["year"]) == w["years"][0]
+    assert client.get("/api/community/wrapped/abc").status_code == 422
