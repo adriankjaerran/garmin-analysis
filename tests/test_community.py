@@ -42,8 +42,8 @@ def test_list_shape(client, cm):
     r = client.get("/api/community/sessions")
     assert r.status_code == 200, r.text[:300]
     d = r.json()
-    assert {"n", "people", "categories", "groups", "totals"} <= set(d) and "h2h" not in d
-    assert not {"person_hours_together"} & set(d["totals"])
+    assert {"n", "people", "categories", "groups"} <= set(d) and not {"h2h", "totals", "goal"} & set(d)
+    assert all("emoji" not in c for c in d["categories"])
     assert [c["id"] for c in d["categories"]] == cm.CAT_IDS
     assert d["n"] == len(d["groups"]) > 0
     for g in d["groups"]:
@@ -159,14 +159,13 @@ def test_club(client, cm):
     r = client.get("/api/community/club")
     assert r.status_code == 200, r.text[:300]
     c = r.json()
-    assert {"totals", "months", "attendance", "pairs", "pair_matrix", "categories", "highlights",
-            "heatmap", "places", "recent"} <= set(c)
+    assert {"totals", "months", "attendance", "categories", "highlights", "places", "company", "goal"} <= set(c)
+    # removed with the minimal Community pages (2026-11): pairs, heatmap, recent, badges, most loyal
+    assert not {"pairs", "pair_matrix", "heatmap", "recent", "latest_badges", "most_loyal"} & set(c)
+    assert all("badges" not in a for a in c["attendance"])
     assert c["totals"]["sessions"] == sum(m["sessions"] for m in c["months"]) == sum(x["n"] for x in c["categories"])
-    assert sum(map(sum, c["heatmap"]["n"])) == c["totals"]["sessions"]
     assert all(x["streak_weeks"] <= x["best_streak_weeks"] for x in c["attendance"])
     assert "records" not in c and all(h["kind"] != "latest_club_record" for h in c["highlights"])
-    n = c["pair_matrix"]["n"]
-    assert all(n[i][j] == n[j][i] for i in range(len(n)) for j in range(len(n)))
     assert client.get("/api/community/club?from=2026-01-01").json()["totals"]["sessions"] <= c["totals"]["sessions"]
 
 
@@ -176,19 +175,14 @@ def test_members(client, cm):
     r = client.get(f"/api/community/members/{ms[0]['person']}")
     assert r.status_code == 200, r.text[:300]
     m = r.json()
-    assert {"totals", "sessions", "form_series", "partners", "best_sessions", "shape"} <= set(m)
+    assert {"totals", "sessions", "form_series", "partners", "company"} <= set(m)
+    assert not {"best_sessions", "shape", "badges"} & set(m)
     assert "personal_bests" not in m and "records" not in m["totals"] and "club_records_held" not in m["totals"]
     assert m["totals"]["sessions"] == ms[0]["sessions"] == len(m["sessions"])
     assert client.get("/api/community/members/nobody-here").status_code == 404
 
 
-def test_no_record_badges(client):
-    ms = client.get("/api/community/members").json()["members"]
-    ids = {b["id"] for b in client.get(f"/api/community/members/{ms[0]['person']}").json()["badges"]["badges"]}
-    assert not ids & {"record_breaker", "club_record"} and "iron_lungs" in ids
-
-
-# ------------------------------------------------------------------ motivation: company, badges, wrapped, goals
+# ------------------------------------------------------------------ motivation: company, goals
 def test_company_effect(client, cm):
     c = client.get("/api/community/club").json()
     assert set(c["company"]) <= {a["person"] for a in c["attendance"]}
@@ -214,40 +208,13 @@ def test_rep_family(cm):
     assert cm._rep_family([[60, 300, 0, 0]]) is None
 
 
-def test_badges(client, cm):
-    ms = client.get("/api/community/members").json()["members"]
-    for row in ms:
-        m = client.get(f"/api/community/members/{row['person']}").json()
-        b = m["badges"]
-        assert b["total"] == len(cm.BADGES) == len(b["badges"]) and b["earned"] == row["badges"]["earned"]
-        gids = {s["gid"] for s in m["sessions"]}
-        earned = [x for x in b["badges"] if x["earned"]]
-        assert [x["earned"] for x in b["badges"]] == [True] * len(earned) + [False] * (len(b["badges"]) - len(earned))
-        assert [x["date"] for x in earned] == sorted((x["date"] for x in earned), reverse=True)
-        for x in b["badges"]:
-            assert 0 <= x["progress"] <= 1
-            if x["earned"]:
-                assert x["gid"] in gids and x["progress"] == 1
-        first = next(x for x in b["badges"] if x["id"] == "first_session")
-        assert first["earned"] and first["date"] == m["totals"]["first"]
-        n = next(x for x in b["badges"] if x["id"] == "sessions_5")
-        assert n["earned"] == (m["totals"]["sessions"] >= 5)
-    iron = [p for p in ms if next(x for x in client.get(f"/api/community/members/{p['person']}").json()["badges"]["badges"]
-                                  if x["id"] == "iron_lungs")["earned"]]
-    assert len(iron) == 1, "exactly one holder of the longest session"
-    lb = client.get("/api/community/club").json()["latest_badges"]
-    assert lb and [x["date"] for x in lb] == sorted((x["date"] for x in lb), reverse=True)
-    assert client.get("/api/community/badges").json()["latest"]
-
-
 def test_no_rivalry_or_together_time(client, cm):
     """decisions 2026-11-01: no rivalry / head-to-head, no person-hours together, no win-count badges"""
     c = client.get("/api/community/club").json()
-    assert "rivalry" not in c and all("h2h" not in p for p in c["pairs"])
+    assert "rivalry" not in c
     assert not {"person_hours_together", "person_hours_shared"} & set(c["totals"])
     assert all("person_hours_together" not in m for m in c["months"])
     assert client.get("/api/community/rivalry").status_code == 404
-    assert not {"rep_winner", "photo_finish"} & set(cm.BADGE_INFO)
     assert "person_hours" not in cm.GOAL_METRICS
     m = client.get(f"/api/community/members/{c['attendance'][0]['person']}").json()
     assert "rivalry" not in m and "min_together" not in m["totals"]
@@ -257,24 +224,9 @@ def test_no_rivalry_or_together_time(client, cm):
     assert cf is None or "beat" not in cf["text"]
 
 
-def test_wrapped(client, cm):
-    c = client.get("/api/community/club").json()
-    y = c["totals"]["last"][:4]
-    r = client.get(f"/api/community/wrapped/{y}")
-    assert r.status_code == 200, r.text[:300]
-    w = r.json()
-    yc = client.get(f"/api/community/club?from={y}-01-01&to={y}-12-31").json()["totals"]
-    assert w["totals"]["sessions"] == yc["sessions"] == sum(m["sessions"] for m in w["months"])
-    assert w["totals"]["km"] == yc["km"]
-    assert y in w["years"] and w["members"] and w["top_place"]["sessions"] >= 1
-    assert all(b["date"].startswith(y) for b in w["badges"])
-    assert client.get("/api/community/wrapped/1990").status_code == 404
-
-
 def test_goals(client, cm):
     g = client.get("/api/community/goals").json()
     assert g["goal"]["default"] and g["goal"]["metric"] == "sessions" and 0 <= g["goal"]["pct"] <= 1
-    assert client.get("/api/community/sessions").json()["goal"]["id"] == "default"
     assert client.get("/api/community/club").json()["goal"]["title"] == g["goal"]["title"]
     r = client.patch("/api/community/goals/default", json={"target": 15, "title": "15 this autumn"}).json()
     assert r["goal"]["target"] == 15 and not r["goal"]["default"] and r["goal"]["id"] != "default"
@@ -313,7 +265,7 @@ def test_goal_status(cm):
     assert cm.default_goal(dt.date(2026, 1, 10))["from"] == "2025-12-01"
 
 
-def test_wrapped_latest(client, cm):
-    w = client.get("/api/community/wrapped/latest").json()
-    assert str(w["year"]) == w["years"][0]
-    assert client.get("/api/community/wrapped/abc").status_code == 422
+def test_removed_endpoints(client):
+    """Wrapped and the badges were removed with the minimal Community pages (2026-11)"""
+    for u in ("/api/community/wrapped/latest", "/api/community/wrapped/2026", "/api/community/badges"):
+        assert client.get(u).status_code == 404, u

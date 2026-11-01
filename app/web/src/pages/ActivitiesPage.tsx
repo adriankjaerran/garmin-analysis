@@ -1,18 +1,19 @@
 // Activities: every activity, filtered. Simple filters up front (words, sport, period / dates), an Advanced panel
 // (place / region, route, workout family / signature / same workout, reps, rep length, rest, part, km). Results =
-// sortable table + map of all result tracks; selecting a row zooms the map to it and shows a summary (Open, Day,
-// Compare, Closest), clicking it again opens the activity. Groups tab: the places, regions, routes and workout tree
+// sortable table (full width) and, behind the "Map" toggle (remembered in localStorage), a map of all result tracks;
+// with the map open, selecting a row zooms the map to it and shows a summary (Open, Day, Compare, Closest) and clicking
+// it again opens the activity; without the map a click opens the activity. Groups tab: the places, regions, routes and workout tree
 // that the current filters leave. Tick rows to compare them. Every control lives in the URL; the old /search
 // (Find & group) URLs redirect here with the same filters.
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi, type Activity, type Meta } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
-import { SPORTS, SPORT_LABEL, addDays, dur, isoLocal, km, num, secs, shortDate, sportColor, speedUnit, speedVal } from "../lib/format";
+import { SPORTS, SPORT_LABEL, addDays, dur, isoLocal, km, num, secs, shortDate, speedUnit, speedVal } from "../lib/format";
 import { FILTER_KEYS, compareUrl, coreBBox, filterQuery, placeCount, repLen, type Group, type SearchOptions, type SearchResult, type SearchRow, type TreeNode } from "../lib/search";
 import { Table, type Col } from "../components/Table";
 import { TracksMap } from "../components/TracksMap";
 import { GroupsMap, type GLine } from "../components/GroupsMap";
-import { ActivityKV, DistCell, SportDot, TogetherMark, distSort, distStr, workoutTip as appWorkoutTip } from "../components/ActivityBits";
+import { ActivityKV, DistCell, SportDot, distSort, distStr, workoutTip as appWorkoutTip } from "../components/ActivityBits";
 import { PageHeader } from "../components/PageHeader";
 
 // ------------------------------------------------------------------ small controls
@@ -121,7 +122,7 @@ function SimpleBar({ query, opts, meta, advOpen }: { query: URLSearchParams; opt
         <button class={"chip" + (!sport ? " on" : "")} onClick={() => setQuery({ sport: null })}>All</button>
         {sports.map((s) => (
           <button key={s.id} class={"chip" + (sport === s.id ? " on" : "")} onClick={() => setQuery({ sport: sport === s.id ? null : s.id })} title={`${s.n} activities`}>
-            <span class="dot" style={{ background: sportColor(s.id) }} />{s.label ?? SPORT_LABEL[s.id] ?? s.id}
+            {s.label ?? SPORT_LABEL[s.id] ?? s.id}
           </button>
         ))}
       </div>
@@ -220,17 +221,20 @@ const workoutText = (r: SearchRow) => r.workout_label ?? r.signature ?? r.family
 const workoutTip = (r: SearchRow) => [appWorkoutTip(r), r.rep_count ? `main reps ${r.rep_count} × ${repLen(r)} (measured median)` : "",
   r.sport_label].filter(Boolean).join(" · ");
 const placeText = (r: SearchRow) => r.place_name ?? r.place;
+const sportText = (r: SearchRow) => r.sport_label ?? SPORT_LABEL[r.sport] ?? r.sport;
 /** sort key: faster first for pace and speed alike */
 const fastKey = (ms: number | null | undefined) => (ms ? -ms : null);
 
-function resultCols(picked: Set<string>, togglePick: (id: string) => void): Col<SearchRow>[] {
+/** `dots`: a sport-coloured dot in front of the sport (only with the map open: it is the map's legend) */
+function resultCols(picked: Set<string>, togglePick: (id: string) => void, dots: boolean): Col<SearchRow>[] {
   return [
     { key: "pick", label: "", width: 28, sort: (r) => (picked.has(r.id) ? 0 : 1),
       render: (r) => <input type="checkbox" checked={picked.has(r.id)} style={{ height: "auto" }} title="Select for Compare"
         onClick={(e) => { e.stopPropagation(); togglePick(r.id); }} /> },
     { key: "date", label: "Date", render: (r) => <span>{r.date} <span class="muted">{r.start?.slice(11, 16)}</span></span> },
+    { key: "sport", label: "Sport", sort: sportText, render: (r) => <span>{dots && <SportDot sport={r.sport} />}{sportText(r)}</span> },
     { key: "workout", label: "Workout", sort: (r) => workoutText(r) ?? "",
-      render: (r) => <span class="clip" style={{ maxWidth: "200px" }} title={workoutTip(r)}><SportDot sport={r.sport} /><TogetherMark a={r} />{workoutText(r)}</span> },
+      render: (r) => <span class="clip" style={{ maxWidth: "200px" }} title={workoutTip(r)}>{workoutText(r)}</span> },
     { key: "rep_pace_ms", label: "Avg rep pace", num: true, title: "Average pace (on foot) / speed of the main reps = total rep distance / total rep time; hover for the median rep time",
       sort: (r) => fastKey(r.rep_pace_ms),
       render: (r) => (r.rep_count ? <span title={r.rep_time_s ? `median rep time ${secs(r.rep_time_s)}` : ""}>{speedCell(r.sport, r.rep_pace_ms ?? r.rep_speed_ms)}</span> : "") },
@@ -270,11 +274,11 @@ function MobileList({ rows }: { rows: SearchRow[] }) {
     <div class="m-list">
       {sorted.slice(0, n).map((r) => {
         const w = workoutText(r), rp = r.rep_count && (r.rep_pace_ms ?? r.rep_speed_ms);
-        const second = [distStr(r, " km"), r.moving_s ? dur(r.moving_s) : null, r.speed_ms ? `${speedVal(r.sport, r.speed_ms)} ${speedUnit(r.sport)}` : null,
+        const second = [sportText(r), distStr(r, " km"), r.moving_s ? dur(r.moving_s) : null, r.speed_ms ? `${speedVal(r.sport, r.speed_ms)} ${speedUnit(r.sport)}` : null,
           r.avg_hr ? `HR ${r.avg_hr}` : null, placeText(r)].filter((x) => x && x !== "—");
         return (
           <a key={r.id} class="m-row" href={`/activities/${r.id}`} title={workoutTip(r)}>
-            <span class="l1"><SportDot sport={r.sport} /><span class="d">{shortDate(r.date, year + "-01-01")}</span> · <TogetherMark a={r} /><b>{w}</b>
+            <span class="l1"><span class="d">{shortDate(r.date, year + "-01-01")}</span> · <b>{w}</b>
               {rp ? <span class="muted"> @ {speedVal(r.sport, rp)}{speedUnit(r.sport) === "/km" ? " /km" : ` ${speedUnit(r.sport)}`}</span> : null}</span>
             <span class="l2 muted">{second.join(" · ")}</span>
           </a>
@@ -318,11 +322,12 @@ function Preview({ id, row }: { id: string; row: SearchRow | undefined }) {
   );
 }
 
-function Results({ data, error, picked, togglePick, sel }: { data: SearchResult | null; error: string | null; picked: Set<string>; togglePick: (id: string) => void; sel: string | null }) {
+function Results({ data, error, picked, togglePick, sel, showMap }: { data: SearchResult | null; error: string | null; picked: Set<string>;
+  togglePick: (id: string) => void; sel: string | null; showMap: boolean }) {
   const [hover, setHover] = useState<string | null>(null);
   const rows = data?.rows ?? [];
   const anyReps = rows.some((r) => r.rep_count);
-  const cols = useMemo(() => resultCols(picked, togglePick).filter((c) => anyReps || !["rep_pace_ms", "rest_s"].includes(c.key)), [picked, anyReps]);
+  const cols = useMemo(() => resultCols(picked, togglePick, showMap).filter((c) => anyReps || !["rep_pace_ms", "rest_s"].includes(c.key)), [picked, anyReps, showMap]);
   const selRow = sel ? rows.find((r) => r.id === sel) : undefined;
   const tracks = useMemo(() => rows.filter((r) => r.poly).map((r) => ({ id: r.id, sport: r.sport, poly: r.poly,
     width: r.id === sel ? 4.5 : picked.has(r.id) ? 4 : 2.5,
@@ -343,10 +348,10 @@ function Results({ data, error, picked, togglePick, sel }: { data: SearchResult 
         {error ? <div class="err pane">Could not search the activities: {error}</div> : data && !rows.length ? <NoResults /> :
           narrow && data ? <MobileList rows={rows} /> :
           <Table cols={cols} rows={rows} rowKey={(r) => r.id} highlight={hover} selected={sel} follow maxHeight="100%" defaultSort={["date", -1]} stickyCols={2}
-            onRow={(r) => (r.id === sel ? navigate(`/activities/${r.id}`) : setQuery({ sel: r.id }))} onHover={(r) => setHover(r?.id ?? null)}
+            onRow={(r) => (!showMap || r.id === sel ? navigate(`/activities/${r.id}`) : setQuery({ sel: r.id }))} onHover={(r) => setHover(r?.id ?? null)}
             empty={data ? "No activities match these filters." : "Loading…"} />}
       </div>
-      <div class="right" style={{ width: "30%", minWidth: "400px" }}>
+      {showMap && <div class="right" style={{ width: "30%", minWidth: "400px" }}>
         <TracksMap tracks={tracks} highlight={hover ?? sel} onHover={setHover}
           onClick={(id) => (id === sel ? navigate(`/activities/${id}`) : setQuery({ sel: id }))}
           style={{ flex: 1, minHeight: "300px" }} markers={!!sel} empty={data ? "No GPS tracks in the result" : "Loading…"}
@@ -359,9 +364,8 @@ function Results({ data, error, picked, togglePick, sel }: { data: SearchResult 
           </div>}
           {sel && selRow && !selRow.poly && <div class="msg">No GPS for the selected activity</div>}
         </TracksMap>
-        {sel ? <Preview key={sel} id={sel} row={selRow} /> :
-          <div class="pane hint">Click a row to preview it here (the map zooms to it); click it again to open the activity. Tick rows to compare them.</div>}
-      </div>
+        {sel && <Preview key={sel} id={sel} row={selRow} />}
+      </div>}
     </div>
   );
 }
@@ -370,9 +374,7 @@ function Results({ data, error, picked, togglePick, sel }: { data: SearchResult 
 type GK = "places" | "regions" | "routes" | "workouts";
 const GK_KIND: Record<GK, string> = { places: "place", regions: "region", routes: "route", workouts: "workout" };
 
-const sportsCell = (s: Record<string, number>) => (
-  <span>{Object.entries(s).map(([k, n]) => <span key={k} style={{ marginRight: "8px" }}><SportDot sport={k} />{n}</span>)}</span>
-);
+const sportsCell = (s: Record<string, number>) => Object.entries(s).map(([k, n]) => `${SPORT_LABEL[k] ?? k} ${n}`).join(", ");
 
 interface FlatNode { path: string; depth: number; node: TreeNode; patch: Record<string, string | null>; label: string; open: boolean; leaf: boolean }
 
@@ -513,8 +515,7 @@ function Groups({ query, fq, rowsById }: { query: URLSearchParams; fq: string; r
         </div>
         {(gk === "places" || gk === "regions") && <Seg2 k="touched" value={touched ? "1" : ""} a={["", "Main " + (gk === "places" ? "place" : "region")]} b={["1", "Every touched"]}
           title="Main = ≥ 40 % of the time inside (one per activity); touched = ≥ 5 % or 3 min (an activity can count in several)" />}
-        <span class="count">{error ?? (data ? `${n} ${gk === "workouts" ? "families" : gk}` : "Loading…")}</span>
-        <span class="muted">Click a row to show it on the map, click again (or “list →”) to list its activities{gk === "places" ? "; grey = start clusters, blue = named places" : ""}</span>
+        <span class="count" title={gk === "places" ? "Map: grey = start clusters, blue = named places" : undefined}>{error ?? (data ? `${n} ${gk === "workouts" ? "families" : gk}` : "Loading…")}</span>
       </div>
       <div class="split">
         <div class="left">{table}</div>
@@ -534,7 +535,16 @@ function activeIdsOf(f: FlatNode | undefined): string[] {
 }
 
 // ------------------------------------------------------------------ page
+const MAP_KEY = "activities.map";
+
 export function ActivitiesPage() {
+  const [showMap, setShowMap] = useState(() => localStorage.getItem(MAP_KEY) === "1");
+  const toggleMap = () => {
+    const on = !showMap;
+    if (on) localStorage.setItem(MAP_KEY, "1"); else localStorage.removeItem(MAP_KEY);
+    setShowMap(on);
+    if (!on) setQuery({ sel: null });
+  };
   const { query } = useLocation();
   const view = query.get("view") === "groups" ? "groups" : "results";
   const fq = filterQuery(query);
@@ -560,13 +570,15 @@ export function ActivitiesPage() {
     <main class="full">
       <PageHeader class="toolbar" title="Activities" sub={res.error ? "" : d ? `${d.n} activities, ${Math.round(d.km).toLocaleString("en-GB")} km` : "…"}
         about="Every workout you recorded: filter by words, sport, period, place or workout, then preview, open or compare."
-        tips={["Click a row to preview it on the map; click it again to open the activity", "Tick rows, then “Compare ticked”",
-          "Search words match name, date, place, route and workout (e.g. 6×1000)", "Groups: the places, routes and workouts left by the filters", "👥 = done with others"]}>
+        tips={["Click a row to open the activity; with the map open, the first click previews it on the map", "Tick rows, then “Compare ticked”",
+          "Search words match name, date, place, route and workout (e.g. 6×1000)",
+          "Groups: the places, routes and workouts left by the filters; click a row to show it on the map, click again (or “list →”) to list its activities"]}>
         <div class="seg">
           <button class={view === "results" ? "on" : ""} onClick={() => setQuery({ view: null })}>List</button>
           <button class={view === "groups" ? "on" : ""} onClick={() => setQuery({ view: "groups", sel: null })}
             title="Places, regions, routes and the workout tree left by the current filters">Groups</button>
         </div>
+          {view === "results" && <button class={"toggle" + (showMap ? " on" : "")} aria-pressed={showMap} onClick={toggleMap} title="Show the result tracks on a map">Map</button>}
           {picked.size > 0 && <button onClick={() => setQuery({ pick: null })} title="Clear the ticked rows">Clear {picked.size} ticked</button>}
           {d && picked.size === 0 && d.n >= 2 && d.n <= 12 && view === "results" &&
             <a class="btn" href={compareUrl(d.rows.map((r) => r.id))} title="Compare every activity in the result">Compare all {d.n}</a>}
@@ -575,7 +587,7 @@ export function ActivitiesPage() {
       </PageHeader>
       <SimpleBar query={query} opts={opts} meta={meta} advOpen={advOpen} />
       {advOpen && <AdvancedPanel query={query} opts={opts} />}
-      {view === "results" ? <Results data={d} error={res.error} picked={picked} togglePick={togglePick} sel={sel} />
+      {view === "results" ? <Results data={d} error={res.error} picked={picked} togglePick={togglePick} sel={showMap ? sel : null} showMap={showMap} />
         : <Groups query={query} fq={fq} rowsById={rowsById} />}
     </main>
   );

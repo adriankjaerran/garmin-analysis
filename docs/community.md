@@ -1,8 +1,9 @@
 # Community: the running club (`scripts/community.py`, `/api/community…`)
 
 The club layer on top of [Together](together.md): every joint workout Together detects becomes a club **session** with
-a category, an optional title / note / guests / photos / kudos, collective numbers, each member's result against their
-current form. Plus a club dashboard and member profiles. Spec and decisions:
+a category (shown as "type" in the app), an optional title / note / guests / photos / kudos, collective numbers, each
+member's result against their current form. Plus a club dashboard and member profiles. The pages are deliberately plain
+(2026-11): dense tables and text, no emoji, badges, avatars, medals or animations (docs/app.md). Spec and decisions:
 [plans/community-plan.md](plans/community-plan.md). Standings, splits and the replay of a session stay on
 `/api/together/{gid}` (+ `/replay`).
 
@@ -19,8 +20,8 @@ cm.list_sessions(category=, person=, date_from=, date_to=, q=, near=, hidden=, v
 cm.get_session(gid); cm.club(date_from=, date_to=); cm.members(); cm.member(person)
 cm.patch(gid, {...}); cm.kudos(gid, person, on=True); cm.add_photo(gid, bytes, filename, by); cm.delete_photo(gid, id)
 cm.auto_category(group) -> (category, reason)
-cm.company_effect(B, store, tdoc, person); cm.badges_for(B, store, tdoc, person)
-cm.wrapped(year | "latest"); cm.goals(); cm.patch_goal(id, {...}); cm.add_goal({...}); cm.delete_goal(id)
+cm.company_effect(B, store, tdoc, person)
+cm.goals(); cm.patch_goal(id, {...}); cm.add_goal({...}); cm.delete_goal(id)
 ```
 
 ## Files
@@ -47,7 +48,7 @@ moved to `data/community.bad-<unix time>.json` before the next write (never sile
 old gid (together's `aliases`) are merged into the current gid and rewritten under it on the next edit.
 
 ## Categories
-Six: `intervals` ⚡, `tempo` 🔥, `long` 🛣️, `easy` 🌿, `race` 🏁, `other` 🥾. Automatic (`category_auto`, with
+Six: `intervals`, `tempo`, `long` (Long run), `easy`, `race`, `other` (the API sends `{id, label, description}`). Automatic (`category_auto`, with
 `category_reason`); a manual `category` in community.json wins (`category_manual: true`). Rules, first match:
 
 1. **race**: group kind `race` / label `same_race`.
@@ -76,7 +77,7 @@ On today's data: 6 intervals (incl. the hidden 2026-10-27 near-miss), 3 easy, 1 
   and `form_info: {key: {delta, text, confidence, discipline, score, shape}}`; sessions / members the full dict.
 
 ## Motivation
-Computed per request from the base (cheap: ~3 ms warm for club / member / wrapped). Member sessions = visible
+Computed per request from the base (cheap: ~3 ms warm for club / member). Member sessions = visible
 community sessions (not near-misses, not user-hidden), oldest first.
 
 ### Faster together than alone? (`company_effect`)
@@ -95,22 +96,16 @@ community sessions (not near-misses, not user-hidden), oldest first.
 - On today's data: Patrik −1.3 (1 solo session to compare: thin), Adrian −2.0 (5 vs 27); Adrian's medium reps
   3:19 /km together vs 3:22 alone.
 
-### Badges (`BADGES`, `badges_for`)
-26 badges in groups attendance / places / time / effort / form / social: first session, 5 / 10 /
-25 sessions, 3- and 8-week streak, comeback (90+ days away), loyal partner (10 with one person), track rat (5 on a
-track: own type `intervals_track` or a place named Bislett / stadion / track), explorer (5 places), globetrotter
-(3 regions ≥ 300 km apart), early bird (start < 08:00), night owl (≥ 20:00), winter warrior (Dec–Feb), hill goat
-(500 m climb in one session), rep machine (20 reps), century (100 km), long haul (500 km), a day out there (24 h
-moving), all-rounder (4 categories), race day, beat your form (+2), day of days (+4), iron lungs (the club's longest
-single session by moving time — exactly one holder), kudos magnet (5 kudos from others), shutterbug (a session with photos). Earned = the first session where the running value reached the
-target (date + gid + detail, e.g. "+2.9 vs form"); iron lungs while held (else "held by Adrian: 4:03 h").
-Locked ones carry `value` / `target` / `progress` (0..1).
-
 ### No rivalry (2026-11-01)
 The club decided against rivalry: no head-to-head scores, rivalry timelines, win counts, "rep winner" / "photo finish"
 badges or win-count headlines (`duels`, `rivalries`, `/api/community/rivalry` and together's `head_to_head` are gone).
 Results stay: each rep is ranked among whoever ran it (medals per rep), the session leaderboard orders by average rep
-pace, races by finish time.
+pace, races by finish time (shown as plain numbers, no medals).
+
+### Removed 2026-11 (minimal Community pages)
+Badges (`BADGES`, `badges_for`, `/api/community/badges`), Wrapped (`wrapped`, `/api/community/wrapped/{year}`; the page
+redirects to the Club page), the club's pairs / pair matrix / weekday × hour heatmap / recent sessions / most loyal, the
+member's best sessions and shape trend, the list's `totals` and `goal`, and the category emoji.
 
 ### No records (2026-11-01)
 The club decided against records: no club records (`club_best`), club PBs (`pb`), "Record breaker" / "Club record
@@ -142,8 +137,7 @@ words in gid, date, place, workout, people, title, note, guests, category; `near
 `hidden=1` also the sessions the user hid. `categories[].n` counts the rows after all filters but `category`.
 ```
 {n, viewer, built, people: {id: {name, initials, colour, colour_dark, auto}},
- categories: [{id: "intervals", label: "Intervals", emoji: "⚡", description, n: 5}, ...],
- totals: {sessions: 17, km: 357.3, hours: 45.7, reps: 68, photos: 0, guests: 0},
+ categories: [{id: "intervals", label: "Intervals", description, n: 5}, ...],
  form_available: true, store_error: null, compute_ms,
  groups: [{gid, date, start_local, start_utc, sport, sports, kind, label, label_text, score, hidden, place, workout,
            people, n_people, no_track, participants: [...], headline: {...},          # together's row
@@ -161,7 +155,7 @@ words in gid, date, place, workout, people, title, note, guests, category; `near
 ### `GET /api/community/sessions/{gid}`
 ```
 {gid, requested_gid, viewer, date, start_local, place, workout, kind, label, label_text, people: {id: display},
- display_title, category_info: {id, label, emoji, description}, categories: [{id, label, emoji, description, n: 0}],
+ display_title, category_info: {id, label, description}, categories: [{id, label, description, n: 0}],
  meta: {title, category, category_auto, category_reason: "same reps (15×400)", category_manual, note, guests: ["Kari"],
         photos: [{id, url: "/api/community/photos/<gid>/<id>.jpg", thumb: ".../<id>_t.jpg", by, at, taken, name, w, h}],
         cover, kudos: ["patrik"], hidden},
@@ -197,23 +191,18 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
 ```
 {from, to, today, viewer, people, form_available, store_error, compute_ms,
  totals: {sessions, km, hours, reps, climb_m, kcal, members, guests,
-          guest_visits, photos, kudos, places, first, last, this_year: {year, sessions, km, hours, most_loyal: {person, sessions} | null}},
+          guest_visits, photos, kudos, places, first, last, this_year: {year, sessions, km, hours}},
  months: [{month: "2026-10", sessions, km, hours, reps, climb_m, members: [..], n_members,
            by_category: {intervals: 3}, gids: [..]}]          /* every month first..last, zeros included */,
  attendance: [{person, display, sessions, share /* of all sessions */, first_seen, last_seen, last_gid, days_since,
                streak_weeks /* consecutive weeks with a session, alive if the last is this or last week */,
                best_streak_weeks, weeks_active, km, hours, reps, by_category, favourite_place, avg_form_delta, n_form}],
- most_loyal: {person, sessions} | null (the period's single top attender; null on a tie),
- pairs: [{a, b, sessions, last}]   /* sessions together, no score */,
- pair_matrix: {people: [ids], n: [[sessions together; diagonal = own sessions]]},
- categories: [{id, label, emoji, description, n, km, hours}],
+ categories: [{id, label, description, n, km, hours}],
  highlights: [{kind: closest_finish | form_jump | longest_session | most_km | most_reps | most_climb |
                biggest_turnout (≥ 3), gid, date, person, other?, value, unit, text}]
              /* closest_finish = the rep (any rep ≥ 2 ran) / race with the smallest gap between the first two, worded
                 neutrally: "Rep 4: Adrian and Patrik 1.4 s apart" */,
- heatmap: {weekdays: ["Mon", …], hours: [0..23], n: [7 × 24 counts by local start]},
- places: [{id, name, sessions, last}], guests: [{name, visits}],
- recent: [{gid, date, title, category, people, km}]   /* 8 newest */}
+ places: [{id, name, sessions, last}], guests: [{name, visits}]}
 ```
 
 ### `GET /api/community/members` → `{people, members: [attendance rows as in club]}`
@@ -227,46 +216,27 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
  sessions: [{gid, date, start_local, place, workout /* own */, group_workout, title, category, with: [people], role,
              form, numbers, rank, of_people, reps_done, avg_s, pace_s_km, n_photos, kudos}]   /* newest first */,
  form_series: [{date, gid, score, shape, delta, discipline, …}]     /* oldest first, sessions with a delta */,
- partners: [{person, display, sessions, last, gids}],
- best_sessions: [≤ 5 sessions by form delta, confidence ≠ none],
- shape: {built, disciplines: {interval | long | ski: {label, unit, personal_best, current: {...fitness.json},
-         weekly: [{date, mean, sd}] /* from 120 days before the first session */}}} | null}
+ partners: [{person, display, sessions, last, gids}]}
 ```
 
 ### Motivation endpoints
 - `/api/community/club` adds `company: {person: {diff, verdict, text, n_joint, n_solo, n_compared, n_joint_cmp, n_solo_cmp, joint_avg, solo_avg,
   thin, pace: [{family, label, diff_s_km, text, n_joint, n_solo, joint_s_km, solo_s_km}]}}` (over the period when
-  `from` / `to` are given), `latest_badges` (10 newest, all members, `person` +
-  badge), `goal`, `goals`, `goal_metrics`; each `attendance` row (and `/members` rows) gets `company` and
-  `badges: {earned, total, latest: [4 × {id, emoji, name, date, gid}], next: {id, emoji, name, progress, value, target, unit}}`.
-- `/api/community/sessions` adds `goal` (the primary goal with progress, for the Sessions header).
-- `/api/community/members/{person}` adds `badges: {person, earned, total, badges: [{id, emoji, name, description,
-  group, earned, date, gid, value, target, progress, unit, detail}]}` (earned newest first, then locked by progress),
-  `company` (as above + `window_days`, `by_discipline`, `joint: [{gid, date, delta, discipline}]`,
+  `from` / `to` are given), `goal`, `goals`, `goal_metrics`; each `attendance` row (and `/members` rows) gets `company`.
+- `/api/community/members/{person}` adds `company` (as above + `window_days`, `by_discipline`, `joint: [{gid, date, delta, discipline}]`,
   `solo: [{activity_id, date, delta, discipline, type, name}]`, pace `joint` / `solo` lists).
-- `GET /api/community/badges` → `{people, badges: {person: badges}, latest (20), definitions}`.
 - `GET /api/community/goals` → `{goal, goals: [{id, title, metric, target, from, to, default?, unit, metric_label,
   value, pct, expected, expected_pct, remaining, days, days_left, status, text, n_sessions, last_gid,
   by_member: [{person, value}]}], metrics: [{id, unit, label}]}`; `POST /api/community/goals` `{title?, metric,
   target, from, to}`; `PATCH /api/community/goals/{id}` (any of those; `default` materialises the suggestion);
   `DELETE /api/community/goals/{id}` — all return the goals payload; bad values / unknown fields → 422, unknown id → 404.
-- `GET /api/community/wrapped/{year | latest}` (404 for a year without sessions, 422 for a bad year) →
-  `{year, years, people, totals: {sessions, km, hours, reps, climb_m, kcal, members, places},
-  previous (the year before | null), first, last, top_place: {name, sessions, others}, favourite_category: {…, n, mix},
-  months: [12 × {month, sessions, km}], busiest_month, biggest_day (most km), longest (+ minutes: the session's length),
-  form_jump (+ person, delta, text), closest_finish, most_loyal: {person, sessions, of, tied_with: [person]}, top_pair: {a, b, sessions},
-  badges (earned this year),
-  members: [{person, sessions, share, km, hours, reps, climb_m, top_place, favourite_category, partner,
-  best_session, avg_form_delta, badges, streak_weeks, company (this year)}]}`.
-
 ## Tests
 `tests/test_community.py` (skips without data): list / filters / categories, PATCH + kudos + guests + hidden, photo
 upload (resize, thumbnail, dedupe, PNG with alpha, cover, delete, path traversal), a broken / hand-edited
-community.json, club invariants (totals = months = categories = heatmap, symmetric pair matrix), members.
+community.json, club invariants (totals = months = categories), members, the removed endpoints / fields.
 community.json and the photo folder are monkeypatched to a temp dir; the test fails if the real file's mtime changes.
-Motivation: company effect (no joint activity counted as solo), rep families, badges (order, progress, earned →
-own session, one iron-lungs holder), no rivalry / together time / win badges (`test_no_rivalry_or_together_time`), Wrapped totals = the club for that year,
-goals (default, PATCH default, POST / DELETE, 422 / 404, km goal = club km, goals survive session edits, statuses).
+Motivation: company effect (no joint activity counted as solo), rep families, no rivalry / together time
+(`test_no_rivalry_or_together_time`), goals (default, PATCH default, POST / DELETE, 422 / 404, km goal = club km, goals survive session edits, statuses).
 
 ## Limits / next
 - Form deltas come from `scripts/form_delta.py`; an implausible delta there (e.g. a session where one member ran reps

@@ -12,8 +12,6 @@
   --disc-ski: #f06ba0;
   --disc-overall: #b4bcc6;
 }
-.shape-chart .readout { display: flex; gap: var(--space-4); flex-wrap: wrap; font-variant-numeric: tabular-nums; min-height: 20px; margin-bottom: var(--space-1); }
-.shape-chart .readout .dot { margin-right: 4px; }
 .shape-chart .plotwrap { position: relative; }
 .shape-chart .u-over { cursor: crosshair; }
 .chart-tip { display: none; position: absolute; z-index: 5; pointer-events: none; background: var(--surface); border: 1px solid var(--hairline);
@@ -29,22 +27,20 @@ details.howto[open] summary::before { content: "▾"; }
 .prose { max-width: 900px; line-height: 1.55; }
 .prose ul { padding-left: var(--space-5); margin: var(--space-2) 0; }
 .prose li { margin-bottom: var(--space-1); }
-.shape-line { font-size: var(--fs-15); margin: 0 0 var(--space-3); }
+.shape-line { font-size: var(--fs-15); margin: 0 0 var(--space-1); }
+.shape-verdict { margin: 0; }
 .shape-line .muted { font-size: var(--fs-13); }
 .shape-block + .shape-block { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px dashed var(--hairline); }
 .shape-block h3 { font-size: var(--fs-13); font-weight: var(--fw-semibold); color: var(--text-muted); margin: var(--space-3) 0 var(--space-1); }
 .shape-block td.wrap { white-space: normal; max-width: 420px; }
-.shape-chart .subtitle { color: var(--text-muted); margin: var(--space-2) 0 0; font-size: var(--fs-12); }
-.fit-sessions td:nth-child(5) { max-width: 500px; }   /* 560 overflowed the table by ~50 px at 1600 px (σ column clipped) */
 .fit-sessions td:nth-child(4) { max-width: 200px; }
 /* model variants: solid = performance only, dashed = with HR (ShapeChart withHr) */
 .line-sw { display: inline-block; width: 20px; border-top: 2px solid var(--text-muted); vertical-align: middle; margin-right: 6px; }
 .line-sw.dash { border-top-style: dashed; }
-.hr-val { color: var(--text-muted); }
 .variant-eval th.grp { text-align: center; }
-.variant-eval td.better { color: var(--state-good); font-weight: var(--fw-semibold); }
+.variant-eval td.better { font-weight: var(--fw-semibold); }
 /* activity Shape section: model internals behind "Details" */
-details.shape-details { margin-top: var(--space-3); }
+details.shape-details { margin-top: var(--space-2); }
 details.shape-details summary { color: var(--accent); font-size: var(--fs-13); }
 details.shape-details[open] summary { margin-bottom: var(--space-2); }
 details.shape-details .kv { margin-bottom: var(--space-2); }

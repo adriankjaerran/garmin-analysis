@@ -14,7 +14,6 @@ import { TogetherSession } from "./pages/TogetherSession";
 import { CommunityPage } from "./pages/CommunityPage";
 import { ClubPage } from "./pages/ClubPage";
 import { MemberPage, MembersPage } from "./pages/MemberPage";
-import { WrappedPage } from "./pages/WrappedPage";
 import { personColour, personName, setPeopleInfo, type PersonInfo } from "./lib/people";
 import { addDays, isoLocal } from "./lib/format";
 import { setPref, useTheme, useThemePref, type ThemePref } from "./lib/theme";
@@ -38,8 +37,9 @@ const ROUTES: { path: string; nav?: string; render: (p: Record<string, string>) 
   { path: "/community/club", nav: "club", render: () => <ClubPage /> },
   { path: "/community/members", nav: "members", render: () => <MembersPage /> },
   { path: "/community/members/:person", nav: "member", render: (p) => <MemberPage person={p.person} /> },
-  { path: "/community/wrapped", nav: "wrapped", render: () => <WrappedPage year={null} /> },
-  { path: "/community/wrapped/:year", nav: "wrapped", render: (p) => <WrappedPage year={p.year} /> },
+  // Wrapped was removed: its URLs go to the Club page
+  { path: "/community/wrapped", nav: "club", render: () => redirect("/community/club") },
+  { path: "/community/wrapped/:year", nav: "club", render: () => redirect("/community/club") },
   { path: "/community/:gid", nav: "community", render: (p) => <TogetherSession gid={p.gid} /> },
   // Together became Community · Sessions
   { path: "/together", nav: "community", render: () => redirect("/community") },
@@ -146,9 +146,6 @@ function Nav({ current, meta, activityId, person, path }:
     </a>
   );
   const nTogether = useTogetherCount(person);
-  // Wrapped: the year in the URL, else this year (in January still last year's)
-  const now = new Date();
-  const wrappedYear = /^\/community\/wrapped\/(\d{4})/.exec(path)?.[1] ?? String(now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear());
   const club = people().length > 1;
   const mm = /^\/community\/members\/([^/]+)$/.exec(path);
   const memberName = mm ? personName(decodeURIComponent(mm[1])) : null;
@@ -172,7 +169,6 @@ function Nav({ current, meta, activityId, person, path }:
         {tab("club", "/community/club", "Club")}
         {tab("members", "/community/members", "Members")}
         {current === "member" && memberName && <a class="tab sub current" href={path}>{memberName}</a>}
-        {tab("wrapped", `/community/wrapped/${wrappedYear}`, `Wrapped ${wrappedYear}`)}
       </>}
       <div class="foot">
         {meta && (

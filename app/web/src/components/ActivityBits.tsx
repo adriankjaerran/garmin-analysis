@@ -1,4 +1,4 @@
-// Small shared pieces for activities: sport dot, 👥 marker, workout name, speed/pace cell, table column set, summary kv.
+// Small shared pieces for activities: sport dot, together marker, workout name, speed/pace cell, Day-page table columns, summary kv.
 import type { Activity, TogetherLink } from "../lib/api";
 import { SPORT_LABEL, dur, km, num, sportColor, stypeLabel, typeLabel, time, speedText as speedOf, speedLabel } from "../lib/format";
 import type { Col } from "./Table";
@@ -6,13 +6,13 @@ import { personName } from "../lib/people";
 
 /** "Together with Patrik" */
 export const togetherWith = (t: TogetherLink) => `Together with ${t.with.map(personName).join(", ")}`;
-/** 👥 marker for an activity done with others: a link to the Together session (title = who + the shared workout) */
+/** "together" marker for an activity done with others: a link to the Together session (title = who + the shared workout) */
 export function TogetherMark({ a }: { a: { together?: TogetherLink | null } }) {
   const t = a.together;
   if (!t) return null;
   return (
     <a class="tg-mark" href={`/community/${t.gid}`} onClick={(e) => e.stopPropagation()} aria-label={togetherWith(t)}
-       title={`${togetherWith(t)}${t.workout ? ` · ${t.workout}` : ""} — open the session`}>👥</a>
+       title={`${togetherWith(t)}${t.workout ? ` · ${t.workout}` : ""} — open the session`}>together</a>
   );
 }
 export const SportDot = ({ sport }: { sport: string }) => <span class="dot" style={{ background: sportColor(sport) }} title={SPORT_LABEL[sport]} />;
@@ -71,32 +71,27 @@ export const workoutTip = (r: { workout_detail?: string | null; name?: string | 
 export const placeText = (a: Activity) => a.place_name ?? a.place ?? a.location ?? "—";
 export const placeHref = (id: string) => `/places?place=${encodeURIComponent(id)}`;
 
-export function activityCols(opts: { date?: boolean } = {}): Col<Activity>[] {
-  const cols: Col<Activity>[] = [];
-  if (opts.date !== false) cols.push({ key: "start", label: "Date", render: (a) => <span>{a.date} <span class="muted">{time(a.start)}</span></span> });
-  else cols.push({ key: "start", label: "Start", render: (a) => time(a.start) });
-  cols.push(
-    { key: "type", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "210px" }} title={[workoutTip(a), typeText(a)].filter(Boolean).join(" · ")}><SportDot sport={a.sport} /><TogetherMark a={a} />{workoutText(a)}</span>, sort: (a) => a.sport + what(a) },
+/** one day's activities (Day page): start time, sport (its dot is the day map's legend), workout and the numbers */
+export function activityCols(): Col<Activity>[] {
+  return [
+    { key: "start", label: "Start", render: (a) => time(a.start) },
+    { key: "sport", label: "Sport", render: (a) => <span><SportDot sport={a.sport} />{SPORT_LABEL[a.sport] ?? a.sport}</span>, sort: (a) => a.sport },
+    { key: "type", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "210px" }} title={[workoutTip(a), typeText(a)].filter(Boolean).join(" · ")}>{workoutText(a)}</span>, sort: (a) => what(a) },
     { key: "dist_km", label: "km", num: true, render: (a) => <DistCell a={a} />, sort: distSort },
     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s ?? a.dur_s) },
     { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: speedSort, title: "Moving pace: min/km on foot (run, walk, hike), /100 m for swims, km/h for ski, bike and other" },
     { key: "hr", label: "HR", num: true, render: (a) => num(a.hr), title: "Average heart rate, whole activity (bpm)" },
     { key: "elev", label: "Climb", num: true, render: (a) => (a.elev ? `${num(a.elev)} m` : "—") },
     { key: "place", label: "Place", render: (a) => <span class="clip" style={{ maxWidth: "140px" }} title={placeText(a)}>{placeText(a)}</span>, sort: (a) => placeText(a) },
-    // dot only (green = GPS track, amber = FIT without GPS, grey = no file); the text is the tooltip
-    { key: "track", label: "GPS", title: "green = GPS track, amber = FIT file without GPS, grey = no file (hover a dot)",
-      render: (a) => <span class={"dot " + (a.track ? "good" : a.fit ? "partial" : "none")} title={a.track ? "GPS track" : a.fit ? "no GPS" : "no file"} />,
-      sort: (a) => (a.track ? 2 : a.fit ? 1 : 0) },
-  );
-  return cols;
+  ];
 }
 
 export function ActivityKV({ a }: { a: Activity }) {
   return (
     <dl class="kv two">
       <dt>Date</dt><dd><a href={`/day/${a.date}`}>{a.date}</a> {time(a.start)}</dd>
-      <dt>Type</dt><dd><SportDot sport={a.sport} />{typeText(a)}</dd>
-      <dt>Workout</dt><dd title={workoutTip(a)}>{workoutText(a)}{a.together && <> · <a href={`/community/${a.together.gid}`}>👥 {togetherWith(a.together)}</a></>}</dd>
+      <dt>Type</dt><dd>{typeText(a)}</dd>
+      <dt>Workout</dt><dd title={workoutTip(a)}>{workoutText(a)}{a.together && <> · <a href={`/community/${a.together.gid}`}>{togetherWith(a.together)}</a></>}</dd>
       <dt>Distance</dt><dd><DistCell a={a} unit=" km" d={a.dist_trusted === false ? 1 : 2} />{a.dist_trusted === false ? <span class="muted"> {a.dist_est_km ? "estimate" : "no GPS"}</span> : null}</dd>
       <dt>Time</dt><dd>{dur(a.dur_s)} <span class="muted">moving {dur(a.moving_s)}</span></dd>
       <dt>{speedLabel(a.sport)}</dt><dd>{speedText(a)} <span class="muted">moving</span></dd>

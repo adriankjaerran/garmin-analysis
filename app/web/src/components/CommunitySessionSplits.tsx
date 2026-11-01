@@ -6,7 +6,6 @@ import { repLabel, speedVal, speedUnit } from "../lib/format";
 import { personColour, personName } from "../lib/people";
 import { useTheme } from "../lib/theme";
 import { repTime, type Cell, type TSession } from "../lib/together";
-import { Av } from "./CommunityBits";
 import "../pages/community-session.css";
 
 type N = number | null;
@@ -50,12 +49,12 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
   };
   return (
     <section class="cs-splits">
-      <div class="head"><h2>Splits</h2><span class="sub">every rep each person ran: time, pace ({speedUnit(sport)}) and average heart rate (peak in the tooltip) · ▲ fastest of the rep</span></div>
+      <div class="head"><h2>Splits</h2><span class="sub muted small">every rep each person ran: time, pace ({speedUnit(sport)}) and average heart rate (peak in the tooltip) · bold = fastest of the rep · * partial · ? suspect</span></div>
       <div class="tg-mxwrap">
         <table class="tg-tbl cs-sp">
           <thead>
             <tr><th rowSpan={2}>Rep</th><th rowSpan={2} class="set">Set</th>
-              {keys.map((k) => <th key={k} colSpan={3} class="pgrp" style={{ borderBottomColor: personColour(k) }}><span class="pn"><Av p={k} size="sm" />{personName(k)}</span></th>)}</tr>
+              {keys.map((k) => <th key={k} colSpan={3} class="pgrp" style={{ borderBottomColor: personColour(k) }}>{personName(k)}</th>)}</tr>
             <tr>{keys.map((k) => [<th key={k + "t"} class="num">Time</th>, <th key={k + "p"} class="num">{speedUnit(sport) === "km/h" ? "km/h" : "Pace"}</th>, <th key={k + "h"} class="num">HR</th>])}</tr>
           </thead>
           <tbody>
@@ -71,8 +70,7 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
                     v.d ? `${Math.round(v.d)} m` : null, v.c.own_dist_m && v.d !== v.c.own_dist_m ? `GPS ${Math.round(v.c.own_dist_m)} m` : null].filter(Boolean).join(" · ");
                   return [
                     <td key={k + "t"} class={"num" + sep + (best === k ? " best" : "") + (v.c.partial || v.c.suspect ? " muted" : "")} title={tip}>
-                      {best === k && <span class="cs-best" style={{ color: personColour(k) }}>▲</span>}
-                      {timeSlot ? (v.d ? `${Math.round(v.d)} m` : "—") : repTime(v.t)}{v.c.suspect ? "?" : v.c.partial ? "◐" : ""}</td>,
+                      {timeSlot ? (v.d ? `${Math.round(v.d)} m` : "—") : repTime(v.t)}{v.c.suspect ? "?" : v.c.partial ? "*" : ""}</td>,
                     <td key={k + "p"} class="num">{speedVal(sport, v.ms)}</td>,
                     <td key={k + "h"} class="num muted" title={v.c.hr_peak ? `avg ${v.c.hr ?? "—"} · peak ${v.c.hr_peak} bpm${v.c.effort_pct ? ` (${v.c.effort_pct} %)` : ""}` : undefined}>{v.c.hr ?? "—"}</td>,
                   ];

@@ -1,5 +1,6 @@
 // One activity: map with the track coloured by speed / HR / elevation, stacked charts with linked hover
-// (chart <-> map), pool-swim summary, one "Segments" section (reps / legs & pauses / laps / lengths as tabs).
+// (chart <-> map; pace, HR and elevation first, cadence and power behind "More charts"), pool-swim summary, one
+// "Segments" section (reps / legs & pauses / laps / lengths as tabs; hidden when it would only show a single leg).
 // Hovering a table row highlights that stretch on the map.
 import type { Map as MLMap, MapMouseEvent } from "maplibre-gl";
 import { Popup } from "maplibre-gl";
@@ -11,7 +12,7 @@ import { RAMP, quantile } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
 import { SeriesCharts, drawablePanels, type Band, type PanelKey } from "../components/SeriesCharts";
 import { Table, type Col } from "../components/Table";
-import { DistCell, SportDot, placeHref, speedText, typeText, workoutTip, togetherWith } from "../components/ActivityBits";
+import { DistCell, placeHref, speedText, typeText, workoutTip, togetherWith } from "../components/ActivityBits";
 import { RecordChips, WorkoutProgress, fastest } from "../components/ProgressCard";
 import { PageHeader } from "../components/PageHeader";
 import { NearestPanel } from "../components/NearestPanel";
@@ -142,6 +143,8 @@ function ActivityMap({ track, colorBy, sport, pauses, cursor, span, onHover }: {
 }
 
 
+const EXTRA_PANELS: PanelKey[] = ["cad", "power"];
+
 const STROKE: Record<string, string> = { 0: "free", 1: "back", 2: "breast", 3: "fly", 4: "drill", 5: "mixed", 6: "IM" };
 const speedCell = (sport: string, ms: number | null | undefined) => (onFoot(sport) ? pace(ms) : sport === "swim" ? pace100(ms) : kmh(ms));
 const speedHead = (sport: string) => (onFoot(sport) ? "Pace /km" : sport === "swim" ? "/100 m" : "km/h");
@@ -205,7 +208,8 @@ function Segments({ data, sport, setSpan, setCursor }: { data: ActivityDetail; s
   if (lengths.length) tabs.push(["lengths", "Lengths", lengths.length]);
   if (legs.length || data.pauses.length) tabs.push(["legs", "Legs & pauses", legs.length]);
   if (data.laps.length > 1) tabs.push(["laps", "Watch laps", data.laps.length]);
-  if (!tabs.length) return null;
+  // nothing to break down: no tabs, or just one leg (a continuous effort without reps, lengths or laps)
+  if (!tabs.length || (tabs.length === 1 && tabs[0][0] === "legs" && legs.length <= 1)) return null;
   const want = query.get("seg") as SegTab | null;
   const tab = tabs.find((t) => t[0] === want)?.[0] ?? tabs[0][0];
   const nMerged = legs.reduce((s, l) => s + l.merged, 0);
@@ -219,7 +223,7 @@ function Segments({ data, sport, setSpan, setCursor }: { data: ActivityDetail; s
   return (
     <section>
       <div class="head">
-        <h2>Segments</h2>
+        <h2 title={sub[tab] + (data.activity.track && tab !== "lengths" ? "; hover a row to see it on the map" : "")}>Segments</h2>
         {tabs.length > 1 ? (
           <div class="seg">
             {tabs.map(([k, label, n]) => (
@@ -227,7 +231,6 @@ function Segments({ data, sport, setSpan, setCursor }: { data: ActivityDetail; s
             ))}
           </div>
         ) : <span class="count">{tabs[0][1]} · {tabs[0][2]}</span>}
-        <span class="sub">{sub[tab]}{data.activity.track && tab !== "lengths" ? "; hover a row to see it on the map" : ""}</span>
       </div>
       {tab === "reps" && (
         <Table rows={reps} rowKey={(_r, i) => String(i)} onHover={(r) => setSpan(r ? [r.start!, r.end!] : null)} cols={nonEmpty([
@@ -306,6 +309,11 @@ export function ActivityPage({ id }: { id: string }) {
   // an untrusted distance (indoor / no GPS) makes the pace / speed series nonsense: keep HR / cadence only
   const panels = a?.dist_trusted === false ? panels0.filter((p) => !["pace", "paceSlow", "speed"].includes(p)) : panels0;
   const drawable = useMemo(() => (s ? drawablePanels(s, panels) : []), [s, panels.join(",")]);
+  // pace / speed, HR and elevation by default; cadence and power behind "More charts"
+  const [moreCharts, setMoreCharts] = useState(false);
+  const onlyExtra = drawable.every((p) => EXTRA_PANELS.includes(p));   // e.g. a treadmill run without HR: show what there is
+  const nExtra = onlyExtra ? 0 : drawable.filter((p) => EXTRA_PANELS.includes(p)).length;
+  const shown = moreCharts || onlyExtra ? drawable : drawable.filter((p) => !EXTRA_PANELS.includes(p));
   const bands = useMemo<Band[]>(() => {
     if (!data) return [];
     const b: Band[] = data.reps.filter((r) => r.start !== undefined).map((r) => ({ a: r.start!, b: r.end!, kind: "rep" as const }));
@@ -344,20 +352,21 @@ export function ActivityPage({ id }: { id: string }) {
   const sport = a.sport;
   const hasReps = data.reps.some((r) => r.start !== undefined);
   const hasMap = a.track;
-  const hasCharts = drawable.length > 0;
+  const hasCharts = shown.length > 0;
   const shaded = hasReps ? "reps shaded" : bands.length ? (swim ? "rests shaded" : "pauses shaded") : "";
   const startDiffers = a.start_place && a.start_place !== a.place;
 
   return (
     <main>
       <section class="first">
-        <PageHeader title={<><SportDot sport={sport} />{a.name ?? a.type}</>} sub={`${longDate(a.date)} ${time(a.start)}`}
+        <PageHeader title={a.name ?? a.type} sub={`${longDate(a.date)} ${time(a.start)}`}
           about="One workout: the track coloured by pace, heart rate or elevation, the charts, the reps or laps, what it says about your shape, and the most similar workouts."
           tips={["Hover the chart to move a marker on the map, or hover the track to move the chart cursor", "Hover a rep / leg / lap row to see that stretch on the map",
-            "Compare lines this workout up with similar ones", "← Older / Newer → step through your activities"]}>
+            "Compare lines this workout up with similar ones", "← Older / Newer → step through your activities",
+            "Cadence and power charts are under “More charts”"]}>
           {a.together && (
-            <a class="tg-link" href={`/community/${a.together.gid}`} title="Who did it with you, and who was faster">
-              👥 {togetherWith(a.together)}{a.together.kind === "intervals" ? " · see results" : ""} ›</a>
+            <a href={`/community/${a.together.gid}`} title="Who did it with you, and who was faster">
+              {togetherWith(a.together)}{a.together.kind === "intervals" ? " · results" : ""}</a>
           )}
           <a class="btn" href={`/day/${a.date}`}>Day view</a>
           {a.fit && <a class="btn" href={`/compare?suggest=${a.id}`} title="Compare with similar sessions (same workout / route)">Compare</a>}
@@ -371,7 +380,7 @@ export function ActivityPage({ id }: { id: string }) {
           <dt>Distance</dt><dd>{a.dist_trusted === false ? <><DistCell a={a} unit=" km" d={1} /><span class="muted" title={a.dist_note ?? ""}>{a.dist_est_km ? " estimated from the laps" : " (no GPS: the watch's distance isn't trusted)"} · watch said {a.dist_km?.toFixed(2) ?? "—"} km</span></>
             : a.dist_km ? `${a.dist_km.toFixed(2)} km` : "—"}</dd>
           <dt>Route</dt><dd title={data.route?.name}>{data.route ? <><a href={`/places?route=${data.route.id}`}>{data.route.id} {data.route.name}</a> <span class="muted">{g.route_dir === "rev" ? "reverse direction, " : ""}{data.route.n} sessions</span>
-            {data.route.rank && <span title="time on the route: moving time from the route's start line to its end (lead-in excluded)">{" · "}{data.route.rank.is_pb ? <span class="pr-chip">🏆 fastest of {data.route.rank.of}</span>
+            {data.route.rank && <span title="time on the route: moving time from the route's start line to its end (lead-in excluded)">{" · "}{data.route.rank.is_pb ? <b>fastest of {data.route.rank.of}</b>
               : <>{fastest(data.route.rank.rank)} of {data.route.rank.of} <span class="muted">({dur(data.route.rank.route_time_s)} on the route, best <a href={`/activities/${data.route.rank.best_id}`}>{dur(data.route.rank.best_s)}</a>)</span></>}</span>}</> : "—"}</dd>
           {swim ? <><dt>Swimming / rest</dt><dd>{dur(swim.active_s)} / {dur(swim.rest_s)} <span class="muted">{swim.n_rests ?? 0} rests{swim.longest_rest_s ? `, longest ${dur(swim.longest_rest_s)}` : ""}; pace from swimming time</span></dd></>
             : <><dt>Moving / paused</dt><dd>{dur(g.moving_s ?? a.moving_s)} / {dur(g.pause_s)} <span class="muted">{g.n_pauses ?? 0} pauses{g.longest_pause_s ? `, longest ${dur(g.longest_pause_s)}` : ""}</span></dd></>}
@@ -393,10 +402,12 @@ export function ActivityPage({ id }: { id: string }) {
       {(hasMap || hasCharts) ? (
         <section>
           <div class="head">
-            <h2>{hasMap ? "Map and series" : "Series"}</h2>
-            <span class="sub">{[shaded, hasMap && hasCharts ? "hover the chart or the track" : "", !hasMap ? "no GPS track" : ""].filter(Boolean).join("; ")}</span>
-            {hasMap && (
+            <h2 title={[shaded, hasMap && hasCharts ? "hover the chart or the track" : "", !hasMap ? "no GPS track" : ""].filter(Boolean).join("; ")}>{hasMap ? "Map and series" : "Series"}</h2>
+            {(hasMap || nExtra > 0) && (
               <div class="tools">
+                {nExtra > 0 && <button class={"toggle" + (moreCharts ? " on" : "")} aria-pressed={moreCharts} onClick={() => setMoreCharts(!moreCharts)}
+                  title="Cadence and power">More charts</button>}
+                {hasMap && <>
                 <span class="muted">Colour by</span>
                 <div class="seg">
                   {(["speed", "hr", "alt"] as ColorBy[]).map((c) => (
@@ -405,13 +416,14 @@ export function ActivityPage({ id }: { id: string }) {
                     </button>
                   ))}
                 </div>
+                </>}
               </div>
             )}
           </div>
           <div class={hasMap && hasCharts ? "act-top" : ""}>
             {hasMap && (tr.data ? <ActivityMap track={tr.data} colorBy={colorBy} sport={sport} pauses={data.pauses} cursor={cursor} span={span} onHover={onMapHover} />
               : <div class="map bordered"><div class="msg">{tr.error ?? "Loading track…"}</div></div>)}
-            {hasCharts && <div><SeriesCharts series={s!} panels={drawable} bands={bands} onHover={onChartHover} cursorRef={chartCursor} /></div>}
+            {hasCharts && <div><SeriesCharts series={s!} panels={shown} bands={bands} onHover={onChartHover} cursorRef={chartCursor} /></div>}
           </div>
         </section>
       ) : (

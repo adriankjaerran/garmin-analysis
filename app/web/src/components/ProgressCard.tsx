@@ -55,7 +55,7 @@ export function ProgressCard({ anchor }: { anchor: string }) {
     { key: "last", label: "Last", render: (w) => <a href={`/activities/${w.current.id}`} onClick={(e) => e.stopPropagation()}
       title={`${shortDate(w.current.date, anchor)}${w.current.hr ? ` · rep HR ${w.current.hr}` : ""}`}>
       <b>{speedVal(w.sport, w.current.speed)}</b> <span class="muted">{shortDate(w.current.date, anchor)}</span></a>, sort: (w) => w.last },
-    { key: "best", label: "Best", sort: (w) => -w.best.speed, render: (w) => w.is_best ? <span class="pr-chip">🏆 this is your best</span> :
+    { key: "best", label: "Best", sort: (w) => -w.best.speed, render: (w) => w.is_best ? <b>this is your best</b> :
       <a href={`/activities/${w.best.id}`} onClick={(e) => e.stopPropagation()}>{speedVal(w.sport, w.best.speed)} <span class="muted">{shortDate(w.best.date, anchor)}</span></a> },
     { key: "trend", label: "Trend", num: true, sort: (w) => w.trend?.vs_median_pct ?? null, title: "last vs the median of the 4 before (↗ > 1 % faster, ↘ > 1 % slower)",
       render: (w) => <span class={trendCls(w.trend)} title={trendTip(w.trend)}>{w.trend ? `${w.trend.arrow} ${w.trend.vs_median_pct > 0 ? "+" : ""}${w.trend.vs_median_pct.toFixed(1)} %` : "—"}</span> },
@@ -88,7 +88,7 @@ function RecordsTable({ rec, anchor, compact }: { rec: Records; anchor: string; 
     { key: "date", label: "Set", sort: (r) => r.best.date, render: (r) => {
       const fresh = daysBetween(r.best.date, anchor) <= NEW_PR_DAYS;
       return <a href={`/activities/${r.best.id}`} onClick={(e) => e.stopPropagation()} title={[r.best.workout_label, r.best.place_name, r.best.name].filter(Boolean).join(" · ")}>
-        {shortDate(r.best.date, anchor)}{fresh && <span class="pr-chip"> 🏆 new</span>}</a>; } },
+        {shortDate(r.best.date, anchor)}{fresh && <span class="muted"> new</span>}</a>; } },
   ];
   if (!compact) cols.push(
     { key: "second", label: "2nd", num: true, sort: () => null, render: (r) => r.top[1] ? <a href={`/activities/${r.top[1].id}`} onClick={(e) => e.stopPropagation()} title={r.top[1].date}>{dur(r.top[1].time_s)}</a> : "—" },
@@ -134,13 +134,13 @@ export function RecordsSection({ anchor }: { anchor: string }) {
 }
 
 // ------------------------------------------------------------------ activity page
-/** "🏆 Fastest 5 km (17:38)" / "2nd fastest 1 km" chips for an activity in the top 3 of a distance */
+/** "Fastest 5 km (17:38)" / "2nd fastest 1 km" chips for an activity in the top 3 of a distance */
 export function RecordChips({ id }: { id: string }) {
   const { data } = useApi<Records>("/api/records");
   const mine = data?.by_activity[id];
   if (!mine?.length) return null;
   return <>{mine.map((m) => <span key={m.key} class="pr-chip" title={`${fastest(m.rank)} ${m.label} of ${m.of} runs with that split`}>
-    {m.rank === 1 ? "🏆 " : ""}{fastest(m.rank)[0].toUpperCase() + fastest(m.rank).slice(1)} {m.label} ({dur(m.time_s)})</span>)}</>;
+    {fastest(m.rank)[0].toUpperCase() + fastest(m.rank).slice(1)} {m.label} ({dur(m.time_s)})</span>)}</>;
 }
 
 /** "6×1000: 3:27 today · best 3:13 (14 Oct 2025) · 11th of 19 · → level vs the 4 before" + every occurrence */
@@ -155,7 +155,7 @@ export function WorkoutProgress({ id }: { id: string }) {
     <div class="act-progress">
       <span class="lbl">Progress</span>
       <span><b>{w.signature}</b>: <b>{speedText(w.sport, c.speed)}</b> here{c.hr ? <span class="muted"> · rep HR {c.hr}</span> : null}</span>
-      {w.is_best ? <span class="pr-chip">🏆 your best {w.signature}</span> :
+      {w.is_best ? <span class="pr-chip">your best {w.signature}</span> :
         <span>best <a href={`/activities/${w.best.id}`}>{speedVal(w.sport, w.best.speed)}</a> <span class="muted">({shortDate(w.best.date, ref)})</span></span>}
       {prevBest && !w.is_best && prevBest.id !== w.best.id && <span class="muted">best until then: {speedVal(w.sport, prevBest.speed)}</span>}
       <span class="muted">{ordinal(w.rank)} of {w.n}</span>

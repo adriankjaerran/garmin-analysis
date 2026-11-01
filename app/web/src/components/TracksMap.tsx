@@ -1,4 +1,4 @@
-// A map showing a handful of encoded-polyline tracks (activity mini map, day map, route members),
+// A map showing encoded-polyline tracks (Activities list, Day map, Home),
 // coloured by sport, with optional highlight + click, fitted to the tracks.
 import type { Map as MLMap, MapLayerMouseEvent } from "maplibre-gl";
 import { Marker } from "maplibre-gl";
@@ -17,18 +17,15 @@ interface Props {
   onHover?: (id: string | null) => void;
   class?: string;
   style?: any;
-  /** extra GeoJSON drawn on top (e.g. route reference) */
-  extra?: GeoJSON.FeatureCollection;
   /** fit to these instead of the tracks */
   fit?: BBox | null;
   markers?: boolean;
   defaultBasemap?: BasemapId;
   children?: ComponentChildren;
-  compact?: boolean;
   empty?: string;
 }
 
-export function TracksMap({ tracks, highlight, onClick, onHover, class: cls, style, extra, fit, markers = true, defaultBasemap, children, compact, empty }: Props) {
+export function TracksMap({ tracks, highlight, onClick, onHover, class: cls, style, fit, markers = true, defaultBasemap, children, empty }: Props) {
   const [map, setMap] = useState<MLMap | null>(null);
   const cb = useRef({ onClick, onHover });
   cb.current = { onClick, onHover };
@@ -37,13 +34,11 @@ export function TracksMap({ tracks, highlight, onClick, onHover, class: cls, sty
   const decoded = useMemo(() => tracks.map((t) => ({ ...t, coords: t.coords ?? (t.poly ? decodePolyline(t.poly) : []) })), [tracks]);
 
   const onReady = (m: MLMap) => {
-    for (const id of ["tracks", "hl", "extra"]) setData(m, id, EMPTY);
+    for (const id of ["tracks", "hl"]) setData(m, id, EMPTY);
     m.addLayer({ id: "tracks-casing", type: "line", source: "tracks", layout: { "line-join": "round", "line-cap": "round" },
       paint: { "line-color": "#ffffff", "line-width": ["+", ["get", "width"], 2.5], "line-opacity": ["case", ["get", "muted"], 0, 0.9] } });
     m.addLayer({ id: "tracks", type: "line", source: "tracks", layout: { "line-join": "round", "line-cap": "round" },
       paint: { "line-color": ["get", "color"], "line-width": ["get", "width"], "line-opacity": ["case", ["get", "muted"], 0.35, 0.9] } });
-    m.addLayer({ id: "extra", type: "line", source: "extra", layout: { "line-join": "round", "line-cap": "round" },
-      paint: { "line-color": ["coalesce", ["get", "color"], "#1d2125"], "line-width": ["coalesce", ["get", "width"], 3], "line-dasharray": [2, 1.5] } });
     m.addLayer({ id: "hl", type: "line", source: "hl", layout: { "line-join": "round", "line-cap": "round" },
       paint: { "line-color": "#1d2125", "line-width": 4.5, "line-opacity": 0.85 } });
     m.on("mousemove", "tracks", (e: MapLayerMouseEvent) => {
@@ -77,7 +72,7 @@ export function TracksMap({ tracks, highlight, onClick, onHover, class: cls, sty
       }
     }
     const b = fit ?? unionBBox(decoded.filter((t) => !t.muted || decoded.every((x) => x.muted)).map((t) => bboxOfCoords(t.coords)).filter((x): x is BBox => !!x));
-    fitBBox(map, b, { padding: compact ? 20 : 40 });
+    fitBBox(map, b, { padding: 40 });
   }, [map, decoded, fit]);
 
   useEffect(() => {
@@ -86,12 +81,8 @@ export function TracksMap({ tracks, highlight, onClick, onHover, class: cls, sty
     setData(map, "hl", t ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: t.coords } } : EMPTY);
   }, [map, highlight, decoded]);
 
-  useEffect(() => {
-    if (map) setData(map, "extra", extra ?? EMPTY);
-  }, [map, extra]);
-
   return (
-    <MapView class={cls} style={style} onReady={onReady} defaultBasemap={defaultBasemap} compact={compact}>
+    <MapView class={cls} style={style} onReady={onReady} defaultBasemap={defaultBasemap}>
       {!tracks.length && <div class="msg">{empty ?? "No GPS track"}</div>}
       {children}
     </MapView>

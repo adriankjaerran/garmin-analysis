@@ -247,7 +247,7 @@ function FinishCard({ g, ax, whole }: { g: Segment; ax: Axis; whole?: boolean })
           <span key={k}><i class="sw" style={{ background: personColour(k) }} />{personInfo(k).initials} <b>{repTime(v.total_s)}</b>{ranked && (v.rank ?? 1) > 1 && v.gap_s !== null ? <span class="muted"> {plus(v.gap_s)}</span> : !ranked && v.n ? <span class="muted"> · {v.n} reps</span> : ""}</span>
         ))}</div>
       )}
-      {ups.map((m) => <div key={m.person} class="up">▲ {personName(m.person)} moves up to {ord(m.to_rank)} overall</div>)}
+      {ups.map((m) => <div key={m.person} class="up">{personName(m.person)} moves up to {ord(m.to_rank)} overall</div>)}
     </div>
   );
 }
@@ -303,7 +303,7 @@ export function ReplayPanel({ s, r: r0, hr, startRep, onClose }: { s: TSession; 
     seek(n === null ? startAt : -LEAD);
     if (play !== undefined) setPlaying(play);
   };
-  // the page's ▶ on a rep row (or ?rrep=) while the replay is open
+  // ?rrep= (a rep to start from) while the replay is open
   useEffect(() => { const n = segIdx(startRep); if (n >= 0 && n !== st.current.sel) goSeg(n, true); }, [startRep]);
   // switching Own start / Clock keeps the rep, restarts it
   useEffect(() => { if (st.current.sel !== null) seek(Math.min(st.current.pos, axes[st.current.sel].fin)); }, [align]);
@@ -449,7 +449,7 @@ export function ReplayPanel({ s, r: r0, hr, startRep, onClose }: { s: TSession; 
             return (
               <button key={h.i} class={"chip" + (sel === j ? " on" : "") + (n < 2 ? " solo" : "")} onClick={() => goSeg(j, true)}
                 title={`${h.title}${n < 2 ? ` (only ${personName(Object.keys(h.people)[0])})` : ""}${np ? ` · ${np} pass${np > 1 ? "es" : ""}` : ""}${/^\d$|^10$/.test(h.label) ? ` (key ${h.label === "10" ? "0" : h.label})` : ""}`}>
-                {segShort(h)}{np > 0 && <span class="np" aria-label={`${np} passes`}>⇄</span>}</button>
+                {segShort(h)}{np > 0 && <span class="np" title={`${np} passes`}> ({np})</span>}</button>
             );
           })}
           {g && (
@@ -487,7 +487,7 @@ export function ReplayPanel({ s, r: r0, hr, startRep, onClose }: { s: TSession; 
                       : !x.started ? "start…" : x.d === null ? "—" : i === 0 || x.d >= lead - 0.5 ? "leads" : `${Math.round(lead - x.d)} m`}</td>
                     <td class="num v">{x.done ? repTime(x.c.partial ? x.c.time_s : x.c.result_s ?? x.c.time_s) : dur(x.e)}</td>
                     <td class="num">{x.total === null ? <span class="muted">—</span> : x.done ? repTime(x.total) : dur(x.total)}</td>
-                    {hr && <td class="num muted">{hrOf(x.k) ? `♥ ${hrOf(x.k)}` : "—"}</td>}
+                    {hr && <td class="num muted">{hrOf(x.k) ?? "—"}</td>}
                   </tr>
                 ));
               })()}</tbody>
@@ -507,7 +507,7 @@ export function ReplayPanel({ s, r: r0, hr, startRep, onClose }: { s: TSession; 
                       <td class="pos">{i + 1}</td>
                       <td><i class="sw" style={{ background: personColour(x.key) }} /><span class={x.key === s.viewer ? "me" : ""}>{personName(x.key)}</span></td>
                       {x.cells.map((c, j) => <td key={j} class={"num" + (j === 0 ? " v" : "")}>{c}</td>)}
-                      {hr && <td class="num muted">{x.hr ? `♥ ${x.hr}` : "—"}</td>}
+                      {hr && <td class="num muted">{x.hr ?? "—"}</td>}
                     </tr>
                   ))}</tbody>
                 </table>
@@ -517,12 +517,12 @@ export function ReplayPanel({ s, r: r0, hr, startRep, onClose }: { s: TSession; 
         })()}
         {segs.length > 0 && <FeedList items={feed} empty={g ? `No passes${finished ? "" : " yet"} in ${segShort(g)}.` : "No passes yet."} />}
         {!g && <SoFar s={s} t={pos} w0={startAt} />}
-        <button class="link tg-close" onClick={onClose}>✕ Close replay</button>
+        <button class="link tg-close" onClick={onClose}>Close replay</button>
       </div>
       <div class="tg-controls">
-        <button class="play" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"} title="Play / pause (space)">{playing ? "❚❚" : "▶"}</button>
-        {segs.length > 0 && <button onClick={() => step(-1)} title={`Previous ${repLabel} (←)`} aria-label={`Previous ${repLabel}`}>⏮</button>}
-        {segs.length > 0 && <button onClick={() => step(1)} title={`Next ${repLabel} (→)`} aria-label={`Next ${repLabel}`}>⏭</button>}
+        <button class="play" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"} title="Play / pause (space)">{playing ? "Pause" : "Play"}</button>
+        {segs.length > 0 && <button onClick={() => step(-1)} title={`Previous ${repLabel} (←)`} aria-label={`Previous ${repLabel}`}>Prev</button>}
+        {segs.length > 0 && <button onClick={() => step(1)} title={`Next ${repLabel} (→)`} aria-label={`Next ${repLabel}`}>Next</button>}
         <div class="seg" role="group" aria-label="Speed">
           {(g ? SPEEDS : allSpeeds).map((x) => <button key={x} class={speed === x ? "on" : ""} onClick={() => (g ? setSpeedSeg(x) : setSpeedAll(x))}>{x}×</button>)}
         </div>

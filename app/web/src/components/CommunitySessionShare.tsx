@@ -7,7 +7,7 @@ import { useEffect, useState } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { dur, longDate, speedText } from "../lib/format";
 import { personInfo, personName } from "../lib/people";
-import { MEDAL, repTime, type Replay, type TSession } from "../lib/together";
+import { repTime, type Replay, type TSession } from "../lib/together";
 import { hms, hoursMin, type CsSession, type Facts } from "../lib/communitySession";
 
 const W = 1080, H = 1350;
@@ -118,16 +118,13 @@ export async function drawShareCard(s: TSession, c: CsSession, facts: Facts, rep
         x.strokeStyle = j ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.6)"; x.lineWidth = j ? 12 : 5; x.stroke();
       });
     }
-  } else {
-    x.globalAlpha = 0.14; x.font = f(400, 380); x.textAlign = "right"; x.textBaseline = "alphabetic";
-    x.fillText(c.category_info.emoji, W + 30, 470); x.globalAlpha = 1;
   }
 
   const L = 64;
   x.textAlign = "left"; x.textBaseline = "alphabetic";
   // category chip + date
   x.font = f(600, 30);
-  const chip = `${c.category_info.emoji}  ${c.category_info.label}`;
+  const chip = c.category_info.label;
   const cw = x.measureText(chip).width + 44;
   x.fillStyle = "rgba(255,255,255,0.2)"; rr(x, L, 56, cw, 56, 28); x.fill();
   x.fillStyle = "#fff"; x.fillText(chip, L + 22, 95);
@@ -148,10 +145,10 @@ export async function drawShareCard(s: TSession, c: CsSession, facts: Facts, rep
   for (const t of tl) { x.fillText(t, L, y); y += 92; }
   y -= 92 - 58;
   x.font = f(500, 34); x.fillStyle = "rgba(255,255,255,0.92)";
-  x.fillText(fit(x, [longDate(c.date), place ? `📍 ${place}` : null].filter(Boolean).join("  ·  "), W - 2 * L), L, y);
+  x.fillText(fit(x, [longDate(c.date), place ?? null].filter(Boolean).join("  ·  "), W - 2 * L), L, y);
   if (hl) {
     y += 56; x.font = f(700, 38); x.fillStyle = "#fff";
-    x.fillText(fit(x, `${s.headline.kind === "race" ? "🏁" : s.headline.kind === "intervals" ? "⚡" : "👥"} ${hl}`, W - 2 * L), L, y);
+    x.fillText(fit(x, hl, W - 2 * L), L, y);
   }
   x.shadowBlur = 0; x.shadowColor = "transparent";
 
@@ -165,7 +162,7 @@ export async function drawShareCard(s: TSession, c: CsSession, facts: Facts, rep
     x.textBaseline = "middle";
     // rank
     x.font = f(600, 40); x.textAlign = "center"; x.fillStyle = "#5f6b7a";
-    x.fillText(r.rank !== null ? MEDAL[r.rank - 1] ?? `${r.rank}` : "", 104, cy + 2);
+    x.fillText(r.rank !== null ? `${r.rank}` : "", 104, cy + 2);
     // avatar
     x.beginPath(); x.arc(176, cy, 34, 0, Math.PI * 2); x.fillStyle = info.colour; x.fill();
     x.fillStyle = "#fff"; x.font = f(700, 28); x.fillText(info.initials, 176, cy + 1);
@@ -205,11 +202,11 @@ export async function drawShareCard(s: TSession, c: CsSession, facts: Facts, rep
   const roday = facts.highlights.find((h) => h.id === "closest") ?? facts.highlights[0];
   if (roday && by + 60 < H - 60) {
     by += 54; x.font = f(500, 30); x.fillStyle = "rgba(255,255,255,0.88)";
-    x.fillText(fit(x, `${roday.emoji} ${roday.title}: ${roday.value}${roday.sub ? ` — ${roday.sub}` : ""}`, W - 2 * L), L, by);
+    x.fillText(fit(x, `${roday.title}: ${roday.value}${roday.sub ? ` — ${roday.sub}` : ""}`, W - 2 * L), L, by);
   }
   // footer
   x.font = f(500, 24); x.fillStyle = "rgba(255,255,255,0.7)"; x.textAlign = "right";
-  x.fillText(`${c.n_timed} member${c.n_timed === 1 ? "" : "s"}${c.meta.kudos.length ? `  ·  👏 ${c.meta.kudos.length}` : ""}  ·  club session`, W - L, H - 44);
+  x.fillText(`${c.n_timed} member${c.n_timed === 1 ? "" : "s"}${c.meta.kudos.length ? `  ·  ${c.meta.kudos.length} kudos` : ""}  ·  club session`, W - L, H - 44);
   return cv;
 }
 
@@ -217,7 +214,7 @@ export function ShareButton({ s, c, facts, replay }: { s: TSession; c: CsSession
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button class="cs-share-btn" onClick={() => setOpen(true)} title="A picture of this session for the club's chat (PNG, 1080 × 1350)"><span aria-hidden="true">↗</span>Share</button>
+      <button class="link" onClick={() => setOpen(true)} title="A picture of this session for the club's chat (PNG, 1080 × 1350)">Share</button>
       {open && createPortal(<ShareDialog s={s} c={c} facts={facts} replay={replay} onClose={() => setOpen(false)} />, document.body)}
     </>
   );

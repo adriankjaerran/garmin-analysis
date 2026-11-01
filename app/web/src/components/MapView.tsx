@@ -1,4 +1,4 @@
-// MapLibre wrapper: raster basemap (Kartverket topo / grey, OpenStreetMap, OpenTopoMap) with a toggle that
+// MapLibre wrapper: raster basemap (Kartverket topo / grey, OpenStreetMap, OpenTopoMap) with a small dropdown that
 // is shared by every map in the app (localStorage), plus small helpers for GeoJSON sources.
 import { Map as MLMap, NavigationControl, ScaleControl, AttributionControl, LngLatBounds, setWorkerUrl } from "maplibre-gl";
 // MapLibre 6 loads its worker as a separate module next to the bundle; let Vite emit it and point at it
@@ -96,7 +96,7 @@ export function MapView({ class: cls = "", style, onReady, bbox, interactive = t
   const el = useRef<HTMLDivElement>(null);
   const [bm, setBm] = useState<BasemapId>(() => getBasemap(defaultBasemap));
   // Kartverket outside Norway is blank: this map shows OSM instead while its centre is abroad (the stored
-  // choice is kept; clicking a basemap button on this map turns the automatic switch off for it)
+  // choice is kept; picking a basemap in this map's dropdown turns the automatic switch off for it)
   const [auto, setAuto] = useState(false);
   const pinned = useRef(false);
   const mapRef = useRef<MLMap | null>(null);
@@ -149,14 +149,11 @@ export function MapView({ class: cls = "", style, onReady, bbox, interactive = t
   return (
     <div class={`map ${cls}`} style={style}>
       <div class="gl" ref={el} />
-      <div class="seg basemap">
-        {(Object.keys(BASEMAPS) as BasemapId[]).map((id) => (
-          <button key={id} class={id === (auto ? "osm" : bm) ? "on" : ""} onClick={() => { pinned.current = isKV(id) && auto; setBasemap(id); }}
-            title={auto && id === "osm" ? "Shown automatically: Kartverket maps cover Norway only (click Topo / Grey to force them)" : "Basemap (all maps)"}>
-            {BASEMAPS[id].label}{auto && id === "osm" ? " (auto)" : ""}
-          </button>
-        ))}
-      </div>
+      <select class="basemap" value={auto ? "osm" : bm} aria-label="Basemap (all maps)"
+        title={auto ? "OSM shown automatically: Kartverket maps cover Norway only (pick Topo / Grey to force them)" : "Basemap (all maps)"}
+        onChange={(e) => { const id = (e.target as HTMLSelectElement).value as BasemapId; pinned.current = isKV(id) && auto; setBasemap(id); }}>
+        {(Object.keys(BASEMAPS) as BasemapId[]).map((id) => <option key={id} value={id}>{BASEMAPS[id].label}</option>)}
+      </select>
       {children}
     </div>
   );

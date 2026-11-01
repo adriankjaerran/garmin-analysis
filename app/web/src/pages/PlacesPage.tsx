@@ -1,5 +1,6 @@
 // Places (start-point clusters) and routes (repeated tracks) from groups.json, on a map.
-// ?place=<id> filters routes to that place, ?route=R3 shows the route: reference line, member tracks, sessions.
+// ?place=<id> filters routes to that place, ?route=R3 shows the route (route ids stay in the URL and in
+// /activities?route=, not in the table): reference line, member tracks, sessions.
 import type { Map as MLMap, MapLayerMouseEvent } from "maplibre-gl";
 import { Marker, Popup } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
@@ -9,10 +10,10 @@ import { SPORT_LABEL, dur, km, num, sportColor, typeLabel } from "../lib/format"
 import { decodePolyline, type BBox } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
 import { Table, type Col } from "../components/Table";
-import { DistCell, SportDot, TogetherMark, distSort, placeHref, speedSort, speedText, whatShort } from "../components/ActivityBits";
+import { DistCell, SportDot, distSort, placeHref, speedSort, speedText, whatShort } from "../components/ActivityBits";
 import { PageHeader } from "../components/PageHeader";
 
-const SHAPE: Record<string, string> = { laps: "laps", out_and_back: "out & back", point_to_point: "point to point", loop_cw: "loop ↻", loop_ccw: "loop ↺" };
+const SHAPE: Record<string, string> = { laps: "laps", out_and_back: "out & back", point_to_point: "point to point", loop_cw: "loop, clockwise", loop_ccw: "loop, anticlockwise" };
 const famOf = (types: Record<string, number>) => {
   const top = Object.entries(types).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "other";
   return top.includes("ski") ? "ski" : top.includes("run") ? "run" : top === "hiking" || top === "walking" ? "hike" : top === "cycling" ? "bike" : top.includes("swim") ? "swim" : "other";
@@ -22,9 +23,10 @@ const famOf = (types: Record<string, number>) => {
 const countText = (p: Place) => (p.n_touched && p.n_touched > p.n ? <>{p.n} <span class="muted">· {p.n_touched} touched</span></> : String(p.n));
 const COUNT_HELP = "Activities with this as their main place (≥ 40 % of the time there, else the start) · activities that start, end or spend ≥ 5 % / 3 min there";
 
+const sportText = (s: string) => <span class="muted">{SPORT_LABEL[s] ?? s}</span>;
 const routeCols: Col<RouteRow>[] = [
-  { key: "id", label: "Route", sort: (r) => Number(r.id.slice(1)) },
-  { key: "name", label: "Name", render: (r) => <span class="clip" style={{ maxWidth: "255px" }} title={[r.name, r.via_names?.length ? `via ${r.via_names.join(", ")}` : ""].filter(Boolean).join(" · ")}><SportDot sport={r.sport} />{r.name}</span> },
+  { key: "name", label: "Route", render: (r) => <span class="clip" style={{ maxWidth: "255px" }} title={[r.name, r.via_names?.length ? `via ${r.via_names.join(", ")}` : ""].filter(Boolean).join(" · ")}>{r.name}</span> },
+  { key: "sport", label: "Sport", render: (r) => sportText(r.sport) },
   { key: "n", label: "Activities", num: true },
   { key: "pb", label: "Best", num: true, sort: (r) => r.pb?.route_time_s ?? null, title: "fastest time on the route (main direction; laps routes aren't ranked)",
     render: (r) => (r.pb ? <span title={r.pb.best_date ?? ""}>{dur(r.pb.route_time_s)}</span> : <span class="muted">—</span>) },
@@ -47,7 +49,8 @@ function RouteTrend({ pts }: { pts: { date: string | null; route_time_s: number 
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 type Member = RouteDetail["members"][number];
 const placeCols: Col<Place & { fam: string }>[] = [
-  { key: "name", label: "Place", render: (p) => <span class="clip" style={{ maxWidth: "255px" }} title={p.name}><SportDot sport={p.fam} />{p.name}</span> },
+  { key: "name", label: "Place", render: (p) => <span class="clip" style={{ maxWidth: "255px" }} title={p.name}>{p.name}</span> },
+  { key: "fam", label: "Sport", render: (p) => sportText(p.fam), title: "main sport there" },
   { key: "n", label: "Activities", num: true, render: countText, title: COUNT_HELP },
   { key: "routes", label: "Routes", num: true },
   { key: "last", label: "Last", render: (p) => p.last ?? "—" },
@@ -72,7 +75,7 @@ export function PlacesPage() {
   const placeActs = useApi<{ n: number; activities: Activity[] }>(place && tab === "activities" ? `/api/activities?place=${encodeURIComponent(place)}` : null).data;
   const actCols = useMemo<Col<Activity>[]>(() => [
     { key: "start", label: "Date", render: (a) => a.date },
-    { key: "type", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "220px" }} title={[whatShort(a), a.route_name, a.name].filter(Boolean).join(" · ")}><SportDot sport={a.sport} /><TogetherMark a={a} />{whatShort(a)}</span>, sort: (a) => whatShort(a) },
+    { key: "type", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "220px" }} title={[whatShort(a), a.route_name, a.name].filter(Boolean).join(" · ")}>{whatShort(a)}</span>, sort: (a) => whatShort(a) },
     { key: "dist_km", label: "km", num: true, render: (a) => <DistCell a={a} />, sort: distSort },
     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s ?? a.dur_s) },
     { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: speedSort },
@@ -210,10 +213,9 @@ export function PlacesPage() {
       </PageHeader>
       <div class="split">
         <div class="left"><MapView style={{ flex: 1 }} onReady={onReady} defaultBasemap="grey">
-          {!r && <div class="overlay bl places-legend">
-            <span><b>Places</b> by main sport:</span>
+          {!r && <div class="overlay bl places-legend" title="Places, coloured by main sport">
             {legendSports.map((k) => <span key={k}><SportDot sport={k} />{SPORT_LABEL[k]}</span>)}
-            <span class="muted">· size = activities there</span>
+            <span class="muted">size = activities</span>
           </div>}
         </MapView></div>
         <div class="right" style={{ width: "560px" }}>
@@ -221,7 +223,7 @@ export function PlacesPage() {
             <>
               <div class="pane">
                 <div class="head">
-                  <h2 title={r.name}>{r.id} {r.name}</h2>
+                  <h2 title={r.name}>{r.name}</h2>
                 </div>
                 <div class="head">
                   <div class="tools" style={{ marginLeft: 0 }}>
@@ -234,29 +236,28 @@ export function PlacesPage() {
                 </div>
                 <dl class="kv">
                   <dt>Start</dt><dd><a href={placeHref(r.place)}>{r.start_place_name ?? r.place_name ?? r.place}</a>{r.end_place_name && r.end_place_name !== (r.start_place_name ?? r.place_name) ? ` → ${r.end_place_name}` : ""}</dd>
-                  <dt>Sport</dt><dd><SportDot sport={r.sport} />{SPORT_LABEL[r.sport] ?? r.sport}</dd>
+                  <dt>Sport</dt><dd>{SPORT_LABEL[r.sport] ?? r.sport}</dd>
                   <dt>Shape</dt><dd>{SHAPE[r.shape] ?? r.shape}{r.via_names?.length ? <span class="muted"> via {r.via_names.join(", ")}</span> : null}</dd>
                   <dt>Distance</dt><dd>{km(r.dist_km)} km{r.climb_m ? <span class="muted"> · {num(r.climb_m)} m climb</span> : null}</dd>
                   <dt>Activities</dt><dd>{r.n}</dd>
 
                   <dt>First / last</dt><dd>{r.first} / {r.last}</dd>
                 </dl>
-                {mainPb && <p class="route-best" title={r.rank_definition}>🏆 Best <b>{dur(mainPb.route_time_s)}</b> on the route ·{" "}
+                {mainPb && <p class="route-best" title={r.rank_definition}>Best <b>{dur(mainPb.route_time_s)}</b> ·{" "}
                   <a href={`/activities/${mainPb.id}`}>{mainPb.best_date}</a>
                   {r.pbs!.length > 1 ? <span class="muted"> ({mainPb.group === "rev" ? "reverse" : "main"} direction)</span> : null}{" "}
-                  <span class="muted">every time, oldest left (up = faster):</span> <RouteTrend pts={trendPts} /></p>}
-                <p class="note">Dashed = reference session{r.waypoints?.length ? ", circles = common stops" : ""}. Compare lines them up along the route (gap, pace, HR, legs).</p>
+                  <span title="every time on the route, oldest left (up = faster)"><RouteTrend pts={trendPts} /></span></p>}
               </div>
               <div class="pane" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                <div class="head"><h2>Activities</h2><span class="count">{r.members.length}</span>
-                  {r.ranked && <span class="sub">ranked by time on the route (start line to end, lead-in excluded){r.pbs && r.pbs.length > 1 ? ", per direction" : ""}</span>}</div>
+                <div class="head"><h2 title={r.ranked ? `ranked by time on the route (start line to end, lead-in excluded)${r.pbs && r.pbs.length > 1 ? ", per direction" : ""}` : undefined}>Activities</h2>
+                  <span class="count">{r.members.length}</span></div>
                 <Table<Member> rows={r.members} rowKey={(a) => a.id} highlight={hlMember} onHover={(a) => setHlMember(a?.id ?? null)}
                   onRow={(a) => navigate(`/activities/${a.id}`)} defaultSort={["date", -1]} cols={[
                     ...(r.ranked ? [{ key: "rank", label: "#", num: true, title: "rank by time on the route (per direction on a point-to-point route)",
                       sort: (a: Member) => (a.rank ? (a.group === mainPb?.group ? 0 : 1000) + a.rank : null),
-                      render: (a: Member) => (a.rank ? <span title={`${a.rank === 1 ? "fastest" : `${ordinal(a.rank)} fastest`} of ${a.of}${r.pbs && r.pbs.length > 1 ? ` (${a.group === "rev" ? "reverse" : "main"} direction)` : ""}`}>{a.is_pb ? "🏆" : a.rank}</span> : "—") }] : []),
+                      render: (a: Member) => (a.rank ? <span title={`${a.rank === 1 ? "fastest" : `${ordinal(a.rank)} fastest`} of ${a.of}${r.pbs && r.pbs.length > 1 ? ` (${a.group === "rev" ? "reverse" : "main"} direction)` : ""}`}>{a.is_pb ? <b>{a.rank}</b> : a.rank}</span> : "—") }] : []),
                     { key: "date", label: "Date" },
-                    { key: "stype", label: "Workout", render: (a: Member) => <span class="clip" style={{ maxWidth: r.ranked ? "90px" : "110px" }} title={`${whatShort(a)} · ${a.name ?? ""}`}><TogetherMark a={a} />{whatShort(a)}</span>, sort: (a: Member) => whatShort(a) },
+                    { key: "stype", label: "Workout", render: (a: Member) => <span class="clip" style={{ maxWidth: r.ranked ? "90px" : "110px" }} title={`${whatShort(a)} · ${a.name ?? ""}`}>{whatShort(a)}</span>, sort: (a: Member) => whatShort(a) },
                     ...(r.ranked ? [
                       { key: "route_time_s", label: "On route", num: true, title: "time on the route: moving time from its start line to its end (lead-in / cool-down excluded); hover for moving / paused",
                         render: (a: Member) => <span title={`moving ${dur(a.moving_s)} · paused ${dur(a.pause_s)}${a.time_src === "moving" ? " · whole moving time (no leg split)" : ""}`}>{a.route_time_s ? dur(a.route_time_s) : "—"}</span> },
@@ -279,7 +280,7 @@ export function PlacesPage() {
             <>
               {selPlace && (
                 <div class="pane">
-                  <div class="head"><h2><SportDot sport={selPlace.fam} />{selPlace.name}</h2>
+                  <div class="head"><h2>{selPlace.name}</h2>
                     <div class="tools">
                       <a class="btn" href={`/activities?place=${encodeURIComponent(selPlace.id)}&adv=1`} title="All activities touching this place, with filters and Compare">List activities</a>
                     </div></div>

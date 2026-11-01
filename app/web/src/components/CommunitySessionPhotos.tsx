@@ -41,7 +41,7 @@ function Lightbox({ c, i, setI }: { c: CsSession; i: number; setI: (i: number | 
   };
   return (
     <div class="cs-lb" role="dialog" aria-label="Photo" onClick={(e) => e.target === e.currentTarget && setI(null)}>
-      <button class="cs-lb-x" onClick={() => setI(null)} aria-label="Close" title="Close (Esc)">✕</button>
+      <button class="cs-lb-x" onClick={() => setI(null)} aria-label="Close" title="Close (Esc)">Close</button>
       {i > 0 && <button class="cs-lb-nav prev" onClick={() => setI(i - 1)} aria-label="Previous photo" title="Previous (←)">‹</button>}
       <img src={p.url} alt={p.name ?? "photo"} onClick={(e) => e.stopPropagation()} />
       {i < ps.length - 1 && <button class="cs-lb-nav next" onClick={() => setI(i + 1)} aria-label="Next photo" title="Next (→)">›</button>}
@@ -49,8 +49,8 @@ function Lightbox({ c, i, setI }: { c: CsSession; i: number; setI: (i: number | 
         <span>{i + 1} / {ps.length}{p.by ? ` · by ${someoneName(c, p.by, personName)}` : ""}{when(p) ? ` · ${p.taken ? "taken" : "added"} ${when(p)}` : ""}</span>
         <span class="cs-lb-tools">
           <button disabled={busy || cover} onClick={async () => { setBusy(true); try { await patchSession(c.gid, { cover: p.id }); } finally { setBusy(false); } }}>
-            {cover ? "★ Cover" : "☆ Set as cover"}</button>
-          <a class="btn" href={p.url} target="_blank" rel="noopener">Open ↗</a>
+            {cover ? "Cover" : "Set as cover"}</button>
+          <a class="btn" href={p.url} target="_blank" rel="noopener">Open</a>
           <button class="danger" disabled={busy} onClick={del}>Delete</button>
         </span>
       </div>
@@ -90,9 +90,9 @@ export function CommunitySessionPhotos({ gid }: { gid: string }) {
       onDragEnter={(e) => { dragOn(e); if ([...(e.dataTransfer?.types ?? [])].includes("Files")) setDrag((d) => d + 1); }}
       onDragOver={dragOn} onDragLeave={() => setDrag((d) => Math.max(0, d - 1))} onDrop={onDrop}>
       <div class="head"><h2>Photos</h2>
-        <span class="sub">{ps.length ? `${ps.length} photo${ps.length === 1 ? "" : "s"} · click to enlarge · ★ = the cover on top` : "the session in pictures"}</span>
+        <span class="sub">{ps.length ? `${ps.length} photo${ps.length === 1 ? "" : "s"} · click to enlarge · the cover is used for Share` : "the session in pictures"}</span>
         <div class="tools">
-          <button onClick={() => input.current?.click()} title="Choose photos (jpg, png, webp, heic; ≤ 15 MB each)">＋ Add photos</button>
+          <button onClick={() => input.current?.click()} title="Choose photos (jpg, png, webp, heic; ≤ 15 MB each)">Add photos</button>
           <input ref={input} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => { const t = e.target as HTMLInputElement; files(t.files); t.value = ""; }} />
         </div>
       </div>
@@ -103,10 +103,10 @@ export function CommunitySessionPhotos({ gid }: { gid: string }) {
               <button class="cs-ph" onClick={() => setLb(i)} title={p.name ?? "photo"} aria-label={`Open photo ${i + 1}`}>
                 <img src={p.thumb} alt={p.name ?? `photo ${i + 1}`} loading="lazy" />
               </button>
-              {c.meta.cover === p.id && <span class="cs-cover-tag" title="The cover photo on top of the page">★ cover</span>}
+              {c.meta.cover === p.id && <span class="cs-cover-tag" title="The cover photo (used for Share)">cover</span>}
               <span class="cs-ph-tools">
-                {c.meta.cover !== p.id && <button title="Set as cover" aria-label="Set as cover" onClick={() => patchSession(gid, { cover: p.id })}>☆</button>}
-                <button title="Delete" aria-label="Delete photo" onClick={() => confirm("Delete this photo? It is removed from this computer.") && deletePhoto(gid, p.id)}>🗑</button>
+                {c.meta.cover !== p.id && <button title="Set as cover" aria-label="Set as cover" onClick={() => patchSession(gid, { cover: p.id })}>cover</button>}
+                <button title="Delete" aria-label="Delete photo" onClick={() => confirm("Delete this photo? It is removed from this computer.") && deletePhoto(gid, p.id)}>delete</button>
               </span>
             </figure>
           ))}
@@ -114,8 +114,7 @@ export function CommunitySessionPhotos({ gid }: { gid: string }) {
       )}
       <div class={"cs-drop" + (ps.length ? " slim" : "")} onClick={() => input.current?.click()} role="button" tabIndex={0}
         onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}>
-        <span class="cs-drop-ic" aria-hidden="true">📷</span>
-        <span><b>{drag ? "Drop to upload" : "Drop photos here"}</b> or click to choose{ps.length ? "" : " — group selfies, the track, the coffee afterwards"}</span>
+        <span><b>{drag ? "Drop to upload" : "Drop photos here"}</b> or click to choose</span>
         <span class="muted small">jpg · png · webp · heic, ≤ 15 MB · stored on this computer only</span>
       </div>
       {ups.length > 0 && (
@@ -124,7 +123,7 @@ export function CommunitySessionPhotos({ gid }: { gid: string }) {
             <li key={u.id} class={u.err ? "err" : u.done ? "done" : ""}>
               <span class="nm">{u.name}</span>
               <span class="bar"><i style={{ width: `${Math.round(u.f * 100)}%` }} /></span>
-              <span class="st">{u.err ? u.err : u.done ? "✓" : `${Math.round(u.f * 100)} %`}</span>
+              <span class="st">{u.err ? u.err : u.done ? "done" : `${Math.round(u.f * 100)} %`}</span>
               {(u.err || u.done) && <button class="cs-x" aria-label="Dismiss" onClick={() => setUps((x) => x.filter((y) => y.id !== u.id))}>×</button>}
             </li>
           ))}

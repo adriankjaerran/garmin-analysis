@@ -1,12 +1,10 @@
 // One club session (/community/<gid>; /api/together/<gid> + the club layer /api/community/sessions/<gid>). Top to
-// bottom: hero (photo / title / category / kudos / share), the story in words, who was there (member cards with
-// form), collective + last time here, then "How it went" (headline, tools, highlights); for intervals the
-// per-rep board (a row per rep, everyone who ran it fastest first; the wide table behind a toggle), the leaderboard
-// (average rep pace over each person's own reps), each person's rep times across the session and a rep close-up
-// (metres behind the rep's leader + the track with a dot per person), for continuous runs / races / hikes the gap over distance, distance apart, who led
-// where and km splits; then the replay (everyone round the map on one clock), splits, breaks, photos.
-// Heart rate stays at three small elements (effort per rep, recovery in the breaks, effort in the header); the rest
-// is behind the "Heart rate" toggle. URL: ?rep=<slot label>&align=clock&replay=1&rrep=<rep to replay>&hr=1&rv=table
+// bottom: a plain title line with small links and an Edit menu, the note / story, one table row per person, then
+// for intervals "Rep by rep" (a row per rep, a column per person) and the splits; for continuous runs / races the
+// race result and km splits. Everything else is folded under "More detail" (rendered only when open): leaderboard,
+// rep close-up (metres behind the rep's leader + the track), rep pace, replay, breaks, heart rate, photos; for
+// continuous runs the gap over distance, distance apart, who led where and the map.
+// URL: ?more=1 (open "More detail") &rep=<slot label>&align=clock&replay=1&rrep=<rep to replay>
 import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi } from "../lib/api";
@@ -15,18 +13,16 @@ import { cssVar, dur, km, repLabel, secs, shortDate, speedLabel, speedText } fro
 import { useTheme } from "../lib/theme";
 import { mapColour, personColour, personInfo, personName, setPeopleInfo } from "../lib/people";
 import {
-  KIND_LABEL, LABELS, MEDAL, behind, labelShort, paceText, pathBetween, placeText, posAt, repTime, rollingMedian, valAt,
+  behind, paceText, pathBetween, posAt, repTime, rollingMedian, valAt,
   type Cell, type Closeup, type Intervals, type Replay, type TParticipant, type TSession,
 } from "../lib/together";
 import { TLine, type TSeries } from "../components/TLine";
 import { TogetherMap, type MapDot, type MapLine } from "../components/TogetherMap";
 import { ReplayPanel } from "../components/Replay";
-import { Av } from "../components/CommunityBits";
 import { CommunitySessionHero } from "../components/CommunitySessionHero";
-import { CommunitySessionMembers } from "../components/CommunitySessionMembers";
+import { CommunitySessionMembers, SamePlace } from "../components/CommunitySessionMembers";
 import { CommunitySessionSplits } from "../components/CommunitySessionSplits";
 import { CommunitySessionPhotos } from "../components/CommunitySessionPhotos";
-import { SessionHighlights, SessionStory } from "../components/CommunitySessionHighlights";
 import { closestRep, sessionFacts, useCommunity } from "../lib/communitySession";
 import "./together.css";
 
@@ -75,7 +71,7 @@ function Caveats({ s }: { s: TSession }) {
     else chips.push({ k, text: cs.map(plain).join("; "), title });
   }
   if (!chips.length) return null;
-  return <div class="tg-caveats">{chips.map((c) => <span key={c.k} class={"tg-cav " + c.k} title={c.title}>⚠ {c.text}</span>)}</div>;
+  return <p class="muted small tg-caveats">Recording: {chips.map((c, i) => <span key={c.k} title={c.title}>{i > 0 && " · "}{c.text}</span>)}</p>;
 }
 
 /** the viewer's own (compare-able) activity in this session */
@@ -84,46 +80,12 @@ function mineOf(s: TSession): TParticipant | undefined {
   return s.participants.find((p) => p.person === v && p.role !== "other" && p.has_fit);
 }
 
-/** "How it went": the neutral headline ("⚡ 15×400 · 2 members · fastest rep 1:15.6"), the detection label and the tools
- *  (Compare with my other sessions, Replay, Heart rate); recording caveats under it. The title, date and people
- *  are in the community hero and the member cards above. */
-function SessionBar({ s, hr, replayable, replayOpen }: { s: TSession; hr: boolean; replayable: boolean; replayOpen: boolean }) {
-  const g = s.group;
-  const kindL = KIND_LABEL[s.kind] ?? s.kind;
-  const span = s.participants.find((p) => p.together)?.together?.text;
+/** "Compare with my other … sessions" (the viewer's own activity in Compare) */
+function CompareLink({ s }: { s: TSession }) {
   const mine = mineOf(s);
-  const cmpWhat = mine ? (mine.signature ?? (mine.workout ?? "").toLowerCase()) : "";
-  const hint = LABELS.find((l) => l.id === g.label)?.hint;
-  const h = s.headline;
-  const showH = !!h?.text && h.kind !== "unverified" && !g.no_track;
-  const parts = showH ? h.text.split(" · ") : [];
-  const lead = parts.shift();
-  return (
-    <section class="cs-bar">
-      <div class="head">
-        <h2>How it went</h2>
-        <span class="sub"><span class={"tg-badge " + g.label} title={hint}>{labelShort(g.label)}</span>{" "}{kindL}{span ? ` · ${span}` : ""}
-          {g.place?.name_local ? <span class="muted" title={placeText(g.place)}> · {g.place.name_local}</span> : null}</span>
-        <div class="tools">
-          {mine && cmpWhat && !g.no_track && (
-            <a class="btn tg-cmp" href={withPerson(`/compare?suggest=${mine.activity_id}`, mine.person)}
-              title={`Your other sessions like this one, in Compare (${personName(mine.key)}'s activities)`}>Compare with my other {cmpWhat} sessions →</a>
-          )}
-          {replayable && <button class={replayOpen ? "on tg-toggle" : "tg-toggle"} aria-pressed={replayOpen} onClick={() => setQuery({ replay: replayOpen ? null : 1, rrep: null })}
-            title={replayOpen ? "Close the replay" : "Everyone's dot running on the map, on one clock"}>{replayOpen ? "Replay ✕" : "Replay ▶"}</button>}
-          {!g.no_track && <button class={hr ? "on tg-toggle" : "tg-toggle"} aria-pressed={hr} onClick={() => setQuery({ hr: hr ? null : 1 })}
-            title="Heart rate traces per rep and effort across the session">♥ Heart rate</button>}
-        </div>
-      </div>
-      {showH && lead && (
-        <div class="tg-hero">
-          <span class="big">{h.kind === "race" ? "🏁 " : h.kind === "intervals" ? "⚡ " : "👥 "}{lead}</span>
-          {parts.length > 0 && <span class="rest">{parts.join(" · ")}</span>}
-        </div>
-      )}
-      <Caveats s={s} />
-    </section>
-  );
+  const what = mine ? (mine.signature ?? (mine.workout ?? "").toLowerCase()) : "";
+  if (!mine || !what || s.group.no_track) return null;
+  return <a href={withPerson(`/compare?suggest=${mine.activity_id}`, mine.person)} title={`${personName(mine.key)}'s other sessions like this one, in Compare`}>Compare with my other {what} sessions</a>;
 }
 
 // ------------------------------------------------------------------ intervals
@@ -142,7 +104,7 @@ function Leaderboard({ s, iv }: { s: TSession; iv: Intervals }) {
   const anySus = iv.leaderboard.some((l) => (l.suspect ?? []).length);
   return (
     <div class="card">
-      <div class="head sm"><h2>Leaderboard</h2><span class="sub">every rep each person ran counts · ordered by average rep pace (total time ÷ total distance of their own reps)</span></div>
+      <div class="head sm"><h2>Leaderboard</h2><span class="sub">ordered by average rep pace over each person's own reps</span></div>
       <div class="tg-mxwrap"><table class="tg-tbl lb">
         <thead><tr>
           <th></th><th>Person</th><th class="num" title="Full reps run (partial reps not counted)">Reps</th>
@@ -157,9 +119,9 @@ function Leaderboard({ s, iv }: { s: TSession; iv: Intervals }) {
             const fade = l.fade_s ?? l.fade_s_km;
             return (
               <tr key={l.person}>
-                <td class="rank">{l.rank !== null ? MEDAL[l.rank - 1] ?? l.rank : ""}</td>
-                <td><span class="pn"><Av p={l.person} /><span class={l.person === s.viewer ? "me" : ""}>{personName(l.person)}</span></span></td>
-                <td class="num" title={l.n_partial ? `+ ${l.n_partial} partial` : undefined}>{l.reps_done}{l.n_partial ? <span class="muted small"> +{l.n_partial}◐</span> : null}</td>
+                <td class="rank">{l.rank ?? ""}</td>
+                <td><span class={l.person === s.viewer ? "me" : ""}>{personName(l.person)}</span></td>
+                <td class="num" title={l.n_partial ? `+ ${l.n_partial} partial` : undefined}>{l.reps_done}{l.n_partial ? <span class="muted small"> +{l.n_partial} partial</span> : null}</td>
                 <td class="num"><span class="nm2 r">{l.by_target.length ? l.by_target.map((t) => (
                   <span key={t.text}>{t.kind === "dist" ? repTime(t.avg_s) : `${t.avg_m ?? "—"} m`}{nT > 1 || l.by_target.length > 1 ? <span class="muted small"> {t.text} ×{t.n}</span> : null}</span>
                 )) : "—"}</span></td>
@@ -184,80 +146,12 @@ function cellMain(c: Cell, timeSlot: boolean) {
   return repTime(c.partial ? c.own_time_s ?? c.time_s : c.result_s ?? c.time_s);
 }
 
-/** chips shown per rep row before "+k" (10–20 people stay one or two lines; phones: the podium + you) */
-const boardTop = () => (typeof window !== "undefined" && window.innerWidth < 500 ? 3 : 6);
-
-/** the primary results view for intervals: one row per rep (label + set distance), then everyone who ran it as a chip,
- *  fastest first, with a medal for the top 3, their time and the gap to the rep's fastest. Click a row: the close-up. */
-function RepBoard({ iv, sel, onSel, viewer }: { iv: Intervals; sel: string | null; onSel: (l: string) => void; viewer: string | null }) {
-  useTheme();
-  const [open, setOpen] = useState<Record<number, boolean>>({});
-  const keys = Object.keys(iv.reps);
-  return (
-    <div class="tg-rb" role="list">
-      {iv.slots.map((sl) => {
-        const st = iv.standings[sl.slot];
-        const timeSlot = sl.target?.kind === "time";
-        const cu = iv.rep_closeups.find((c) => c.slot === sl.label);
-        const ranked = st.order.map((o) => ({ k: o.person, o, c: iv.reps[o.person][sl.slot]! }));
-        const rest = keys.filter((k) => iv.reps[k][sl.slot] && !st.order.some((o) => o.person === k)).map((k) => ({ k, o: null, c: iv.reps[k][sl.slot]! }));
-        const chips = [...ranked, ...rest];
-        const top = boardTop();
-        const many = chips.length > top + 1 && !open[sl.slot];
-        // the top N, plus "you" when further down (so your own result is always on the row)
-        const shown = many ? chips.filter((x, i) => i < top || x.k === viewer) : chips;
-        const medals = st.order.length >= 2;
-        return (
-          <div key={sl.slot} role="listitem" class={"tg-rb-row" + (sel === sl.label ? " selected" : "") + (cu?.available ? " clickable" : "") + (!sl.anchor ? " extra" : "") + (sl.warmup ? " warmup" : "")}
-            onClick={cu?.available ? () => onSel(sl.label) : undefined} title={cu?.available ? `${rl(sl.label, false)}: show the close-up` : undefined}>
-            <div class="tg-rb-lab"><b>{rl(sl.label)}</b><span class="muted">{sl.target?.text ?? ""}</span></div>
-            <div class="tg-rb-chips">
-              {shown.map(({ k, o, c }) => {
-                const gap = o && o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? `−${Math.round(o.gap_m)} m` : `+${secs(o.gap_s, 1)}`) : null;
-                const tip = [personName(k), cellMain(c, timeSlot), o ? (o.tie ? `dead heat (within ${o.tie_s} s)` : o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : behind(o.gap_s)) + " the fastest" : "fastest") : null,
-                  c.partial ? `partial: ${dur(c.own_time_s)} for ${Math.round(c.own_dist_m ?? 0)} m, not ranked` : null,
-                  c.warmup ? `${c.warmup}: ${c.warmup_reason ?? ""} (not counted)` : !o && !c.partial ? "only one person ran this rep" : null,
-                  c.suspect ? `⚠ suspect: ${c.suspect}` : null, c.source === "onset" ? "from the speed step" : null,
-                  c.effort_pct ? `peak HR ${c.effort_pct} %` : null].filter(Boolean).join(" · ");
-                return (
-                  <span key={k} class={"tg-rb-chip" + (c.partial ? " partial" : "") + (k === viewer ? " me" : "") + (o?.rank === 1 && medals ? " first" : "")}
-                    style={{ "--pc": personColour(k) } as any} title={tip}>
-                    {(c.partial || (o && medals)) && <span class="rk">{c.partial ? "◐" : MEDAL[o!.rank - 1] ?? o!.rank}</span>}
-                    <Av p={k} size="xs" />
-                    <span class="nm">{personInfo(k).name}</span>
-                    <b class="v">{cellMain(c, timeSlot)}{c.suspect ? <span class="sus">?</span> : null}{c.source === "onset" ? <sup>≈</sup> : null}</b>
-                    {gap && <small class="g">{gap}</small>}
-                  </span>
-                );
-              })}
-              {many && <button class="tg-rb-more" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [sl.slot]: true }); }}
-                title="Show everyone who ran this rep">+{chips.length - shown.length}</button>}
-            </div>
-            <button class="tg-rp-row" title={`Replay ${rl(sl.label, false)}: everyone from the start line`} aria-label={`Replay ${rl(sl.label, false)}`}
-              onClick={(e) => { e.stopPropagation(); setQuery({ replay: 1, rrep: sl.label }); }}>▶</button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/** results per rep: the board (default) or the wide table (a column per person; handy with a few people) */
+/** results per rep: a row per rep, a column per person (fastest of the rep in bold) */
 function RepResults({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
-  const { query } = useLocation();
-  const table = query.get("rv") === "table";
   return (
     <div class="card tg-rep-results">
-      <div class="head sm"><h2>Rep by rep</h2><span class="sub">each rep ranked among whoever ran it · click a rep for the close-up, ▶ to replay it</span>
-        <div class="tools">
-          <div class="seg" role="group" aria-label="View">
-            <button class={!table ? "on" : ""} onClick={() => setQuery({ rv: null })} title="A row per rep, everyone who ran it fastest first">Board</button>
-            <button class={table ? "on" : ""} onClick={() => setQuery({ rv: "table" })} title="A column per person">Table</button>
-          </div>
-        </div>
-      </div>
-      {table ? <Standings s={s} iv={iv} sel={sel} onSel={onSel} /> : <RepBoard iv={iv} sel={sel} onSel={onSel} viewer={s.viewer} />}
-      <p class="note small">🥇🥈🥉 fastest three of the rep · +s behind the rep's fastest · = dead heat (within the recording precision) · ◐ partial (not ranked) · ≈ found from the speed step · ? suspect (hover)</p>
+      <div class="head sm"><h2>Rep by rep</h2><span class="sub">bold = fastest of the rep · +s behind it · = dead heat · * partial (not ranked) · ≈ from the speed step · ? suspect (hover)</span></div>
+      <Standings s={s} iv={iv} sel={sel} onSel={onSel} />
     </div>
   );
 }
@@ -265,8 +159,6 @@ function RepResults({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: st
 function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
   void s;
   const keys = Object.keys(iv.reps);
-  let maxGap = 0;
-  for (const st of iv.standings) for (const o of st.order) maxGap = Math.max(maxGap, o.gap_s);
   const many = keys.length > 3;
   return (
     <>
@@ -274,8 +166,7 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
         <table class="tg-tbl mx">
           <thead><tr>
             <th>Rep</th><th>Set</th>
-            {keys.map((k) => <th key={k} class="pcol"><span class="pn"><Av p={k} size="sm" />{many ? personInfo(k).initials : personName(k)}</span></th>)}
-            <th class="rp" aria-label="Replay"></th>
+            {keys.map((k) => <th key={k} class="pcol" title={personName(k)}>{many ? personInfo(k).initials : personName(k)}</th>)}
           </tr></thead>
           <tbody>
             {iv.slots.map((sl) => {
@@ -292,9 +183,7 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
                     const c = iv.reps[k][sl.slot];
                     if (!c) return <td key={k} class="cell none muted">—</td>;
                     const o = st.order.find((x) => x.person === k);
-                    const tint = o && maxGap > 0 && o.gap_s > (o.tie_s ?? 1) ? Math.round(4 + (o.gap_s / maxGap) * 18) : 0;
-                    const style = tint ? { background: `color-mix(in srgb, var(--state-duplicate) ${tint}%, transparent)` } : undefined;
-                    const tip = [c.suspect ? `⚠ suspect: ${c.suspect}` : null,
+                    const tip = [c.suspect ? `suspect: ${c.suspect}` : null,
                       c.partial ? `partial: ${dur(c.own_time_s)} for ${Math.round(c.own_dist_m ?? 0)} m, not ranked` : null,
                       c.source === "onset" ? "from the speed step (no rep detected on this watch)" : null,
                       c.method === "merged" ? "two detected pieces merged" : null, c.method === "interpolated" ? "time at the set distance (interpolated)" : null,
@@ -302,17 +191,15 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
                       o && o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : behind(o.gap_s)) + " the rep's fastest" : null,
                       c.hr_peak ? `peak HR ${c.hr_peak} bpm` : null].filter(Boolean).join(" · ");
                     return (
-                      <td key={k} class={"cell" + (c.partial ? " partial" : "") + (!o && !c.partial ? " unranked" : "") + (c.suspect ? " suspect" : "")} style={style} title={tip}>
-                        <span class="m">{c.suspect ? <span class="sus">?</span> : o ? (o.tie ? <span class="tie" title="dead heat">=</span> : MEDAL[o.rank - 1] ?? (many ? <span class="rk">{o.rank}</span> : "")) : c.partial ? "◐" : ""}</span>
-                        <span class="v">{cellMain(c, timeSlot)}{c.source === "onset" ? <sup>≈</sup> : null}</span>
+                      <td key={k} class={"cell" + (c.partial ? " partial" : "") + (!o && !c.partial ? " unranked" : "") + (c.suspect ? " suspect" : "")} title={tip}>
+                        <span class="m">{c.suspect ? <span class="sus">?</span> : o?.tie ? <span class="tie" title="dead heat">=</span> : c.partial ? "*" : ""}</span>
+                        <span class="v">{o?.rank === 1 && st.order.length >= 2 ? <b>{cellMain(c, timeSlot)}</b> : cellMain(c, timeSlot)}{c.source === "onset" ? <sup>≈</sup> : null}</span>
                         {o && o.gap_s > 0.05 && <span class="g">{timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : many ? secs(o.gap_s, 1) : behind(o.gap_s)}</span>}
                         {c.partial && c.own_dist_m ? <span class="g">{Math.round(c.own_dist_m)} m</span> : null}
                         {c.effort_pct ? <span class="e">{c.effort_pct} %</span> : null}
                       </td>
                     );
                   })}
-                  <td class="rp"><button class="tg-rp-row" title={`Replay ${rl(sl.label, false)}: everyone from the start line`} aria-label={`Replay ${rl(sl.label, false)}`}
-                    onClick={(e) => { e.stopPropagation(); setQuery({ replay: 1, rrep: sl.label }); }}>▶</button></td>
                 </tr>
               );
             })}
@@ -346,7 +233,7 @@ function RepTrend({ s, iv, sel }: { s: TSession; iv: Intervals; sel: string | nu
   const fmt = (v: number) => (one ? repTime(v) : paceText(v, s.group.sport));
   return (
     <div class="card">
-      <div class="head sm"><h2>{one ? "Rep times" : "Rep pace"}</h2><span class="sub">each person's own reps across the session (faster on top{one ? "" : "; pace, as the distances differ"}; suspect reps left out)</span></div>
+      <div class="head sm"><h2>{one ? "Rep times" : "Rep pace"}</h2><span class="sub">faster on top{one ? "" : " (pace, as the distances differ)"}</span></div>
       <div class="tg-legend">
         {i === null ? <span class="muted">hover a rep</span> : <>
           <span class="muted">{rl(iv.slots[i].label, false)}{iv.slots[i].target ? ` · ${iv.slots[i].target!.text}` : ""}</span>
@@ -360,8 +247,8 @@ function RepTrend({ s, iv, sel }: { s: TSession; iv: Intervals; sel: string | nu
   );
 }
 
-function RepCloseup({ s, iv, cu, replay, align, onSel, onReplay }: {
-  s: TSession; iv: Intervals; cu: Closeup; replay: Replay | null; align: "own" | "clock"; onSel: (l: string) => void; onReplay: () => void;
+function RepCloseup({ s, iv, cu, replay, align, onSel }: {
+  s: TSession; iv: Intervals; cu: Closeup; replay: Replay | null; align: "own" | "clock"; onSel: (l: string) => void;
 }) {
   const theme = useTheme();
   const A = (align === "clock" ? cu.clock : cu.own)!;
@@ -394,9 +281,9 @@ function RepCloseup({ s, iv, cu, replay, align, onSel, onReplay }: {
       <div class="head sm">
         <h2>Rep close-up</h2>
         <div class="seg reppick" role="group" aria-label="Rep">
-          <button disabled={pi <= 0} onClick={() => onSel(avail[pi - 1])} aria-label="Previous rep">◀</button>
+          <button disabled={pi <= 0} onClick={() => onSel(avail[pi - 1])} aria-label="Previous rep">Prev</button>
           <button class="on" disabled>{rl(cu.slot, false)}{slot.target ? ` · ${slot.target.text}` : ""}</button>
-          <button disabled={pi >= avail.length - 1} onClick={() => onSel(avail[pi + 1])} aria-label="Next rep">▶</button>
+          <button disabled={pi >= avail.length - 1} onClick={() => onSel(avail[pi + 1])} aria-label="Next rep">Next</button>
         </div>
         <div class="tools">
           <div class="seg" role="group" aria-label="Start alignment">
@@ -407,9 +294,7 @@ function RepCloseup({ s, iv, cu, replay, align, onSel, onReplay }: {
       </div>
       <div class="tg-cu-map">
         {replay ? (
-          <TogetherMap lines={lines} dots={dots} fitKey={s.gid + ":" + cu.slot}>
-            <button class="overlay tg-replay-btn" onClick={onReplay} title="Run the whole session on the map">Replay ▶</button>
-          </TogetherMap>
+          <TogetherMap lines={lines} dots={dots} fitKey={s.gid + ":" + cu.slot} />
         ) : <div class="map bordered"><div class="msg">Loading track…</div></div>}
       </div>
       <div class="tg-legend">
@@ -447,12 +332,12 @@ function Breaks({ s, iv }: { s: TSession; iv: Intervals }) {
   const mode = effortLabel(iv.leaderboard[0]?.effort_mode);
   return (
     <section>
-      <div class="head"><h2>Breaks · recovery</h2><span class="sub">how much HR dropped in the first 30 s of the break, and HR at the next start (as % of {mode}); Faster recovery = the larger drop</span></div>
+      <div class="head"><h2>Breaks · recovery</h2><span class="sub">HR drop in the first 30 s and HR at the next start (% of {mode})</span></div>
       <div class="tg-mxwrap">
         <table class="tg-tbl br" style={{ width: "auto" }}>
           <thead>
             <tr><th rowSpan={2}>After rep</th>
-              {keys.map((k) => <th key={k} colSpan={3} class="pgrp" style={{ borderBottomColor: personColour(k) }}><span class="pn"><Av p={k} size="sm" />{personName(k)}</span></th>)}
+              {keys.map((k) => <th key={k} colSpan={3} class="pgrp" style={{ borderBottomColor: personColour(k) }}>{personName(k)}</th>)}
               <th rowSpan={2} title="Who's HR dropped more in the first 30 s">Faster recovery</th></tr>
             <tr>{keys.map((k) => [<th key={k + "d"} class="num">Break</th>, <th key={k + "h"} class="num" title="HR drop in the first 30 s of the break">HR drop 30 s</th>, <th key={k + "n"} class="num">Next start</th>])}</tr>
           </thead>
@@ -472,7 +357,7 @@ function Breaks({ s, iv }: { s: TSession; iv: Intervals }) {
                       <td key={k + "n"} class="num" title={b.hr_next_start ? `${b.hr_next_start} bpm` : ""}>{b.hr_next_start_pct !== null ? `${b.hr_next_start_pct} %` : "—"}</td>,
                     ];
                   })}
-                  <td>{rf ? <span class="pn"><Av p={rf.person} size="sm" />{personName(rf.person)}</span> : ""}</td>
+                  <td>{rf ? personName(rf.person) : ""}</td>
                 </tr>
               );
             })}
@@ -501,7 +386,7 @@ function HeartIntervals({ s, iv, cu, replay }: { s: TSession; iv: Intervals; cu:
   const mode = effortLabel(iv.leaderboard[0]?.effort_mode);
   return (
     <section>
-      <div class="head"><h2>Heart rate</h2><span class="sub">% of {mode}{s.participants.some((p) => p.hr_norm?.warn) ? " (⚠ max HR from the watch's zone settings)" : ""}</span></div>
+      <div class="head"><h2>Heart rate</h2><span class="sub">% of {mode}{s.participants.some((p) => p.hr_norm?.warn) ? " (max HR from the watch's zone settings)" : ""}</span></div>
       <div class="tg-grid2">
         <div class="card">
           <div class="head sm"><h2>{cu ? rl(cu.slot, false) : "Rep"}</h2><span class="sub">HR from 15 s before the own start (0) to 45 s after the rep</span></div>
@@ -516,7 +401,20 @@ function HeartIntervals({ s, iv, cu, replay }: { s: TSession; iv: Intervals; cu:
   );
 }
 
-function IntervalsView({ s, iv, replay, hr, top, middle }: { s: TSession; iv: Intervals; replay: Replay | null; hr: boolean; top?: ComponentChildren; middle?: ComponentChildren }) {
+/** "More detail": folded by default, its content rendered only when open (?more=1; the replay opens it too) */
+function More({ open, children }: { open: boolean; children: ComponentChildren }) {
+  return (
+    <details class="cs-more" open={open}
+      onToggle={(e) => { const o = (e.currentTarget as HTMLDetailsElement).open; if (o !== open) setQuery(o ? { more: 1 } : { more: null, replay: null, rrep: null }); }}>
+      <summary>More detail</summary>
+      {open && <div class="cs-more-body">{children}</div>}
+    </details>
+  );
+}
+
+interface ViewProps { s: TSession; replay: Replay | null; between?: ComponentChildren; more: boolean; extra?: ComponentChildren; photos?: ComponentChildren }
+
+function IntervalsView({ s, iv, replay, between, more, extra, photos }: ViewProps & { iv: Intervals }) {
   const { query } = useLocation();
   const align = query.get("align") === "clock" ? "clock" : "own";
   const avail = iv.rep_closeups.filter((c) => c.available);
@@ -526,27 +424,31 @@ function IntervalsView({ s, iv, replay, hr, top, middle }: { s: TSession; iv: In
   const onSel = (l: string) => setQuery({ rep: l });
   return (
     <>
-      {top}
-      <div class="tg-body">
-        <div class="tg-col">
-          <RepResults s={s} iv={iv} sel={cu?.slot ?? null} onSel={onSel} />
-          <Leaderboard s={s} iv={iv} />
+      <RepResults s={s} iv={iv} sel={cu?.slot ?? null} onSel={onSel} />
+      <CommunitySessionSplits s={s} />
+      {between}
+      <More open={more}>
+        <div class="tg-body">
+          <div class="tg-col">
+            <Leaderboard s={s} iv={iv} />
+            <RepTrend s={s} iv={iv} sel={cu?.slot ?? null} />
+          </div>
+          <div class="tg-col side">
+            {cu ? <RepCloseup s={s} iv={iv} cu={cu} replay={replay} align={align} onSel={onSel} />
+              : <div class="card"><div class="empty">No rep close-up: no rep with a set distance that two or more people ran.</div></div>}
+          </div>
         </div>
-        <div class="tg-col side">
-          {cu ? <RepCloseup s={s} iv={iv} cu={cu} replay={replay} align={align} onSel={onSel} onReplay={() => setQuery({ replay: 1, rrep: cu.slot })} />
-            : <div class="card"><div class="empty">No rep close-up: no rep with a set distance that two or more people ran.</div></div>}
-          <RepTrend s={s} iv={iv} sel={cu?.slot ?? null} />
-        </div>
-      </div>
-      {middle}
-      <Breaks s={s} iv={iv} />
-      {hr && <HeartIntervals s={s} iv={iv} cu={cu} replay={replay} />}
+        {extra}
+        <Breaks s={s} iv={iv} />
+        <HeartIntervals s={s} iv={iv} cu={cu} replay={replay} />
+        {photos}
+      </More>
     </>
   );
 }
 
 // ------------------------------------------------------------------ continuous
-function ContinuousView({ s, replay, hr, top, middle }: { s: TSession; replay: Replay | null; hr: boolean; top?: ComponentChildren; middle?: ComponentChildren }) {
+function ContinuousView({ s, replay, between, more, extra, photos }: ViewProps) {
   const theme = useTheme();
   const c = s.continuous!;
   const race = s.group.label === "same_race";
@@ -609,7 +511,7 @@ function ContinuousView({ s, replay, hr, top, middle }: { s: TSession; replay: R
     values: hx.map((m) => hrPct(pOf(k), valAt(replay.people[k].t, replay.people[k].hr, m * 60))) })), [replay, hx, theme]);
   const last = c.finish?.[c.finish.length - 1];
 
-  if (!c.available) return <>{top}<section><p class="note">{c.why ?? "No comparison available."}</p></section>{middle}</>;
+  if (!c.available) return <><section><p class="note">{c.why ?? "No comparison available."}</p></section>{between}<More open={more}>{extra}{photos}</More></>;
   const apartCard = ap && wasTogether && ax.length > 1 && (
     <div class="card">
       <div class="head sm"><h2>Distance apart</h2><span class="sub">straight line between you, metres · dashed: not side by side</span></div>
@@ -619,35 +521,46 @@ function ContinuousView({ s, replay, hr, top, middle }: { s: TSession; replay: R
   );
   return (
     <>
-      {top}
-      <div class="tg-body">
-        <div class="tg-col">
-          {c.race && c.race.length > 0 && (
-            <div class="card">
-              <div class="head sm"><h2>Race result</h2><span class="sub">each person's own recorded race</span></div>
-              <div class="tg-mxwrap"><table class="tg-tbl lb">
-                <thead><tr><th></th><th>Person</th><th class="num">Time</th><th class="num">Gap</th><th class="num">Distance</th><th class="num">{speedLabel(sport)}</th></tr></thead>
-                <tbody>{c.race.map((r) => (
-                  <tr key={r.person}><td class="rank">{MEDAL[r.rank - 1] ?? r.rank}</td>
-                    <td><span class="pn"><Av p={r.person} /><span class={r.person === s.viewer ? "me" : ""}>{personName(r.person)}</span></span></td>
-                    <td class="num"><b>{dur(r.time_s)}</b></td><td class="num">{r.rank === 1 ? <span class="muted">first</span> : behind(r.gap_s)}</td>
-                    <td class="num">{r.dist_km ? `${r.dist_km.toFixed(2)} km` : "—"}</td><td class="num">{r.dist_km ? speedText(sport, (r.dist_km * 1000) / r.time_s) : "—"}</td></tr>
-                ))}</tbody>
-              </table></div>
-              {race && <p class="note small">{c.split_at_m !== null && c.split_at_m !== undefined && last
-                ? `${personName(last.person)} lost contact at ${(c.split_at_m / 1000).toFixed(1)} km (more than 10 s behind from there on).`
-                : ""}{ap && !wasTogether ? ` Side by side only ${ap.with_pct ?? 0} % of the time, so there is no distance-apart chart.` : ""}</p>}
-            </div>
-          )}
-          {wasTogether && ap && (
-            <div class="tg-stats">
-              <div><b>{ap.with_pct ?? "—"} %</b><span>of the time side by side</span></div>
-              <div><b>{ap.within_20m_pct ?? "—"} %</b><span>within 20 m</span></div>
-              <div><b>{ap.median_apart_m ?? "—"} m</b><span>median apart (side by side)</span></div>
-              {c.common_m ? <div><b>{km(c.common_m / 1000)} km</b><span>same stretch</span></div> : null}
-            </div>
-          )}
-          {!race && apartCard}
+      {c.race && c.race.length > 0 && (
+        <div class="card">
+          <div class="head sm"><h2>Race result</h2><span class="sub">each person's own recorded race</span></div>
+          <div class="tg-mxwrap"><table class="tg-tbl lb">
+            <thead><tr><th></th><th>Person</th><th class="num">Time</th><th class="num">Gap</th><th class="num">Distance</th><th class="num">{speedLabel(sport)}</th></tr></thead>
+            <tbody>{c.race.map((r) => (
+              <tr key={r.person}><td class="rank">{r.rank}</td>
+                <td><span class={r.person === s.viewer ? "me" : ""}>{personName(r.person)}</span></td>
+                <td class="num"><b>{dur(r.time_s)}</b></td><td class="num">{r.rank === 1 ? <span class="muted">first</span> : behind(r.gap_s)}</td>
+                <td class="num">{r.dist_km ? `${r.dist_km.toFixed(2)} km` : "—"}</td><td class="num">{r.dist_km ? speedText(sport, (r.dist_km * 1000) / r.time_s) : "—"}</td></tr>
+            ))}</tbody>
+          </table></div>
+          {race && c.split_at_m !== null && c.split_at_m !== undefined && last && <p class="note small">{personName(last.person)} lost contact at {(c.split_at_m / 1000).toFixed(1)} km (more than 10 s behind from there on).</p>}
+        </div>
+      )}
+      {(c.km_splits?.length ?? 0) > 0 && (
+        <div class="card">
+          <div class="head sm"><h2>Splits per km</h2><span class="sub">{race ? "each person's own distance, the whole race" : c.clock === "moving" ? "moving time on the shared route" : "on the shared route"} · bold = fastest that km</span></div>
+          <div class="tg-mxwrap">
+            <table class="tg-tbl mx km">
+              <thead><tr><th>km</th>{keys.map((k) => <th key={k} class="pcol">{personName(k)}</th>)}</tr></thead>
+              <tbody>{c.km_splits!.map((r) => (
+                <tr key={r.km}><td class="rl">{r.km}</td>
+                  {keys.map((k) => {
+                    const v = r.people[k];
+                    return <td key={k} class="cell">{v?.time_s ? <><span class="v">{v.rank === 1 && keys.length > 1 ? <b>{dur(v.time_s)}</b> : dur(v.time_s)}</span>{v.gap_s ? <span class="g">{behind(v.gap_s, "s", 0)}</span> : null}</> : "—"}</td>;
+                  })}</tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {between}
+      <More open={more}>
+        {wasTogether && ap && (
+          <p class="tg-stats-line">{ap.with_pct ?? "—"} % of the time side by side · {ap.within_20m_pct ?? "—"} % within 20 m · median {ap.median_apart_m ?? "—"} m apart{c.common_m ? ` · ${km(c.common_m / 1000)} km same stretch` : ""}</p>
+        )}
+        {race && ap && !wasTogether && <p class="note small">Side by side only {ap.with_pct ?? 0} % of the time, so there is no distance-apart chart.</p>}
+        <div class="tg-body">
+          <div class="tg-col">
           {god && gx.length > 1 && (
             <div class="card">
               <div class="head sm"><h2>Gap over distance</h2><span class="sub">{race ? "time behind the front at each point of the course (front on top)"
@@ -674,47 +587,27 @@ function ContinuousView({ s, replay, hr, top, middle }: { s: TSession; replay: R
               {(god.flagged ?? 0) > 0 && <p class="note small">{god.flagged} point{god.flagged === 1 ? "" : "s"} left out: a track snapped to another part of the path (GPS / projection), not a real gap.</p>}
             </div>
           )}
-          {race && apartCard}
-        </div>
-        <div class="tg-col side">
-          <div class="card">
-            <div class="head sm"><h2>Map</h2><span class="sub">{cur ? "dots at the chart cursor" : "hover a chart to place the dots"}</span></div>
-            <div class="tg-cu-map tall">
-              {replay ? (
-                <TogetherMap lines={lines} dots={dots} fitKey={s.gid}>
-                  <button class="overlay tg-replay-btn" onClick={() => setQuery({ replay: 1 })} title="Run the session on the map">Replay ▶</button>
-                </TogetherMap>
-              ) : <div class="map bordered"><div class="msg">Loading track…</div></div>}
-            </div>
-            <MapLegend keys={keys} viewer={s.viewer} />
+            {apartCard}
           </div>
-          {(c.km_splits?.length ?? 0) > 0 && (
+          <div class="tg-col side">
             <div class="card">
-              <div class="head sm"><h2>Splits per km</h2><span class="sub">{race ? "each person's own distance, the whole race" : c.clock === "moving" ? "moving time on the shared route" : "on the shared route"}</span></div>
-              <div class="tg-mxwrap">
-                <table class="tg-tbl mx km">
-                  <thead><tr><th>km</th>{keys.map((k) => <th key={k} class="pcol"><span class="pn"><Av p={k} size="sm" />{personName(k)}</span></th>)}</tr></thead>
-                  <tbody>{c.km_splits!.map((r) => (
-                    <tr key={r.km}><td class="rl">{r.km}</td>
-                      {keys.map((k) => {
-                        const v = r.people[k];
-                        return <td key={k} class="cell">{v?.time_s ? <><span class="m">{v.rank === 1 ? "▲" : ""}</span><span class="v">{dur(v.time_s)}</span>{v.gap_s ? <span class="g">{behind(v.gap_s, "s", 0)}</span> : null}</> : "—"}</td>;
-                      })}</tr>
-                  ))}</tbody>
-                </table>
+              <div class="head sm"><h2>Map</h2><span class="sub">{cur ? "dots at the chart cursor" : "hover a chart to place the dots"}</span></div>
+              <div class="tg-cu-map tall">
+                {replay ? <TogetherMap lines={lines} dots={dots} fitKey={s.gid} /> : <div class="map bordered"><div class="msg">Loading track…</div></div>}
               </div>
-              <p class="note small">▲ fastest that km</p>
+              <MapLegend keys={keys} viewer={s.viewer} />
             </div>
-          )}
+          </div>
         </div>
-      </div>
-      {middle}
-      {hr && hs.length > 0 && (
-        <section>
-          <div class="head"><h2>Heart rate</h2><span class="sub">% of max HR over the clock{s.participants.some((p) => p.hr_norm?.warn) ? " (⚠ max HR from the watch's zone settings)" : ""}</span></div>
-          <TLine x={hx} series={hs} height={180} xFmt={(v) => `${Math.round(v)} min`} yFmt={(v) => `${Math.round(v)} %`} />
-        </section>
-      )}
+        {extra}
+        {hs.length > 0 && (
+          <section>
+            <div class="head"><h2>Heart rate</h2><span class="sub">% of max HR over the clock{s.participants.some((p) => p.hr_norm?.warn) ? " (max HR from the watch's zone settings)" : ""}</span></div>
+            <TLine x={hx} series={hs} height={180} xFmt={(v) => `${Math.round(v)} min`} yFmt={(v) => `${Math.round(v)} %`} />
+          </section>
+        )}
+        {photos}
+      </More>
     </>
   );
 }
@@ -763,7 +656,7 @@ function Unverified({ s, replay }: { s: TSession; replay: Replay | null }) {
           <div class="tg-mxwrap"><table class="tg-tbl lb">
             <thead><tr><th>Person</th><th>Activity</th><th class="num">Distance</th><th class="num">Time</th><th>Track</th></tr></thead>
             <tbody>{s.participants.map((p) => (
-              <tr key={p.key}><td><span class="pn"><Av p={p.key} />{personName(p.key)}</span></td>
+              <tr key={p.key}><td>{personName(p.key)}</td>
                 <td><a href={withPerson(`/activities/${p.activity_id}`, p.person)}>{p.name}</a></td>
                 <td class="num">{p.dist_km ? `${km(p.dist_km)} km` : "—"}</td><td class="num">{dur(p.dur_s)}</td>
                 <td>{p.has_gps ? "GPS" : p.has_fit ? "no GPS" : <span class="muted">no watch file</span>}</td></tr>
@@ -781,19 +674,14 @@ function Unverified({ s, replay }: { s: TSession; replay: Replay | null }) {
   );
 }
 
-/** the replay where the story gets to it (after the standings): the panel when open, else a one-line invitation */
-function ReplaySection({ s, rp, replay, open, hr }: { s: TSession; rp: { data: Replay | null; error: string | null }; replay: Replay | null; open: boolean; hr: boolean }) {
+/** the replay (inside "More detail"): the panel when started, else one button */
+function ReplaySection({ s, rp, replay, open }: { s: TSession; rp: { data: Replay | null; error: string | null }; replay: Replay | null; open: boolean }) {
   const { query } = useLocation();
-  const unit = s.intervals ? "a rep" : "a km";
   return (
     <section class="tg-replay-sec">
-      <div class="head"><h2>Replay</h2><span class="sub">everyone on one clock · pick {unit} to run it from the start line{open ? " · space = play / pause" : ""}</span></div>
-      {!open ? (
-        <button class="cs-replay-cta" onClick={() => setQuery({ replay: 1, rrep: null })}>
-          <span class="cs-replay-play" aria-hidden="true">▶</span>
-          <span><b>Run it again</b><span class="muted"> — every dot on the map, who passed whom and when{s.intervals ? "; or press ▶ on a rep above" : ""}</span></span>
-        </button>
-      ) : replay ? <ReplayPanel s={s} r={replay} hr={hr} startRep={query.get("rrep")} onClose={() => setQuery({ replay: null, rrep: null })} />
+      <div class="head"><h2>Replay</h2><span class="sub">everyone on one clock{open ? " · space = play / pause" : ""}</span></div>
+      {!open ? <button onClick={() => setQuery({ replay: 1, rrep: null })}>Start replay</button>
+        : replay ? <ReplayPanel s={s} r={replay} hr startRep={query.get("rrep")} onClose={() => setQuery({ replay: null, rrep: null })} />
         : <div class="empty">{rp.error ?? (rp.data && !rp.data.available ? rp.data.note ?? "No positions to replay." : "Loading positions…")}</div>}
     </section>
   );
@@ -804,13 +692,13 @@ export function TogetherSession({ gid }: { gid: string }) {
   const { data: raw, error } = useApi<TSession>(`/api/together/${encodeURIComponent(gid)}`);
   const s = useMemo(() => (raw ? ordered(raw) : null), [raw]);
   const { data: c } = useCommunity(gid);
-  const hr = query.get("hr") === "1";
   const replayOpen = query.get("replay") === "1";
+  const more = query.get("more") === "1" || replayOpen;
   if (s) setPeopleInfo(s.people);
   const facts = useMemo(() => (s ? sessionFacts(s, c, personName) : null), [s, c]);
   const gpsN = s ? s.participants.filter((p) => p.has_gps).length : 0;
-  const canMap = !!s && gpsN >= 1 && (s.group.no_track || !!(s.intervals?.rep_closeups.some((x) => x.available) || s.continuous?.available || replayOpen));
-  // replay positions: also the maps' dots and the hero / share card sketch, so loaded once the session is shown with a map
+  const canMap = !!s && gpsN >= 1 && (s.group.no_track || (more && !!(s.intervals?.rep_closeups.some((x) => x.available) || s.continuous?.available)));
+  // replay positions: the maps' dots, the replay and the share card sketch; loaded once a map is shown
   const rp = useApi<Replay>(s && (canMap || replayOpen) ? `/api/together/${encodeURIComponent(gid)}/replay` : null);
   useEffect(() => {
     const t = c?.meta.title || c?.display_title || s?.group.workout;
@@ -820,33 +708,29 @@ export function TogetherSession({ gid }: { gid: string }) {
 
   if (error) return (
     <main class="tg">
-      <a class="cs-back-plain" href="/community">‹ Sessions</a>
+      <a href="/community">‹ Sessions</a>
       <h1>Session not found</h1>
       <div class="note">{/no together group|not found|404/i.test(error) ? `There is no club session "${gid}". It may have been renamed or merged when the sessions were re-detected.` : error}</div>
-      <p><a href="/community">See all sessions →</a></p>
+      <p><a href="/community">See all sessions</a></p>
     </main>
   );
   if (!s || !facts) return <main class="tg"><div class="empty">Loading…</div></main>;
   const replay = rp.data?.available ? rp.data : null;
   const unverified = s.group.no_track || gpsN < 2 && !s.intervals;
   const replayable = !unverified && (gpsN >= 2 || !!s.intervals);
-  const bar = <SessionBar s={s} hr={hr} replayable={replayable} replayOpen={replayOpen && replayable} />;
-  const top = <>{bar}<SessionHighlights f={facts} /></>;
-  const middle = <>
-    {replayable && <ReplaySection s={s} rp={rp} replay={replay} open={replayOpen} hr={hr} />}
-    <CommunitySessionSplits s={s} />
-  </>;
+  const between = <SamePlace gid={s.gid} />;
+  const extra = replayable ? <ReplaySection s={s} rp={rp} replay={replay} open={replayOpen} /> : null;
+  const photos = <CommunitySessionPhotos gid={s.gid} />;
   return (
     <main class="tg cs-page">
-      <CommunitySessionHero gid={s.gid} s={s} replay={replay} facts={facts} />
-      <SessionStory f={facts} />
-      <CommunitySessionMembers gid={s.gid} s={s} f={facts} />
-      {s.group.label === "same_place_diff_workout" && <p class="note">Same place and time, but different workouts (e.g. only a shared warm-up or cool-down): hidden from the list by default.</p>}
-      {unverified ? <>{bar}<Unverified s={s} replay={replay} /></>
-        : s.intervals ? <IntervalsView s={s} iv={s.intervals} replay={replay} hr={hr} top={top} middle={middle} />
-        : s.continuous ? <ContinuousView s={s} replay={replay} hr={hr} top={top} middle={middle} />
-        : <>{top}<section><p class="note">No comparison for this session.</p></section>{middle}</>}
-      <CommunitySessionPhotos gid={s.gid} />
+      <CommunitySessionHero gid={s.gid} s={s} replay={replay} facts={facts} links={<CompareLink s={s} />} />
+      {s.group.label === "same_place_diff_workout" && <p class="note small">Near-miss: same place and time, but different workouts (e.g. only a shared warm-up); hidden from the list by default.</p>}
+      <Caveats s={s} />
+      <CommunitySessionMembers gid={s.gid} s={s} />
+      {unverified ? <><Unverified s={s} replay={replay} />{between}<More open={more}>{photos}</More></>
+        : s.intervals ? <IntervalsView s={s} iv={s.intervals} replay={replay} between={between} more={more} extra={extra} photos={photos} />
+        : s.continuous ? <ContinuousView s={s} replay={replay} between={between} more={more} extra={extra} photos={photos} />
+        : <><section><p class="note">No comparison for this session.</p></section>{between}<More open={more}>{extra}{photos}</More></>}
     </main>
   );
 }

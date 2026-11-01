@@ -1,5 +1,5 @@
-// One header pattern for every page: title, short context (`sub`), a one-line "what is this page" (`about`),
-// an optional `?` with a few tips, and tools (children) on the right.
+// One header pattern for every page: title, short context (`sub`), and tools (children) on the right. The
+// "what is this page" line (`about`) and the tips are not shown on the page: they sit behind the `?` popover.
 //   <PageHeader title="Compare" sub="4 sessions" about="Line up sessions of the same workout …"
 //               tips={["Hover a chart to move the map cursor", "Drag to zoom"]}>{tools}</PageHeader>
 import type { ComponentChildren } from "preact";
@@ -20,7 +20,7 @@ export function PageHeader({ title, sub, about, tips, class: cls, children }: {
     document.addEventListener("keydown", close);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", close); };
   }, [open]);
-  const hasHelp = !!(tips && tips.length);
+  const hasHelp = !!about || !!(tips && tips.length);
   return (
     <header class={"pagehead" + (cls ? " " + cls : "")}>
       <div class="head">
@@ -28,19 +28,18 @@ export function PageHeader({ title, sub, about, tips, class: cls, children }: {
         {sub !== undefined && sub !== null && sub !== "" && <span class="sub">{sub}</span>}
         {hasHelp && (
           <div class="help" ref={ref}>
-            <button class="help-btn" aria-expanded={open} aria-label="Tips for this page" title="Tips for this page"
+            <button class="help-btn" aria-expanded={open} aria-label="About this page" title="About this page"
                     onClick={() => setOpen(!open)}>?</button>
             {open && (
               <div class="help-pop" role="dialog">
                 {about && <p class="help-about">{about}</p>}
-                <ul>{tips!.map((t) => <li>{t}</li>)}</ul>
+                {tips && tips.length > 0 && <ul>{tips.map((t) => <li>{t}</li>)}</ul>}
               </div>
             )}
           </div>
         )}
         {children && <div class="tools">{children}</div>}
       </div>
-      {about && <p class="about">{about}</p>}
     </header>
   );
 }

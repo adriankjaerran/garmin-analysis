@@ -17,7 +17,7 @@ import { useTheme } from "../lib/theme";
 import { SPORT_LABEL, dur, num, stypeLabel, typeLabel, onFoot } from "../lib/format";
 import { PageHeader } from "../components/PageHeader";
 import { Table, type Col } from "../components/Table";
-import { DistCell, SportDot, distSort } from "../components/ActivityBits";
+import { DistCell, distSort } from "../components/ActivityBits";
 import { CompareCharts, type CPanel } from "../components/CompareCharts";
 import { CompareMap } from "../components/CompareMap";
 import { paceRange, speedRange } from "../lib/chartAxes";
@@ -83,13 +83,13 @@ function Landing() {
   }, [acts, q]);
   return (
     <section>
-      <div class="head"><h2>Pick a session</h2>
+      <div class="head"><h2 title="Click a row to compare it with its suggested set (same workout, same route, most similar), or paste ids above. Also: the Compare button on any activity page.">Pick a session</h2>
         <input type="search" placeholder="Filter: 6×1000, Bislett, R3, 2025…" value={q} style={{ width: "260px" }}
           onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
-        <span class="sub">{q ? `${rows.length} matches` : "the 40 most recent runs and ski sessions"}. Click a row to compare it with its suggested set (same workout, same route, most similar), or paste ids above. Also: the Compare button on any activity page.</span></div>
+        <span class="count" title={q ? undefined : "the 40 most recent runs and ski sessions"}>{rows.length}</span></div>
       <Table rows={rows} rowKey={(a) => a.id} onRow={(a) => navigate(`/compare?suggest=${a.id}`)} empty={acts ? "No activity matches." : "Loading…"} cols={[
         { key: "start", label: "Date", render: (a) => a.date },
-        { key: "type", label: "Workout", render: (a) => <span><SportDot sport={a.sport} />{shortWhat(a)}</span> },
+        { key: "type", label: "Workout", render: (a) => shortWhat(a) },
         { key: "place", label: "Place", render: (a) => a.place_name ?? a.place ?? a.location ?? "—" },
         { key: "route", label: "Route", render: (a) => <span title={a.route_name ?? ""}>{a.route ?? "—"}</span> },
         { key: "dist_km", label: "km", num: true, render: (a) => <DistCell a={a} />, sort: distSort },
@@ -147,15 +147,15 @@ function Picker({ ids, refKind, acts, colors, focus, sug, mode, anchor, align, c
           const wl = (acts.get(id) ?? sug?.activities[id])?.workout_label;
           return (
           <span key={id} class={"schip" + (id === focus ? " on" : "") + (al?.status === "excluded" ? " excl" : "")}
-            title={`${label(id)}${wl ? " — " + wl : ""}${al ? `\nCommon start: ${startText(al)}` : ""}${al?.status === "excluded" ? "\n(⚑ = use this session's start instead)" : ""} (click: highlight)`}
+            title={`${label(id)}${wl ? " — " + wl : ""}${al ? `\nCommon start: ${startText(al)}` : ""}${al?.status === "excluded" ? "\n(start = use this session's start instead)" : ""} (click: highlight)`}
             onClick={() => setQuery({ focus: id === focus ? null : id })}>
             <i style={{ background: colors[id] ?? "#b9bfc6" }} />
             {label(id)}
             {k === 0 && refKind === "first" ? <b class="ref">ref</b> :
               refKind === "first" && <button class="x" title="Make this the reference" onClick={(e) => { e.stopPropagation(); set([id, ...ids.filter((x) => x !== id)]); }}>ref</button>}
-            {canStart && (id === anchor ? <b class="flag" title="Common start: this session's start is the start line">⚑</b>
+            {canStart && (id === anchor ? <b class="flag" title="Common start: this session's start is the start line">start</b>
               : <button class="x" title="Use this start: every session starts where this one started (common start line)"
-                onClick={(e) => { e.stopPropagation(); setQuery({ start: k === 0 ? "ref" : id }); }}>⚑</button>)}
+                onClick={(e) => { e.stopPropagation(); setQuery({ start: k === 0 ? "ref" : id }); }}>start</button>)}
             {al?.status === "late" && <b class="late" title={startText(al)}>{startText(al, true)}</b>}
             {al?.status === "excluded" && <b class="exbadge" title={startText(al)}>excluded</b>}
             <a class="x" href={`/activities/${id}`} title="Open activity" onClick={(e) => e.stopPropagation()}>↗</a>
@@ -191,17 +191,17 @@ function Picker({ ids, refKind, acts, colors, focus, sug, mode, anchor, align, c
 // ---------------------------------------------------------------- matrix table (sessions × legs / reps / breaks)
 interface MCol { key: string; label: string; title?: string }
 interface Metric<R> { id: string; label: string; get: (r: R) => N | string | undefined; fmt: (v: any, r: R) => string; best: "min" | "max" | null;
-  /** compare every cell with the reference's cell in the same column: tinted green (better) / red (worse), the
-   *  difference printed small, plus Mean and Δ columns. Value = the difference that gets the full tint. */
-  heat?: number; dfmt?: (d: number) => string }
+  /** compare every cell with the reference's cell in the same column: the difference in the cell's tooltip,
+   *  plus Mean and Δ ref columns */
+  vsRef?: boolean; dfmt?: (d: number) => string }
 
-function Matrix<R>({ units, rows, metrics, metric, setMetric, focus, onHover, onPick, refRow, colors, extraCols = [], cmp, refId, note, sel }: {
+function Matrix<R>({ units, rows, metrics, metric, setMetric, focus, onHover, onPick, refRow, colors, extraCols = [], cmp, refId, sel }: {
   units: MCol[]; rows: { id: string; label: any; cells: (R | null)[] }[]; metrics: Metric<R>[]; metric: string;
   setMetric: (m: string) => void; focus: string | null; onHover: (id: string | null) => void; onPick: (id: string) => void;
   refRow?: { label: string; cells: (R | null)[] } | null; colors: Record<string, string>;
   extraCols?: Col<{ id: string; label: any; cells: (R | null)[] }>[];
-  /** the reference's cells (reference session or median) for the heat colouring */
-  cmp?: (R | null)[] | null; refId?: string | null; note?: string;
+  /** the reference's cells (reference session or median) for the differences */
+  cmp?: (R | null)[] | null; refId?: string | null;
   /** highlighted column (the selected rep / break) */
   sel?: number | null;
 }) {
@@ -210,17 +210,11 @@ function Matrix<R>({ units, rows, metrics, metric, setMetric, focus, onHover, on
   const all: Row[] = refRow ? [{ id: "_ref", label: <span class="muted">{refRow.label}</span>, cells: refRow.cells }, ...rows] : rows;
   const num = (c: R | null | undefined): N => { if (!c) return null; const v = M.get(c); return typeof v === "number" ? v : null; };
   const best = units.map((_u, k) => bestOf(rows, (r) => { const c = r.cells[k]; return c && !(c as any).partial ? num(c) : null; }, M.best));
-  const heat = M.heat && cmp ? M.heat : 0;
-  const better = M.best === "max" ? 1 : -1;   // sign of a better difference
+  const vs = !!(M.vsRef && cmp);
   const diff = (r: Row, k: number): N => {
-    if (!heat || r.id === "_ref" || r.id === refId) return null;
+    if (!vs || r.id === "_ref" || r.id === refId) return null;
     const v = num(r.cells[k]), w = num(cmp![k]);
     return v === null || w === null ? null : v - w;
-  };
-  const tint = (d: N) => {
-    if (d === null || Math.abs(d) < 1e-9) return undefined;
-    const a = Math.min(1, Math.abs(d) / heat) * 0.32 + 0.04;
-    return d * better > 0 ? `rgba(47,138,76,${a.toFixed(2)})` : `rgba(196,60,60,${a.toFixed(2)})`;
   };
   const df = M.dfmt ?? ((d: number) => sgn(d, (x) => String(Math.round(x))));
   const mean = (r: Row) => { const v = r.cells.map(num).filter((x): x is number => x !== null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
@@ -237,25 +231,24 @@ function Matrix<R>({ units, rows, metrics, metric, setMetric, focus, onHover, on
         const v = M.get(c);
         const part = (c as any).partial;
         const d = diff(r, k);
-        return <span class={"mcell" + (r.id !== "_ref" && typeof v === "number" && v === best[k] ? " best" : "") + (part ? " partial" : "")}
-          style={heat ? { background: tint(d) } : undefined}
-          title={part ? `partial: ${Math.round(part * 100)} % of the leg` : d !== null ? `${df(d)} vs the reference` : undefined}>
-          {v === null || v === undefined ? "—" : M.fmt(v, c)}{heat ? <small>{d === null ? "" : df(d)}</small> : null}</span>;
+        return <span class={(r.id !== "_ref" && typeof v === "number" && v === best[k] ? "best" : "") + (part ? " partial" : "")}
+          title={part ? `partial: ${Math.round(part * 100)} % of the leg` : d !== null ? `${df(d)} vs the ${refId ? "reference" : "median"}` : undefined}>
+          {v === null || v === undefined ? "—" : M.fmt(v, c)}</span>;
       },
     })),
-    ...(heat ? [
+    ...(vs ? [
       { key: "_mean", label: "Mean", num: true, title: "mean over this session's reps", sort: (r: Row) => mean(r),
         render: (r: Row) => { const m = mean(r); return m === null ? "—" : <span class={m === bestMean && r.id !== "_ref" ? "best" : ""}>{M.fmt(m, r.cells.find(Boolean) as R)}</span>; } },
-      { key: "_d", label: "Δ ref", num: true, title: "mean difference to the reference over the reps both have (green = better)", sort: (r: Row) => meanDiff(r),
-        render: (r: Row) => { const d = meanDiff(r); return d === null ? <span class="muted">{r.id === refId ? "ref" : "—"}</span> : <span class="mcell" style={{ background: tint(d) }}>{df(d)}</span>; } },
+      { key: "_d", label: "Δ ref", num: true, title: "mean difference to the reference over the reps both have", sort: (r: Row) => meanDiff(r),
+        render: (r: Row) => { const d = meanDiff(r); return d === null ? <span class="muted">{r.id === refId ? "ref" : "—"}</span> : df(d); } },
     ] as Col<Row>[] : []),
     ...extraCols,
   ];
   return (
     <div>
       <div class="head sm">
-        <div class="seg">{metrics.map((m) => <button key={m.id} class={m.id === M.id ? "on" : ""} onClick={() => setMetric(m.id)}>{m.label}</button>)}</div>
-        <span class="sub">{heat ? `green = ${M.best === "max" ? "higher" : "lower"} than the ${refId ? "reference" : "median"} in that column, red = ${M.best === "max" ? "lower" : "higher"} (small number = difference); bold green = best per column` : M.best ? `best per column in green (${M.best === "min" ? "lowest" : "highest"})` : ""}{note ? ` · ${note}` : ""}</span>
+        <div class="seg" title={[M.best ? `bold = best per column (${M.best === "min" ? "lowest" : "highest"})` : "", vs ? `hover a cell for the difference to the ${refId ? "reference" : "median"}` : ""].filter(Boolean).join("; ") || undefined}>
+          {metrics.map((m) => <button key={m.id} class={m.id === M.id ? "on" : ""} onClick={() => setMetric(m.id)}>{m.label}</button>)}</div>
       </div>
       <Table rows={all} rowKey={(r) => r.id} cols={cols} highlight={focus} onHover={(r) => onHover(r && r.id !== "_ref" ? r.id : null)}
         onRow={(r) => r.id !== "_ref" && onPick(r.id)} />
@@ -513,7 +506,7 @@ export function ComparePage() {
           "No ids yet? Click a session below: it opens with its suggested set (same workout, same route, most similar). Suggestions ▾ swaps or adds sessions.",
           "Route position = ghost race along the route; Intervals = reps lined up on their start (All, Per rep or one rep, e.g. R3); Breaks = the recoveries.",
           "Hover a chart, a track, a chip or a table row to highlight a session, click to keep it. Drag on a chart to zoom, double-click to reset.",
-          "⚙ Options: reference (first session or median), common start or t = 0 at rep 1, pace or speed, rep matching. Changed options show as chips; × resets one.",
+          "Options: reference (first session or median), common start or t = 0 at rep 1, pace or speed, rep matching. Changed options show as chips; × resets one.",
         ]} />
       <Picker ids={ids} refKind={refKind} acts={actMap} colors={D?.colors ?? {}} focus={pinned} sug={sug.data} mode={mode}
         anchor={!iv && startQ && !rep1 ? (startQ === "ref" || startQ.includes(",") ? ids[0] : startQ) : null}
@@ -563,14 +556,13 @@ export function ComparePage() {
             <div class="note">{perRep ? `One chart per rep, x = seconds since the rep start (${r.rep_series?.lead_s ?? 15} s before it, up to ${r.rep_series?.post_s ?? 30} s of the next break after it), every session overlaid, same ${metric} scale in all. Click a chart to open that rep.`
               : repView && selSlot ? `${slotName(selSlot)} only: x = seconds since each session's ${selSlot.anchor ? "" : "extra "}rep start, in real time (${r.rep_series!.lead_s} s before it and up to ${r.rep_series!.post_s} s of the next break after it; shaded = the longest rep). `
               : mode === "breaks" && sel !== null && V !== D ? `Break after ${selSlot ? slotName(selSlot) : ""} only. ` : ""}
-              {perRep ? "" : " Drag on a chart to zoom, double-click to reset."} Hover a line, a track, a chip or a table row to highlight a session; click to keep it highlighted.
-              {D.many && !perRep ? " Grey band = middle 50 % of the sessions." : ""}</div>
+              {D.many && !perRep ? "Grey band = middle 50 % of the sessions." : ""}</div>
           </div>
         </div>
       </section>
       {iv && <Detail r={r} D={D} focus={focus} onHover={setHover} onPick={pick} tab={tab} metric={tableMetric} sel={sel} />}
       <section>
-        <div class="head"><h2>Sessions</h2><span class="sub">{iv ? "reps summary first, then the whole session; " : ""}{r.align?.applied ? (r.align.start?.kind === "rep1" ? "totals from the start of rep 1 (hover for the whole session); " : "totals from the common start line (hover for the whole session); ") : ""}deltas vs the {refKind === "median" ? "median of the selection" : "reference (first session)"}; best per column in green</span></div>
+        <div class="head"><h2 title={`${iv ? "reps summary first, then the whole session; " : ""}${r.align?.applied ? (r.align.start?.kind === "rep1" ? "totals from the start of rep 1 (hover for the whole session); " : "totals from the common start line (hover for the whole session); ") : ""}deltas vs the ${refKind === "median" ? "median of the selection" : "reference (first session)"}; bold = best per column`}>Sessions</h2></div>
         <SummaryTable r={r} D={D} focus={focus} onHover={setHover} onPick={pick} deltaKind={deltaKind} metric={tableMetric} />
       </section>
       {!iv && <Detail r={r} D={D} focus={focus} onHover={setHover} onPick={pick} tab={tab} metric={tableMetric} />}
@@ -599,7 +591,7 @@ function ModeNote({ r }: { r: CmpResult }) {
   } else if (al?.applied && al.start) {
     const date = (id: number) => r.activities[String(id)]?.date ?? String(id);
     const late = al.late ?? [];
-    bits.push(`common start at the ${al.start.kind === "point" ? "point" : "start"} of ${date(al.start.anchor_id)} (⚑, line ±${Math.round(al.start.radius_m ?? 0)} m${al.start.route_m ? `, route ${(al.start.route_m / 1000).toFixed(2)} km` : ""}); x = 0 at the line, lead-ins cut off`
+    bits.push(`common start at the ${al.start.kind === "point" ? "point" : "start"} of ${date(al.start.anchor_id)} (line ±${Math.round(al.start.radius_m ?? 0)} m${al.start.route_m ? `, route ${(al.start.route_m / 1000).toFixed(2)} km` : ""}); x = 0 at the line, lead-ins cut off`
       + (late.length ? `; ${late.length} late (joined further along): ${late.map((i) => `${date(i)} +${al.sessions?.[String(i)]?.join_m} m`).join(", ")}` : ""));
   } else if (al && !al.applied && al.note) bits.push(al.note);
   if (ex.size) bits.push(`${ex.size} left out by the ${al?.start?.kind === "rep1" ? "rep 1 start" : "common start"}: ${(al!.excluded ?? []).map((e) => `${r.activities[String(e.id)]?.date ?? e.id} ${e.reason}`).join("; ")}`);
@@ -609,7 +601,7 @@ function ModeNote({ r }: { r: CmpResult }) {
   const sports = [...new Set(r.sessions.map((s) => s.sport))];
   return <>
     <div class="note">{bits.join(" · ")}</div>
-    {sports.length > 1 && <div class="note cmp-warn">⚠ Mixed sports ({sports.map((x) => SPORT_LABEL[x] ?? x).join(", ")}): paces, speeds and efficiency are not comparable across sports.</div>}
+    {sports.length > 1 && <div class="note cmp-warn">Mixed sports ({sports.map((x) => SPORT_LABEL[x] ?? x).join(", ")}): paces, speeds and efficiency are not comparable across sports.</div>}
   </>;
 }
 
@@ -744,13 +736,13 @@ function SummaryTable({ r, D, focus, onHover, onPick, deltaKind, metric }: {
   if (al) cols.push({ key: "start", label: isRep1 ? "Rep 1" : "Start", title: isRep1 ? "t = 0 at rep 1: where rep 1 started (elapsed time · distance into the session); before it is cut off. from R2 = no rep 1, enters at the anchor's time of its first matched rep"
     : "common start line: lead-in cut off before the line, late = joined further along the start session's path",
     sort: (x) => al[x.sid]?.offset_s ?? null,
-    render: (x) => { const a = al[x.sid]; return <span class={"muted" + (a?.status === "late" ? " cmp-late" : "")} title={startText(a)}>{a?.status === "anchor" && !isRep1 ? "⚑ start" : isRep1 && a?.status !== "late" ? startText(a).replace(/^rep 1 at /, "") : startText(a, a?.status === "late")}</span>; } });
+    render: (x) => { const a = al[x.sid]; return <span class={"muted" + (a?.status === "late" ? " cmp-late" : "")} title={startText(a)}>{a?.status === "anchor" && !isRep1 ? "start" : isRep1 && a?.status !== "late" ? startText(a).replace(/^rep 1 at /, "") : startText(a, a?.status === "late")}</span>; } });
   add("dist_m", "km", (x) => x.dist_m, (v) => (v / 1000).toFixed(2), null, undefined, wTip("dist_m"));
   if (r.mode === "distance") {
     add("fin", "Gap at end", (x) => x.fin, (v) => gapTxt(v, secTxt), "min", `${deltaKind} time behind / ahead of the reference at the last point both covered`,
       (x) => (x.gap_end ? `at ${(x.gap_end.x_m / 1000).toFixed(1)} km, the last point this session and the reference both covered` : ""));
-    if (r.axis?.x === "route_m") add("cover", "Covered", (x) => x.coverage_pct, (v, x) => `${Math.round(v)} %${x.reversed ? " ↺" : ""}`, null,
-      "share of the route this session ran on the route (jumps, shortcuts, detours and long off-route stretches don't count; the gap is held there). ↺ = ran the route in the other direction",
+    if (r.axis?.x === "route_m") add("cover", "Covered", (x) => x.coverage_pct, (v, x) => `${Math.round(v)} %${x.reversed ? " rev." : ""}`, null,
+      "share of the route this session ran on the route (jumps, shortcuts, detours and long off-route stretches don't count; the gap is held there). rev. = ran the route in the other direction",
       (x) => (x.uncovered?.length ? `not covered: ${x.uncovered.map(([a, b]) => `${(a / 1000).toFixed(1)}–${(b / 1000).toFixed(1)} km`).join(", ")}` : x.reversed ? "reversed: x is its own travel direction" : ""));
   }
   add("moving_s", "Moving", (x) => x.moving_s, (v) => dur(v), null, undefined, wTip("moving_s"));
@@ -804,7 +796,7 @@ function Detail({ r, D, focus, onHover, onPick, tab, metric, sel = null }: {
     }
     return (
       <section>
-        <div class="head"><h2>Legs</h2><span class="sub">{r.legs_kind === "route_waypoints" ? "between the route's common stops" : r.legs_kind === "laps_400m" ? "400 m laps (own distance)" : "per km (own distance)"}; Δ leg = leg time − reference leg time; gap = ghost gap at the leg end (moving time, behind / ahead); faded = partly covered</span></div>
+        <div class="head"><h2 title={`${r.legs_kind === "route_waypoints" ? "between the route's common stops" : r.legs_kind === "laps_400m" ? "400 m laps (own distance)" : "per km (own distance)"}; Δ leg = leg time − reference leg time; gap = ghost gap at the leg end (moving time, behind / ahead); faded = partly covered`}>Legs</h2></div>
         <Matrix units={units} rows={rows} metrics={metrics} metric={query.get("lm") ?? "time"} setMetric={mq("lm")} focus={focus}
           onHover={onHover} onPick={onPick} refRow={refRow} colors={D.colors} />
       </section>
@@ -818,9 +810,9 @@ function Detail({ r, D, focus, onHover, onPick, tab, metric, sel = null }: {
     type R = NonNullable<NonNullable<CmpResult["reps"]>[string][number]>;
     type Bk = NonNullable<NonNullable<CmpResult["breaks"]>[string][number]>;
     const repMetrics: Metric<R>[] = [
-      pace ? { id: "pace", label: "Pace", get: (c) => c.pace_s_km, fmt: (v) => dur(v), best: "min", heat: 8, dfmt: (d) => sgn(d) }
-        : { id: "pace", label: "km/h", get: (c) => c.speed_kmh, fmt: (v) => v.toFixed(1), best: "max", heat: 0.6, dfmt: (d) => sgn(d, (x) => x.toFixed(1)) },
-      { id: "time", label: "Time", get: (c) => c.time_s, fmt: (v) => dur(v), best: "min", heat: 4, dfmt: (d) => sgn(d, (x) => x.toFixed(Math.abs(x) < 10 ? 1 : 0)) },
+      pace ? { id: "pace", label: "Pace", get: (c) => c.pace_s_km, fmt: (v) => dur(v), best: "min", vsRef: true, dfmt: (d) => sgn(d) }
+        : { id: "pace", label: "km/h", get: (c) => c.speed_kmh, fmt: (v) => v.toFixed(1), best: "max", vsRef: true, dfmt: (d) => sgn(d, (x) => x.toFixed(1)) },
+      { id: "time", label: "Time", get: (c) => c.time_s, fmt: (v) => dur(v), best: "min", vsRef: true, dfmt: (d) => sgn(d, (x) => x.toFixed(Math.abs(x) < 10 ? 1 : 0)) },
       { id: "d", label: "Δ time", get: (c) => c.d_time_s, fmt: (v) => sgn(v, (s) => `${s.toFixed(1)} s`), best: "min" },
       { id: "dist", label: "Distance", get: (c) => c.dist_m, fmt: (v) => `${v}`, best: null },
       { id: "hr", label: "HR", get: (c) => c.hr, fmt: (v) => String(v), best: null },
@@ -831,11 +823,11 @@ function Detail({ r, D, focus, onHover, onPick, tab, metric, sel = null }: {
       { id: "dur", label: "Duration", get: (c) => c.dur_s, fmt: (v) => dur(v), best: null },
       { id: "d", label: "Δ duration", get: (c) => c.d_dur_s, fmt: (v) => sgn(v, (s) => `${Math.round(s)} s`), best: null },
       { id: "kind", label: "Kind", get: (c) => c.kind, fmt: (v, c) => `${v} ${Math.round(c.standing_s)}s`, best: null },
-      { id: "drop30", label: "HR drop 30 s", get: (c) => c.drop_30, fmt: (v) => String(v), best: "max", heat: 8 },
-      { id: "drop60", label: "HR drop 60 s", get: (c) => c.drop_60, fmt: (v) => String(v), best: "max", heat: 10 },
+      { id: "drop30", label: "HR drop 30 s", get: (c) => c.drop_30, fmt: (v) => String(v), best: "max", vsRef: true },
+      { id: "drop60", label: "HR drop 60 s", get: (c) => c.drop_60, fmt: (v) => String(v), best: "max", vsRef: true },
       { id: "peak", label: "HR peak", get: (c) => c.hr_peak, fmt: (v) => String(v), best: null },
       { id: "min", label: "HR min", get: (c) => c.hr_min, fmt: (v) => String(v), best: null },
-      { id: "next", label: "HR at next start", get: (c) => c.hr_next_start, fmt: (v) => String(v), best: "min", heat: 10 },
+      { id: "next", label: "HR at next start", get: (c) => c.hr_next_start, fmt: (v) => String(v), best: "min", vsRef: true },
       { id: "dist", label: "Distance", get: (c) => c.dist_m, fmt: (v) => `${v} m`, best: null },
     ];
     // a break sits in the slot of the rep before it; the last slot has no break
@@ -859,12 +851,11 @@ function Detail({ r, D, focus, onHover, onPick, tab, metric, sel = null }: {
     return (
       <section>
         <div class="head">
-          <div class="seg">
+          <div class="seg" title={t === "reps" ? `Columns = the ${D.refId ? "reference's" : "anchor session's"} reps; other sessions' reps are matched to them ${r.rep_summary && Object.values(r.rep_summary).some((x) => x.match === "index") ? "by number" : "by length"} (a rep only some have gets an “R1+” column); Δ time = time at the reference rep's distance − reference time`
+            : "After R3 = from the end of rep 3 to the start of the next rep; HR drop = peak around the rep end − HR at 30 / 60 s; the recovery after the last rep is in the Breaks chart (Recovery)"}>
             <button class={t === "reps" ? "on" : ""} onClick={() => setQuery({ tab: first === "reps" ? null : "reps" })}>Reps</button>
             <button class={t === "breaks" ? "on" : ""} onClick={() => setQuery({ tab: first === "breaks" ? null : "breaks" })}>Breaks</button>
           </div>
-          <span class="sub">{t === "reps" ? `Columns = the ${D.refId ? "reference's" : "anchor session's"} reps; other sessions' reps are matched to them ${r.rep_summary && Object.values(r.rep_summary).some((x) => x.match === "index") ? "by number" : "by length"} (a rep only some have gets an “R1+” column); Δ time = time at the reference rep's distance − reference time`
-            : "After R3 = from the end of rep 3 to the start of the next rep; HR drop = peak around the rep end − HR at 30 / 60 s; the recovery after the last rep is in the Breaks chart (Recovery)"}</span>
         </div>
         {t === "reps" && <RepLadder r={r} D={D} ids={ids} pace={pace} focus={focus} onHover={onHover} onPick={onPick} sel={sel} />}
         {t === "reps" ? reps : brks}
@@ -918,8 +909,8 @@ function RepLadder({ r, D, ids, pace, focus, onHover, onPick, sel = null }: {
   };
   return (
     <div class="ladder">
-      <div class="ladder-chart" ref={box}>
-        <div class="title">{byTime ? "Time per rep (no distance)" : pace ? "Pace per rep (min/km)" : "Speed per rep (km/h)"} <span class="muted">— faster is up; dots = one rep; hover for values</span></div>
+      <div class="ladder-chart" ref={box} title="faster is up; dots = one rep; hover a dot for its value">
+        <div class="title">{byTime ? "Time per rep (no distance)" : pace ? "Pace per rep (min/km)" : "Speed per rep (km/h)"} </div>
         <svg width={W} height={H} onMouseLeave={() => onHover(null)}>
           {ticks.map((v) => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} class="grid" /><text x={L - 6} y={y(v) + 4} class="ax" text-anchor="end">{fmt(v)}</text></g>)}
           {sel !== null && slots[sel] && <rect x={x(sel) - 14} y={T} width={28} height={H - T - Bm} class="selcol" />}
@@ -999,7 +990,7 @@ function RepRank({ r, D, RD, focus, onHover, onPick, compact, slot = null }: {
   const what = byTime ? "rep time" : pace ? "rep pace" : "rep speed";
   const vs = D.refId ? "reference" : "median";
   return (
-    <div class="ladder-rank">
+    <div class="ladder-rank" title={`${slot ? `${slot} ${what}` : `avg ${what} = rep distance / rep time`}; bar right = faster than the ${vs}, left = slower${compact ? "; hover the charts for values at a point" : ""}`}>
       <div class="title">{slot ? <><b>{slot}</b>: who was faster, vs the {vs}</> : compact ? `Who was faster: avg ${what} vs the ${vs}` : `Avg vs the ${vs}`}
         {" "}<span class="muted">{slot ? `(${byTime ? "rep time" : what})` : `(difference: mean over the reps both have)`}</span></div>
       <table>
@@ -1014,7 +1005,6 @@ function RepRank({ r, D, RD, focus, onHover, onPick, compact, slot = null }: {
           ))}
         </tbody>
       </table>
-      <div class="note">{slot ? `${slot} ${what}` : `avg ${what} = rep distance / rep time`} · bar: green = faster than the {vs}, red = slower{compact ? " · hover the charts for values at a point" : ""}</div>
     </div>
   );
 }
@@ -1078,7 +1068,7 @@ function RepPick({ r, mode, sel, perRep }: { r: CmpResult; mode: Mode; sel: stri
   </span>;
 }
 
-// ---------------------------------------------------------------- ⚙ Options (expert controls) + chips for the changed ones
+// ---------------------------------------------------------------- Options (expert controls) + chips for the changed ones
 interface Opts {
   mode: Mode; iv: boolean; perRep: boolean; repOne: boolean; refKind: "first" | "median"; startQ: string | null; rep1: boolean; hasReps: boolean;
   metric: "pace" | "speed"; defMetric: "pace" | "speed"; deltaKind: string; repAxis: string; gap: string; rgap: string; match: string;
@@ -1100,7 +1090,7 @@ function OptionsBar({ o }: { o: Opts }) {
   }, [open]);
   const allView = o.mode === "intervals" && !o.perRep && !o.repOne;
   const repCharts = o.mode === "intervals";
-  const startTxt = o.rep1 ? "Rep 1" : o.startQ ? (o.startName ? `common, ⚑ ${o.startName}` : "common") : "own";
+  const startTxt = o.rep1 ? "Rep 1" : o.startQ ? (o.startName ? `common, ${o.startName}` : "common") : "own";
   // changed options that apply to this view: one chip each, × resets it
   const chips: { k: string; label: string; title: string; reset: Record<string, null> }[] = [];
   if (o.refKind === "median") chips.push({ k: "ref", label: "Reference: median", title: "Gaps and deltas vs the median of the sessions", reset: { ref: null } });
@@ -1132,7 +1122,7 @@ function OptionsBar({ o }: { o: Opts }) {
       {chips.map((c) => <span key={c.k} class="ochip" title={c.title}>{c.label}
         <button class="x" title="Back to the default" aria-label={`Reset ${c.label}`} onClick={() => setQuery(c.reset)}>×</button></span>)}
       <button class={"optbtn" + (open ? " on" : "")} aria-expanded={open} onClick={() => setOpen(!open)}
-        title="Reference, start, pace / speed, gap time, rep axis, break width, rep matching">⚙ Options{chips.length ? ` (${chips.length})` : ""}</button>
+        title="Reference, start, pace / speed, gap time, rep axis, break width, rep matching">Options{chips.length ? ` (${chips.length})` : ""}</button>
       {open && (
         <div class="optpop" role="dialog">
           <Row label="Reference" on>
@@ -1145,7 +1135,7 @@ function OptionsBar({ o }: { o: Opts }) {
             <Seg items={[
               { on: !o.startQ, label: "Own", title: "Every session from its own watch start", q: { start: null } },
               { on: !!o.startQ && !o.rep1, label: "Common", q: { start: !o.startQ || o.rep1 ? "ref" : o.startQ },
-                title: "Common start line at the first session's start (⚑ on a chip: use that session's start). Lead-ins are cut off, sessions that started later join where their recording begins on the start session's path, sessions that never get on it are left out" },
+                title: "Common start line at the first session's start (“start” on a chip: use that session's start). Lead-ins are cut off, sessions that started later join where their recording begins on the start session's path, sessions that never get on it are left out" },
               { on: o.rep1, label: "Rep 1", show: o.hasReps || o.rep1, q: { start: "rep1" },
                 title: "t = 0 at rep 1: every session starts at the detected start of its first rep (the rep matched to the reference's rep 1, as in Intervals); the warm-up is cut off, real breaks are kept. Sessions without reps are left out. Route position: x = own distance since rep 1" },
             ]} />

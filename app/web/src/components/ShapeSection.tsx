@@ -1,8 +1,9 @@
-// Activity page "Shape" section: what this session says about fitness, in plain words — the one-liner, the score,
-// how it compares with your shape that day, and race equivalents. Model internals (evidence weight, σ, the
-// with-HR variant, components, HR diagnostics) are behind "Details".
+// Activity page "Shape" section: two lines per scored discipline — the score with its race equivalents, and the verdict
+// against your shape that day ("Easy effort: doesn't change your shape"). Everything else (the explanation, how it
+// counts, your shape then and now, evidence weight, σ, the with-HR variant, components, HR diagnostics) is under a
+// collapsed "Details".
 import { useApi } from "../lib/api";
-import { DISC_LABEL, KIND_HELP, KIND_LABEL, daysAgo, discColor, pm, raceT, unitShort, type FitnessSession } from "../lib/fitness";
+import { DISC_LABEL, KIND_HELP, KIND_LABEL, daysAgo, pm, raceT, unitShort, type FitnessSession } from "../lib/fitness";
 import "../fitness.css";
 
 const HR_KEYS = ["work_hrr", "hrr"];
@@ -38,8 +39,8 @@ export function ShapeSection({ id }: { id: string }) {
   return (
     <section>
       <div class="head">
-        <h2>Shape</h2>
-        <span class="sub">what this workout says about your fitness (<a href="/fitness">Fitness</a> page)</span>
+        <h2 title="What this workout says about your fitness">Shape</h2>
+        <div class="tools"><a href="/fitness">Fitness →</a></div>
       </div>
       {!data.scored && <div class="empty">Not used for your fitness estimate: {data.not_scored?.text ?? "only interval, race, run and ski sessions with a watch file are."}</div>}
       {data.sessions.map((s) => {
@@ -48,27 +49,29 @@ export function ShapeSection({ id }: { id: string }) {
         return (
           <div class="shape-block" key={s.discipline}>
             <p class="shape-line">
-              <span class="dot" style={{ background: discColor(s.discipline) }} />
-              {s.explain}
+              {data.sessions.length > 1 && <span class="muted">{DISC_LABEL[s.discipline]}: </span>}
+              <b>{s.score.toFixed(1)}</b> {unitShort(s.discipline)}
+              {eq ? <span class="muted"> · 5k {raceT(eq["5k"])} · 10k {raceT(eq["10k"])} · half {raceT(eq.half)}</span> : null}
             </p>
-            <dl class="kv">
-              <dt>Fitness score</dt><dd><b>{s.score.toFixed(1)}</b> {unitShort(s.discipline)} <span class="muted">{s.label}</span></dd>
-              <dt>Compared with you</dt><dd title={s.kind === "bound" && delta !== null && delta < 0 ? `the score is a lower bound (${delta.toFixed(1)} vs your shape): an easy or long run isn't all-out, so it only counts when it shows more than your shape` : undefined}>{vsShape(delta, s.kind)}</dd>
-              <dt>Race equivalents</dt><dd>{eq ? `5k ${raceT(eq["5k"])} · 10k ${raceT(eq["10k"])} · half ${raceT(eq.half)}` : <span class="muted">{s.discipline === "ski" ? "none (ski has its own scale)" : "—"}</span>}</dd>
-              <dt>How it counts</dt><dd title={KIND_HELP[s.kind]}>{COUNTS[s.kind] ?? KIND_LABEL[s.kind]}</dd>
-              <dt>Your shape that day</dt><dd>{sh ? <>{pm(s.shape_at ?? sh.mean, sh.sd)}{s.shape_race_equivalents_s ? <span class="muted"> · 5k {raceT(s.shape_race_equivalents_s["5k"])}</span> : null}</> : "—"}</dd>
-              <dt>Your shape now</dt><dd>{s.current ? (() => {
-                const c = s.current, ago = c.last_evidence ? daysAgo(c.last_evidence.date, c.date) : null;
-                // stale: no race / hard session for > 90 days: the value is carried forward, greyed, its band grows
-                return ago === null || ago > STALE_DAYS
-                  ? <span style={{ opacity: 0.6 }} title="no recent race or hard session: the model carries the last value forward and its uncertainty grows every day">
-                      {pm(c.mean, c.sd)} <span class="muted">· last evidence {ago === null ? "none" : `${ago} days ago`}</span></span>
-                  : <>{pm(c.mean, c.sd)} <span class="muted">{c.pct_of_best !== undefined ? `${c.pct_of_best.toFixed(0)} % of your best` : ""}</span></>;
-              })() : "—"}</dd>
-            </dl>
+            <p class="shape-verdict" title={s.kind === "bound" && delta !== null && delta < 0 ? `the score is a lower bound (${delta.toFixed(1)} vs your shape): an easy or long run isn't all-out, so it only counts when it shows more than your shape` : undefined}>
+              {delta === null ? s.explain : vsShape(delta, s.kind)}
+            </p>
             <details class="howto shape-details">
-              <summary>Details: how the model scored it</summary>
+              <summary>Details</summary>
+              <p class="note">{s.explain}</p>
               <dl class="kv">
+                <dt>Score</dt><dd>{s.score.toFixed(1)} {unitShort(s.discipline)} <span class="muted">{s.label}</span></dd>
+                {!eq && s.discipline === "ski" && <><dt>Race equivalents</dt><dd class="muted">none (ski has its own scale)</dd></>}
+                <dt>How it counts</dt><dd title={KIND_HELP[s.kind]}>{COUNTS[s.kind] ?? KIND_LABEL[s.kind]}</dd>
+                <dt>Your shape that day</dt><dd>{sh ? <>{pm(s.shape_at ?? sh.mean, sh.sd)}{s.shape_race_equivalents_s ? <span class="muted"> · 5k {raceT(s.shape_race_equivalents_s["5k"])}</span> : null}</> : "—"}</dd>
+                <dt>Your shape now</dt><dd>{s.current ? (() => {
+                  const c = s.current, ago = c.last_evidence ? daysAgo(c.last_evidence.date, c.date) : null;
+                  // stale: no race / hard session for > 90 days: the value is carried forward, greyed, its band grows
+                  return ago === null || ago > STALE_DAYS
+                    ? <span style={{ opacity: 0.6 }} title="no recent race or hard session: the model carries the last value forward and its uncertainty grows every day">
+                        {pm(c.mean, c.sd)} <span class="muted">· last evidence {ago === null ? "none" : `${ago} days ago`}</span></span>
+                    : <>{pm(c.mean, c.sd)} <span class="muted">{c.pct_of_best !== undefined ? `${c.pct_of_best.toFixed(0)} % of your best` : ""}</span></>;
+                })() : "—"}</dd>
                 <dt title={KIND_HELP[s.kind]}>Evidence</dt><dd>{KIND_LABEL[s.kind]}</dd>
                 <dt>Weight used</dt><dd>{s.weight === null ? "—" : s.weight.toFixed(2)} <span class="muted">{s.kind !== "implausible" ? `= ${(s.confidence * 100).toFixed(0)} % of a race's pull` : ""} · σ {s.sigma.toFixed(1)}</span></dd>
                 {s.hr && <>

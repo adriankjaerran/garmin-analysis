@@ -1,5 +1,5 @@
-// Weekly shape per discipline (mean line + ±1 sd band) over all years, overall % of best on a right
-// axis, and every session's evidence as markers (race = diamond, hard = dot, bound = ring,
+// Weekly shape per discipline (mean line + ±1 sd band) over all years, overall % of best (line only) on a
+// right axis, and every session's evidence as markers (race = diamond, hard = dot, bound = ring,
 // implausible = cross). With `withHr`, the "with HR" model variant (fitness.json variants.hr) is drawn per
 // discipline as a dashed line in the same colour, without a band. Hover a marker -> session details, click -> activity. Drag across the plot to zoom.
 import uPlot from "uplot";
@@ -9,7 +9,7 @@ import { navigate } from "../lib/router";
 import { cssVar } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { dateAxis } from "../lib/chartAxes";
-import { DISC_LABEL, KIND_LABEL, discColor, pm, unitShort, type Disc, type FitSession, type FitnessDoc } from "../lib/fitness";
+import { DISC_LABEL, KIND_LABEL, discColor, unitShort, type Disc, type FitSession, type FitnessDoc } from "../lib/fitness";
 
 const ts = (d: string) => Date.parse(d + "T12:00:00Z") / 1000;
 const isoOf = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
@@ -37,7 +37,6 @@ interface Props {
 
 export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, withHr = false, onZoom, height = 380 }: Props) {
   const box = useRef<HTMLDivElement>(null);
-  const read = useRef<HTMLDivElement>(null);
   const tip = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
   const hl = useRef(highlight);
@@ -65,7 +64,6 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, w
     const data: (number | null)[][] = [x];
     const series: uPlot.Series[] = [{}];
     const bandsCfg: uPlot.Band[] = [];
-    const lines: { key: string; idx: number; hr: { m: (number | null)[]; sd: (number | null)[] } | null }[] = [];
     const HD = withHr ? doc.variants?.hr?.disciplines : undefined;
     let lo = Infinity, hi = -Infinity;
     for (const k of discs) {
@@ -85,29 +83,31 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, w
         { stroke: "transparent", width: 0, scale: "v", points: { show: false } },
         { stroke: "transparent", width: 0, scale: "v", points: { show: false } });
       bandsCfg.push({ series: [base + 1, base + 2], fill: rgba(c, 0.13) });
-      let hr: (typeof lines)[number]["hr"] = null;
       if (HD?.[k]) {
-        const hm: (number | null)[] = xs.map(() => null), hs = [...hm];
+        const hm: (number | null)[] = xs.map(() => null);
         for (const w of HD[k].weekly) {
           const i = pos.get(w.date);
           if (i === undefined) continue;
-          hm[i] = w.mean; hs[i] = w.sd;
+          hm[i] = w.mean;
           lo = Math.min(lo, w.mean); hi = Math.max(hi, w.mean);
         }
         data.push(hm);
         series.push({ label: k + " (with HR)", stroke: c, width: 1.5, dash: [5, 4], scale: "v", points: { show: false } });
-        hr = { m: hm, sd: hs };
       }
-      lines.push({ key: k, idx: base, hr });
     }
-    // overall (% of best) goes in its own small panel below, x-synced
-    let ov: (number | null)[][] | null = null;
+    // overall (% of best): one line on its own right-hand scale
+    let pctRange: [number, number] | null = null;
     if (overall && D.overall) {
-      const m: (number | null)[] = xs.map(() => null), up = [...m], dn = [...m];
+      const m: (number | null)[] = xs.map(() => null);
       // the overall % jumps while disciplines join the model (first weeks); start it once all have data
       const start = Object.entries(D).filter(([k, d]) => k !== "overall" && d?.weekly?.length).map(([, d]) => d.weekly[0].date).sort().pop() ?? "";
-      for (const w of D.overall.weekly) { const i = pos.get(w.date); if (i !== undefined && w.date >= start) { m[i] = w.mean; up[i] = w.mean + w.sd; dn[i] = w.mean - w.sd; } }
-      if (m.some((v) => v !== null)) ov = [x, m, up, dn];
+      for (const w of D.overall.weekly) { const i = pos.get(w.date); if (i !== undefined && w.date >= start) m[i] = w.mean; }
+      const vals = m.filter((v) => v !== null) as number[];
+      if (vals.length) {
+        pctRange = [Math.floor(Math.min(...vals)) - 4, Math.min(102, Math.ceil(Math.max(...vals) + 2))];
+        data.push(m);
+        series.push({ label: "overall", stroke: discColor("overall"), width: 1.5, scale: "pct", points: { show: false } });
+      }
     }
     const pts: (FitSession & { t: number })[] = doc.sessions
       .filter((s) => discs.includes(s.discipline) && inr(s.date) && (bounds || s.kind !== "bound"))
@@ -158,37 +158,24 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, w
       cache = ptsXY();
     };
 
-    const fmtRead = (i: number | null | undefined) => {
-      if (i === null || i === undefined) i = xs.length - 1;
-      const parts = [`<span class="muted">week to ${xs[i]}</span>`];
-      for (const { key, idx, hr } of lines) {
-        const m = data[idx][i], up = data[idx + 1][i];
-        if (m === null) continue;
-        const h = hr && hr.m[i] !== null ? ` <span class="muted" title="with HR">· HR ${pm(hr.m[i], hr.sd[i])}</span>` : "";
-        parts.push(`<span><i class="dot" style="background:${discColor(key)}"></i>${DISC_LABEL[key]} ${pm(m, (up as number) - m)}${h}</span>`);
-      }
-      if (ov && ov[1][i] !== null) parts.push(`<span><i class="dot" style="background:${discColor("overall")}"></i>Overall ${(ov[1][i] as number).toFixed(1)} %</span>`);
-      read.current!.innerHTML = parts.join("");
-    };
-
     const width = root.clientWidth || 900;
-    const sync = uPlot.sync("shape-" + Math.random());
     const u: uPlot = new uPlot({
       width, height,
       padding: [8, 4, 0, 0],
       legend: { show: false },
-      cursor: { drag: { x: true, y: false, setScale: false }, points: { show: false }, y: false, sync: { key: sync.key, setSeries: false } },
+      cursor: { drag: { x: true, y: false, setScale: false }, points: { show: false }, y: false },
       select: { show: true, left: 0, top: 0, width: 0, height: 0 },
-      scales: { x: { time: true }, v: { range: () => vRange } },
+      scales: { x: { time: true }, v: { range: () => vRange }, ...(pctRange ? { pct: { range: () => pctRange! } } : {}) },
       bands: bandsCfg,
       axes: [
         { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 26, ...dateAxis(56) },
         { scale: "v", stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 48, label: "VDOT", labelFont: font, labelSize: 16 },
+        ...(pctRange ? [{ scale: "pct", side: 1, stroke: muted, grid: { show: false }, ticks: { show: false }, font, size: 44,
+          label: "% of best", labelFont: font, labelSize: 16 } as uPlot.Axis] : []),
       ],
       series,
       hooks: {
         draw: [drawPts],
-        setCursor: [(u) => fmtRead(u.cursor.idx)],
         setSelect: [(u) => {
           const s = u.select;
           if (s.width > 6) {
@@ -200,29 +187,6 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, w
       },
     }, data as uPlot.AlignedData, root);
     plot.current = u;
-    let u2: uPlot | null = null;
-    if (ov) {
-      const c = discColor("overall");
-      const vals = (ov[1].filter((v) => v !== null) as number[]);
-      const pr: [number, number] = [Math.floor(Math.min(...vals)) - 4, Math.min(102, Math.ceil(Math.max(...vals) + 2))];
-      const lab = document.createElement("div");
-      lab.className = "subtitle";
-      lab.textContent = "Overall, % of personal best (precision-weighted across disciplines)";
-      root.appendChild(lab);
-      u2 = new uPlot({
-        width, height: 120, padding: [6, 4, 0, 0], legend: { show: false },
-        cursor: { drag: { x: false, y: false, setScale: false }, points: { show: false }, y: false, sync: { key: sync.key, setSeries: false } },
-        scales: { x: { time: true }, y: { range: () => pr } },
-        bands: [{ series: [2, 3], fill: rgba(c, 0.15) }],
-        axes: [
-          { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 24, ...dateAxis(56) },
-          { stroke: muted, grid: { stroke: grid, width: 1 }, ticks: { show: false }, font, size: 48, space: 28, label: "%", labelFont: font, labelSize: 16 },
-        ],
-        series: [{}, { stroke: c, width: 1.5, points: { show: false } },
-          { stroke: "transparent", width: 0, points: { show: false } }, { stroke: "transparent", width: 0, points: { show: false } }],
-      }, ov as uPlot.AlignedData, root);
-    }
-    fmtRead(null);
 
     // marker hover / click (uPlot's cursor only knows the weekly grid)
     const over = u.over;
@@ -256,19 +220,18 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, w
     over.addEventListener("mouseleave", onLeave);
     over.addEventListener("click", onClick);
     over.addEventListener("dblclick", onDbl);
-    const ro = new ResizeObserver(() => { u.setSize({ width: root.clientWidth, height }); u2?.setSize({ width: root.clientWidth, height: 120 }); });
+    const ro = new ResizeObserver(() => { u.setSize({ width: root.clientWidth, height }); });
     ro.observe(root);
     return () => {
       ro.disconnect();
       over.removeEventListener("mousemove", onMove); over.removeEventListener("mouseleave", onLeave);
       over.removeEventListener("click", onClick); over.removeEventListener("dblclick", onDbl);
-      u.destroy(); u2?.destroy(); plot.current = null;
+      u.destroy(); plot.current = null;
     };
   }, [doc, discs.join(","), overall, bounds, withHr, from, to, height, theme]);
 
   return (
     <div class="shape-chart">
-      <div class="readout" ref={read} />
       <div class="plotwrap">
         <div ref={box} />
         <div class="chart-tip" ref={tip} />

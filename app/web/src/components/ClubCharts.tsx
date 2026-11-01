@@ -1,24 +1,17 @@
-// uPlot charts of the Community pages: the club's month series (sessions as bars by category, km as a line),
-// a member's form delta per session (stems from 0, green above / red below) and their shape trend (weekly mean ± sd
-// per discipline with the session scores as dots).
+// uPlot charts of the Community pages: the club's month series (sessions as bars by type, km as a line) and
+// a member's form delta per session (stems from 0, green above / red below).
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { cssVar, shortDate } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { dateAxis } from "../lib/chartAxes";
-import { discColor, DISC_LABEL } from "../lib/fitness";
-import { CATS, dayTs, delta, monthLabel, type ClubMonth, type Member } from "../lib/community";
+import { DISC_LABEL } from "../lib/fitness";
+import { CATS, delta, monthLabel, type ClubMonth, type Member } from "../lib/community";
 import { navigate } from "../lib/router";
 import "../fitness.css";
 
 const monthTs = (m: string) => Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 15) / 1000;
-function rgba(c: string, a: number) {
-  const m = /^#([0-9a-f]{6})$/i.exec(c.trim());
-  if (!m) return c;
-  const n = parseInt(m[1], 16);
-  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
-}
 
 /** create a uPlot in `el`, resized with it; returns a cleanup */
 function mount(el: HTMLDivElement, opts: Omit<uPlot.Options, "width">, data: uPlot.AlignedData): () => void {
@@ -97,7 +90,7 @@ export function ClubMonthChart({ months, height = 220 }: { months: ClubMonth[]; 
           <b>{monthLabel(m.month)}</b>
           <span>{m.sessions} session{m.sessions === 1 ? "" : "s"}</span><span>{m.km.toFixed(1)} km</span><span>{m.hours.toFixed(1)} h</span>
           {CATS.filter((c) => m.by_category[c.id]).map((c) => <span><i class="sw" style={{ background: `var(--cat-${c.id})` }} />{c.label} {m.by_category[c.id]}</span>)}
-        </> : <span class="muted">Hover a month · bars = sessions by category · dashed = km (all members)</span>}
+        </> : <span class="muted">Hover a month · bars = sessions by type · dashed = km (all members)</span>}
       </div>
       <div ref={box} />
     </div>
@@ -180,78 +173,6 @@ export function ClubFormChart({ series, height = 200 }: { series: Member["form_s
         {s ? <><b>{shortDate(s.date, "x")}</b><span class={s.delta >= 0 ? "up" : "down"}>{delta(s.delta)} vs form</span>
           <span>score {s.score.toFixed(1)} · shape {s.shape.toFixed(1)}</span><span class="muted">{DISC_LABEL[s.discipline] ?? s.discipline}{s.confidence ? ` · ${s.confidence} confidence` : ""}</span></>
           : <span class="muted">Each dot = a club session: the session's score minus the shape the day before (VDOT). Hollow = low confidence. Click = open</span>}
-      </div>
-      <div ref={box} />
-    </div>
-  );
-}
-
-/** shape trend per discipline (weekly mean ± sd) from the member's `shape`, with the club sessions' scores as dots */
-export function ClubShapeChart({ shape, sessions, height = 240 }: { shape: NonNullable<Member["shape"]>; sessions: Member["form_series"]; height?: number }) {
-  const box = useRef<HTMLDivElement>(null);
-  const theme = useTheme();
-  const [idx, setIdx] = useState<number | null>(null);
-  const discs = Object.keys(shape.disciplines).filter((d) => shape.disciplines[d].weekly?.length);
-  const dates = [...new Set(discs.flatMap((d) => shape.disciplines[d].weekly.map((w) => w.date)))].sort();
-  useEffect(() => {
-    if (!dates.length) return;
-    const x = dates.map(dayTs);
-    const pos = new Map(dates.map((d, i) => [d, i]));
-    const data: (number | null)[][] = [x];
-    const ser: uPlot.Series[] = [{}];
-    const bands: uPlot.Band[] = [];
-    let lo = Infinity, hi = -Infinity;
-    for (const d of discs) {
-      const m: (number | null)[] = x.map(() => null), up = [...m], dn = [...m];
-      for (const w of shape.disciplines[d].weekly) {
-        const i = pos.get(w.date)!;
-        m[i] = w.mean; up[i] = w.mean + w.sd; dn[i] = w.mean - w.sd;
-        lo = Math.min(lo, w.mean - w.sd); hi = Math.max(hi, w.mean + w.sd);
-      }
-      const c = discColor(d), base = data.length;
-      data.push(m, up, dn);
-      ser.push({ stroke: c, width: 2, points: { show: false } }, { stroke: "transparent", points: { show: false } }, { stroke: "transparent", points: { show: false } });
-      bands.push({ series: [base + 1, base + 2], fill: rgba(c, 0.12) });
-    }
-    for (const s of sessions) { lo = Math.min(lo, s.score); hi = Math.max(hi, s.score); }
-    const yr: [number, number] = [Math.floor(lo - 1), Math.ceil(hi + 1)];
-    return mount(box.current!, {
-      height, padding: [10, 10, 0, 0], legend: { show: false },
-      cursor: { drag: { x: false, y: false }, points: { show: false }, y: false },
-      scales: { x: { time: true }, y: { range: () => yr } },
-      bands,
-      axes: [{ ...axisBase(), size: 26, ...dateAxis(56) }, { ...axisBase(), size: 40, label: "VDOT", labelSize: 14, labelFont: `11px ${cssVar("--font")}` }],
-      series: ser,
-      hooks: {
-        draw: [(u) => {
-          const ctx = u.ctx, dpr = devicePixelRatio || 1;
-          ctx.save();
-          for (const s of sessions) {
-            const cx = u.valToPos(dayTs(s.date), "x", true), cy = u.valToPos(s.score, "y", true);
-            const sy = u.valToPos(s.shape, "y", true);
-            ctx.strokeStyle = cssVar("--text-muted"); ctx.lineWidth = dpr; ctx.setLineDash([2 * dpr, 2 * dpr]);
-            ctx.beginPath(); ctx.moveTo(cx, sy); ctx.lineTo(cx, cy); ctx.stroke(); ctx.setLineDash([]);
-            ctx.beginPath(); ctx.arc(cx, cy, 4.5 * dpr, 0, 2 * Math.PI);
-            ctx.fillStyle = discColor(s.discipline); ctx.fill(); ctx.lineWidth = 1.5 * dpr; ctx.strokeStyle = cssVar("--surface"); ctx.stroke();
-          }
-          ctx.restore();
-        }],
-        setCursor: [(u) => setIdx(u.cursor.idx ?? null)],
-        ready: [(u) => { u.over.addEventListener("mouseleave", () => setIdx(null)); }],
-      },
-    }, data as uPlot.AlignedData);
-  }, [shape, sessions, height, theme]);
-  if (!dates.length) return null;
-  const i = idx ?? dates.length - 1;
-  return (
-    <div class="cm-chart">
-      <div class="cm-readout">
-        <b>{idx === null ? "Now" : `week to ${shortDate(dates[i], "x")}`}</b>
-        {discs.map((d) => {
-          const w = shape.disciplines[d].weekly.find((x) => x.date === dates[i]);
-          return w ? <span><i class="sw" style={{ background: discColor(d) }} />{DISC_LABEL[d] ?? d} {w.mean.toFixed(1)} ± {w.sd.toFixed(1)}</span> : null;
-        })}
-        <span class="muted">dots = club sessions' scores</span>
       </div>
       <div ref={box} />
     </div>

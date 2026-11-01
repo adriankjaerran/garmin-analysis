@@ -1,48 +1,11 @@
-// Motivation bits of a club session page: the story (the session in a few sentences), the highlights strip
-// ("Rep of the day" = the closest rep, fastest rep, faster recovery, strongest finish, most even, biggest form jump;
-// for runs together / races: side by side, winner, most in front, fastest km) and "Last time here": the previous
-// session at the same place (the same workout if there is one, else the same category) with each member's fitness
-// score then and now (+ average rep for the same workout). Facts: lib/communitySession.ts sessionFacts().
-import { setQuery } from "../lib/router";
+// "Last time here" on a club session page: the previous session at the same place (the same workout if there is
+// one, else the same type) with each member's fitness score then and now (+ average rep for the same workout).
 import { shortDate } from "../lib/format";
-import { personColour, personName } from "../lib/people";
-import { useTheme } from "../lib/theme";
+import { personName } from "../lib/people";
 import { repTime } from "../lib/together";
-import { useCommunity, type CsSession, type Facts } from "../lib/communitySession";
-import { Av } from "./CommunityBits";
-import "../pages/community-session.css";
+import { useCommunity, type CsSession } from "../lib/communitySession";
 
-export function SessionStory({ f }: { f: Facts }) {
-  if (!f.story.length) return null;
-  return <p class="cs-story"><span class="cs-story-q" aria-hidden="true">“</span>{f.story.join(" ")}</p>;
-}
-
-export function SessionHighlights({ f }: { f: Facts }) {
-  useTheme();
-  if (!f.highlights.length) return null;
-  const go = (rep: string) => {
-    setQuery({ rep });
-    setTimeout(() => document.querySelector(".tg-rb-row.selected, .tg-tbl.mx tr.selected")?.scrollIntoView({ block: "center", behavior: "smooth" }), 50);
-  };
-  return (
-    <div class="cs-hls">
-      {f.highlights.map((h) => {
-        const body = <>
-          <span class="cs-hl-e" aria-hidden="true">{h.emoji}</span>
-          <span class="cs-hl-t">{h.title}</span>
-          <b>{h.value}</b>
-          {h.sub && <small>{h.sub}</small>}
-        </>;
-        const style = h.person ? ({ "--pc": personColour(h.person) } as any) : undefined;
-        return h.rep
-          ? <button key={h.id} class={"cs-hl" + (h.person ? " p" : "")} style={style} onClick={() => go(h.rep!)} title={`Show Rep ${h.rep} in the table and the close-up`}>{body}</button>
-          : <div key={h.id} class={"cs-hl" + (h.person ? " p" : "")} style={style}>{body}</div>;
-      })}
-    </div>
-  );
-}
-
-/** the previous session at this place to compare with: the same workout if any, else the same category */
+/** the previous session at this place to compare with: the same workout if any, else the same type */
 export function lastTimeHere(c: CsSession) {
   const older = c.same_place.filter((x) => x.date < c.date || (x.date === c.date && x.gid < c.gid));
   const same = older.find((x) => x.workout === c.workout);
@@ -66,13 +29,13 @@ function LastTimeBody({ c, gid, same, base }: { c: CsSession; gid: string; same:
   return (
     <>
       <a class="cs-last-link" href={`${base}/${encodeURIComponent(gid)}`}>
-        <span class="cs-sp-date">{shortDate(x.date, c.date)}</span><span class="cs-sp-wk">{x.workout}</span><span aria-hidden="true">›</span>
+        {shortDate(x.date, c.date)} · {x.workout}
       </a>
       {!p ? <div class="muted small">Loading…</div> : (
         <ul class="cs-last">
           {rows.map(({ m, o, now, then, unrel, d, rep }) => (
             <li key={m.key}>
-              <span class="pn"><Av p={m.key} size="sm" /><b>{personName(m.key)}</b></span>
+              <span class="pn">{personName(m.key)}:</span>
               {!o ? <span class="muted small">wasn't there</span> : (
                 <span class="cs-last-v">
                   {d !== null
@@ -94,10 +57,9 @@ export function LastTimeHere({ c, base }: { c: CsSession; base: string }) {
   const lt = lastTimeHere(c);
   if (!lt) return null;
   return (
-    <div class="card cs-lastcard">
-      <div class="head sm"><h2>Last time here</h2>
-        <span class="sub">{lt.same ? `the same workout at ${c.place?.name ?? "this place"}` : `the last ${c.category_info.label.toLowerCase()} session at ${c.place?.name ?? "this place"}`} · score = fitness (VDOT scale)</span></div>
+    <section class="cs-lastcard">
+      <h2>Last time here <span class="muted small">· {lt.same ? `the same workout at ${c.place?.name ?? "this place"}` : `the last ${c.category_info.label.toLowerCase()} session at ${c.place?.name ?? "this place"}`} · score = fitness (VDOT scale)</span></h2>
       <LastTimeBody c={c} gid={lt.x.gid} same={lt.same} base={base} />
-    </div>
+    </section>
   );
 }

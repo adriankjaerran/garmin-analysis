@@ -115,12 +115,12 @@ section.first { border-top: 0; margin-top: 0; padding-top: 0; }
 /* PageHeader (components/PageHeader.tsx): title row + one-line "what is this page" + `?` tips */
 .pagehead { margin-bottom: var(--space-3); }
 .pagehead > .head { margin-bottom: 0; }
-.pagehead .about { margin: 2px 0 0; color: var(--text-muted); font-size: var(--fs-13); max-width: 90ch; }
 .pagehead .help { position: relative; }
 .pagehead .help-btn { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--hairline); background: var(--surface); color: var(--text-muted); font: inherit; font-size: var(--fs-12); line-height: 1; cursor: pointer; padding: 0; }
 .pagehead .help-btn:hover, .pagehead .help-btn[aria-expanded="true"] { color: var(--text); background: var(--surface-hover); }
 .pagehead .help-pop { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: min(360px, 80vw); background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-float); box-shadow: var(--shadow-float); padding: var(--space-3); font-size: var(--fs-13); }
-.pagehead .help-pop .help-about { margin: 0 0 var(--space-2); }
+.pagehead .help-pop .help-about { margin: 0; }
+.pagehead .help-pop .help-about + ul { margin-top: var(--space-2); }
 .pagehead .help-pop ul { margin: 0; padding-left: 1.2em; color: var(--text-muted); }
 .pagehead .help-pop li + li { margin-top: 4px; }
 .toolbar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--hairline); flex-wrap: wrap; min-height: 45px; }
@@ -157,9 +157,6 @@ tbody tr.selected { background: var(--accent-surface); }
 tbody tr.hl { background: var(--surface-hover); }
 td.muted { color: var(--text-muted); }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; flex: none; }
-.dot.good { background: var(--state-good); }
-.dot.partial { background: var(--state-version); }
-.dot.none { background: var(--state-failed); }
 .mono { font-family: var(--mono); font-size: var(--fs-12); }
 
 /* label-value pairs */
@@ -181,7 +178,7 @@ dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow
 .map .gl { position: absolute; inset: 0; }
 .map.bordered { border: 1px solid var(--hairline); border-radius: var(--radius-control); overflow: hidden; }
 .map .basemap { position: absolute; top: var(--space-2); left: var(--space-2); z-index: 2; box-shadow: 0 1px 3px rgba(20, 24, 28, 0.12); }
-.map .basemap button { height: 24px; font-size: var(--fs-12); padding: 0 var(--space-2); }
+.map .basemap { height: 24px; font-size: var(--fs-12); padding: 0 var(--space-1); }
 .map .overlay { position: absolute; z-index: 2; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-control); padding: var(--space-1) var(--space-2); font-size: var(--fs-12); box-shadow: 0 1px 3px rgba(20, 24, 28, 0.12); }
 .map .overlay.bl { left: var(--space-2); bottom: var(--space-5); }
 .map .overlay.tr { right: var(--space-2); top: var(--space-2); }
@@ -242,7 +239,6 @@ dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow
   .split > .right { width: auto !important; min-width: 0 !important; }   /* pages set a desktop width inline */
   .cal { overflow-x: auto; }
   .cols > * { min-width: 0; }
-  .pagehead .about { font-size: var(--fs-12); }
   nav.side .who-list { top: 100%; left: 0; }
   nav.side .tab { padding: 4px var(--space-2); }
   main { padding: var(--space-3); }
@@ -267,12 +263,6 @@ dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow
 .toolbar.sub { min-height: 40px; }
 .btn.disabled { color: var(--text-muted); cursor: default; pointer-events: none; }
 button.caret, span.caret { width: 18px; height: 18px; padding: 0; border: 0; background: none; justify-content: center; color: var(--text-muted); display: inline-flex; }
-td:has(> .why) { max-width: none; }
-td .why { display: block; font-size: var(--fs-12); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-td .why .more { color: var(--text-faint, var(--text-muted)); }
-.cbars { display: inline-flex; gap: 2px; vertical-align: middle; }
-.cbars i { display: inline-block; height: 8px; background: var(--surface-hover); border-radius: 2px; overflow: hidden; }
-.cbars b { display: block; height: 100%; background: var(--accent); }
 /* place name labels on the Places map (HTML markers: the raster style has no glyphs) */
 .place-label { font-size: var(--fs-12); color: #1d2125; background: rgba(255, 255, 255, 0.85); padding: 0 4px; border-radius: 3px;
   white-space: nowrap; pointer-events: none; box-shadow: 0 0 0 1px rgba(20, 24, 28, 0.08); }
@@ -281,10 +271,10 @@ td .why .more { color: var(--text-faint, var(--text-muted)); }
 .fsimple { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--hairline); }
 .fsimple .sep { width: 1px; height: 20px; background: var(--hairline); margin: 0 var(--space-1); }
 .fsimple .adv-toggle.on { background: var(--accent-surface); border-color: var(--accent); color: var(--accent); }
+button.toggle.on { background: var(--accent-surface); border-color: var(--accent); color: var(--accent); }   /* Activities "Map" */
 button.link { border: 0; background: none; color: var(--accent); padding: 0 var(--space-1); }
 button.link:hover { background: none; text-decoration: underline; }
 .split > .right > .preview { flex: none; border-top: 1px solid var(--hairline); }
-.split > .right > .hint { flex: none; border-top: 1px solid var(--hairline); color: var(--text-muted); font-size: var(--fs-12); }
 .preview button.x { height: 24px; width: 24px; padding: 0; justify-content: center; color: var(--text-muted); }
 h2.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 nav.side .step.home { margin-bottom: var(--space-2); }
@@ -293,11 +283,7 @@ nav.side span.step { color: var(--text-muted); font-size: var(--fs-12); text-tra
 nav.side .tab .badge { display: inline-block; margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center;
   background: var(--accent-surface); color: var(--accent); font-variant-numeric: tabular-nums; }
 nav.side a.current .badge { background: var(--surface); }
-/* Together links from activities (ActivityPage header, activity tables) */
-.tg-link { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 var(--space-2); border-radius: 12px; font-size: var(--fs-12);
-  background: var(--accent-surface); color: var(--accent); white-space: nowrap; }
-.tg-link:hover { text-decoration: none; filter: brightness(0.97); }
-/* 👥 marker (ActivityBits.TogetherMark): a link to the Together session, in front of the workout name */
+/* "together" marker (ActivityBits.TogetherMark): a link to the Together session, in front of the workout name */
 .tg-mark { margin-right: 4px; font-size: 11px; text-decoration: none; border-radius: 3px; }
 .tg-mark:hover { text-decoration: none; background: var(--accent-surface); }
 
@@ -307,21 +293,17 @@ nav.side a.current .badge { background: var(--surface); }
   .seg button { flex: none; }
   .act-top .map { height: 300px; }
 }
-/* PageHeader inside a full-height page's top bar (Activities, Map, Places): title row + the one-liner under it */
+/* PageHeader inside a full-height page's top bar (Activities, Map, Places): one title row */
 .toolbar.pagehead { display: block; margin-bottom: 0; }
 .toolbar.pagehead > .head { min-height: var(--control); gap: var(--space-2) var(--space-3); }
-.toolbar.pagehead .about { margin: 0 0 2px; font-size: var(--fs-12); }
 /* friendly empty / error states: padded, plain words, the way out right there */
 .empty-state { padding: var(--space-5) var(--space-4); color: var(--text); }
 .empty-state p { margin: 0 0 var(--space-2); }
 .empty-state button, .empty-state .btn { margin-top: var(--space-1); }
-/* Day page: the day's Together sessions under the title */
+/* Day page: links to the day's Together sessions under the title */
 .day-together { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: 0 0 var(--space-3); }
-.places-legend { display: flex; gap: 4px var(--space-2); flex-wrap: wrap; align-items: center; max-width: calc(100% - 140px); }
+.places-legend { display: flex; gap: var(--space-2); flex-wrap: nowrap; white-space: nowrap; align-items: center; font-size: var(--fs-12); max-width: calc(100% - 140px); overflow: hidden; }
 .places-legend .dot { margin-right: 3px; }
-/* Closest activities: component bars + ⓘ, the reasons in the tooltip (no clipped "Why" text column) */
-.why-cell { display: inline-flex; align-items: center; gap: 6px; cursor: help; }
-.why-i { color: var(--text-muted); font-size: var(--fs-12); }
 
 /* an untrusted (indoor / no-GPS) distance: the lap estimate "≈ 9.2" or "—", how it was estimated in the tooltip */
 .dist-est { color: var(--text-muted); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
@@ -338,3 +320,14 @@ nav.side a.current .badge { background: var(--surface); }
 
 /* Places › route: the PB line with the time trend (PlacesPage) */
 .route-best { margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+
+
+/* sidebar groups: Personal (own training) and Community (the club) */
+nav.side .group { display: block; margin: var(--space-2) var(--space-4) 2px; padding-top: var(--space-2); font-size: 11px; font-weight: var(--fw-semibold);
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+nav.side .group.community { margin-top: var(--space-4); border-top: 1px solid var(--hairline); padding-top: var(--space-3); }
+nav.side .group:first-of-type { margin-top: 0; padding-top: 0; }
+@media (max-width: 760px) {
+  nav.side .group { display: none; }
+  nav.side .group.community { display: block; width: 1px; height: 18px; margin: 0 var(--space-1); padding: 0; border: 0; background: var(--hairline); font-size: 0; align-self: center; }
+}

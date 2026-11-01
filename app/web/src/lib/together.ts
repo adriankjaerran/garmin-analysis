@@ -87,17 +87,6 @@ export interface ReplayPerson { person: string; role: string; t: number[]; lat: 
 export interface Replay { gid: string; available: boolean; t0_utc: string; step_s: number; note?: string;
   people: Record<string, ReplayPerson>; reps: { slot: number; label: string; start_s: number; end_s: number }[] }
 
-export const LABELS: { id: string; label: string; hint: string }[] = [
-  { id: "same_workout", label: "Same workout", hint: "same reps, started together" },
-  { id: "together", label: "Side by side", hint: "side by side most of the time (a steady run or hike together)" },
-  { id: "partly_together", label: "Partly", hint: "part of the session side by side" },
-  { id: "same_race", label: "Race", hint: "same race start" },
-  { id: "unverified", label: "Unverified", hint: "one of you has no watch file: same start place and time, but nothing to compare" },
-];
-export const labelShort = (id: string) => LABELS.find((l) => l.id === id)?.label ?? (id === "same_place_diff_workout" ? "Near-miss" : id);
-
-export const KIND_LABEL: Record<string, string> = { intervals: "Intervals", race: "Race", continuous: "Run", hike: "Hike", ride: "Ride", ski: "Ski", swim: "Swim", other: "Other" };
-
 /** index of the last t <= x (binary search); -1 before the first */
 export function idxAt(ts: number[], x: number): number {
   let lo = 0, hi = ts.length - 1;
@@ -135,8 +124,6 @@ export function pathBetween(p: ReplayPerson | undefined, a: number, b: number): 
   return out;
 }
 
-/** "75.6" (tenths) */
-export const sec1 = (s: N | undefined) => (s === null || s === undefined ? "—" : s.toFixed(1));
 /** rep time with its unit: "45.3 s" under a minute, else "1:17.2" / "12:52.3" */
 export function repTime(s: N | undefined): string {
   if (s === null || s === undefined) return "—";
@@ -159,4 +146,3 @@ export function rollingMedian(v: N[], k = 5): N[] {
 }
 /** a place name, with the local-script original when the name is a Latin fallback ("Huayin City (青柯坪)") */
 export const placeText = (p: TPlace | null | undefined) => (!p ? "" : p.name_local ? `${p.name} (${p.name_local})` : p.name);
-export const MEDAL = ["🥇", "🥈", "🥉"];

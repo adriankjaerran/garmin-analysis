@@ -143,8 +143,8 @@ def photo(gid: str, file: str):
 
 @router.get("/community/club")
 def club(request: Request, date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to")):
-    """Club dashboard: totals, months, attendance (streaks, last seen), pairs, categories, highlights,
-    weekday × hour heatmap, places, guests, recent."""
+    """Club dashboard: totals, months, attendance (streaks, last seen), company effect, categories, highlights,
+    places, guests, goals."""
     return _run("club", date_from=date_from, date_to=date_to, viewer=request.scope.get("person"))
 
 
@@ -156,42 +156,11 @@ def members(request: Request):
 
 @router.get("/community/members/{person}")
 def member(person: str, request: Request):
-    """member profile: totals, sessions, form series, partners, best sessions, personal bests, shape trend"""
+    """member profile: totals, sessions, form series, partners, company effect"""
     try:
         return _run("member", person, viewer=request.scope.get("person"))
     except KeyError:
         raise HTTPException(404, f"no member {person}")
-
-
-@router.get("/community/wrapped/{year}")
-def wrapped(year: str, request: Request):
-    """the yearly recap (Wrapped): totals vs the year before, top place, favourite category, biggest day, best form
-    jump, most loyal, closest finish, badges earned, a slide per member. `latest` = the newest year
-    with a club session"""
-    if year == "latest":
-        r = _run("wrapped", "latest", viewer=request.scope.get("person"))
-    elif year.isdigit() and len(year) == 4:
-        r = _run("wrapped", year, viewer=request.scope.get("person"))
-    else:
-        raise HTTPException(422, "year: YYYY or latest")
-    if not r["totals"]["sessions"]:
-        raise HTTPException(404, f"no club sessions in {year} (years: {', '.join(r['years']) or 'none'})")
-    return r
-
-
-@router.get("/community/badges")
-def badges(request: Request):
-    """every member's badges (earned with date + session, locked with progress) and the newest earned ones"""
-    def f():
-        cm = _cm()
-        tdoc = cm.tg.load()
-        B = cm.base(tdoc)
-        M = cm.motivation(B, cm.load_store(), tdoc)
-        return {"people": B["people"], "badges": M["badges"], "latest": cm.latest_badges(M["badges"], n=20),
-                "definitions": list(cm.BADGE_INFO.values())}
-    _doc()
-    with _LOCK:
-        return f()
 
 
 @router.get("/community/goals")
