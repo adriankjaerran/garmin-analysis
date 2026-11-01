@@ -69,7 +69,7 @@ def row(a: dict, poly: bool = True) -> dict:
     w = a.get("workout") or {}
     r = {
         "id": str(a["id"]), "date": a["date"], "start": a.get("start"), "name": a.get("name"),
-        "sport": family(a.get("atype")), "sport_label": a.get("sport_label"), "isport": a.get("sport"),
+        "sport": family(a.get("atype"), a), "sport_label": a.get("sport_label"), "isport": a.get("sport"),
         "atype": a.get("atype"), "gps": bool(a.get("gps")),
         "dist_km": a.get("dist_km"), "dist_trusted": a.get("dist_trusted"), "moving_s": a.get("moving_s"),
         "avg_hr": a.get("avg_hr"),   # whole-activity average (Garmin summary), same as the activity header
@@ -167,7 +167,7 @@ def _text(a: dict) -> str:
 
 
 def _app_ok(a: dict, app: dict) -> bool:
-    if app["sport"] and family(a.get("atype")) not in app["sport"]:
+    if app["sport"] and family(a.get("atype"), a) not in app["sport"]:
         return False
     if app["q"]:
         t = _text(a)
@@ -310,7 +310,7 @@ def groups(request: Request, kind: str = "place", touched: int = 0, min_n: int =
         g["ids"] = [str(i) for i in g["ids"]]
         if "places" in g:
             g["places"] = {k or "no place": v for k, v in g["places"].items()}
-        g["sports"] = dict(Counter(family(ix.acts[int(i)].get("atype")) for i in g["ids"]).most_common())
+        g["sports"] = dict(Counter(family(ix.acts[int(i)].get("atype"), ix.acts[int(i)]) for i in g["ids"]).most_common())
         if kind in ("place", "start_place"):
             p = ix.places.get(g["key"], {})
             g |= {"name": p.get("name") or g["key"], "lat": p.get("lat"), "lon": p.get("lon"), "kind": p.get("kind"),
@@ -329,7 +329,7 @@ def groups(request: Request, kind: str = "place", touched: int = 0, min_n: int =
             g |= {k: r.get(k) for k in ("sport", "shape", "dist_km", "start_place", "end_place", "via", "place",
                                         "start_place_name", "end_place_name", "via_names", "place_name",
                                         "region", "climb_m", "is_climb", "poly")}
-            g["sport"] = family(ix.acts[int(g["ids"][0])].get("atype")) if g["ids"] else g.get("sport")
+            g["sport"] = family(ix.acts[int(g["ids"][0])].get("atype"), ix.acts[int(g["ids"][0])]) if g["ids"] else g.get("sport")
     return {"kind": kind, "groups": gs}
 
 
@@ -368,7 +368,7 @@ def options(store: Store = Depends(get_store)):
     W = lambda a: a.get("workout") or {}
     fam_label = {W(a)["family"]: W(a).get("family_label") for a in A}
     return {
-        "sports": [d | {"label": SPORT_LABEL.get(d["id"], d["id"])} for d in cnt(lambda a: [family(a.get("atype"))])],
+        "sports": [d | {"label": SPORT_LABEL.get(d["id"], d["id"])} for d in cnt(lambda a: [family(a.get("atype"), a)])],
         # n = what the place filter returns in its default (touched) mode = n_touched; n_main = with place_mode=main
         "places": [{"id": k, "name": v.get("name") or k, "n": v.get("n"), "n_touched": v.get("n"), "n_main": v.get("n_main"),
                     "n_start": v.get("n_start"), "kind": v.get("kind"), "src": v.get("src")}
