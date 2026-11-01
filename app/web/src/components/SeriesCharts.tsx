@@ -107,11 +107,9 @@ interface Props {
   cursorRef?: { current: ((i: number | null) => void) | null };
   /** x tick / hover label (default: elapsed time) */
   xFmt?: (t: number) => string;
-  /** x tick steps in x units (default: whole minutes / hours, see TIME_INCRS) */
-  xIncrs?: number[];
 }
 
-export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, xFmt, xIncrs = TIME_INCRS }: Props) {
+export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, xFmt }: Props) {
   const xh = xFmt ?? dur;
   const box = useRef<HTMLDivElement>(null);
   const hoverRef = useRef(onHover);
@@ -162,7 +160,7 @@ export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, x
         scales: { x: { time: false }, y: { range: () => range, dir: k === "pace" || k === "paceSlow" || k === "pace100" ? -1 : 1 } },
         axes: [
           { show: isLast, stroke: cssVar("--text-muted"), grid: { stroke: cssVar("--hairline"), width: 1 }, ticks: { show: false },
-            values: (_u, ts) => (xFmt ? ts.map(xFmt) : tTicks(ts)), font: `12px ${cssVar("--font")}`, size: 22, space: 80, incrs: xIncrs },
+            values: (_u, ts) => (xFmt ? ts.map(xFmt) : tTicks(ts)), font: `12px ${cssVar("--font")}`, size: 22, space: 80, incrs: TIME_INCRS },
           { stroke: cssVar("--text-muted"), grid: { stroke: cssVar("--hairline"), width: 1 }, ticks: { show: false },
             values: (_u, ts) => ts.map((v) => P.fmt(v)), font: `12px ${cssVar("--font")}`, size: 48, space: 30,
             ...(k === "pace" || k === "paceSlow" || k === "pace100" ? { incrs: PACE_INCRS } : {}) },

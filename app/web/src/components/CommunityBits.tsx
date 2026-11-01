@@ -8,13 +8,12 @@ import { ago, delta, plural, type Attendance, type FormInfo } from "../lib/commu
 type N = number | null;
 
 /** a form delta as text ("+2.4" / "−1.6"); coloured only when |delta| ≥ 2; details in the tooltip */
-export function FormDelta({ v, info, p }: { v: N | undefined; info?: FormInfo | null; p?: string }) {
+export function FormDelta({ v, info }: { v: N | undefined; info?: FormInfo | null }) {
   if (v === null || v === undefined) return <span class="muted" title="no form score (easy run, hike, no watch data)">—</span>;
   if (info?.confidence === "none") {   // rejected by the fitness model itself: no number
-    return <span class="muted" title={(p ? personName(p) + ": " : "") + `score unreliable (${delta(v)} vs form, rejected by the fitness model)`}>?</span>;
+    return <span class="muted" title={`score unreliable (${delta(v)} vs form, rejected by the fitness model)`}>?</span>;
   }
   const tip = [
-    p ? personName(p) : null,
     info?.text ?? `${delta(v)} vs form`,
     info?.score != null && info?.shape != null ? `score ${info.score.toFixed(1)} vs shape ${info.shape.toFixed(1)} the day before` : null,
     info?.confidence ? `${info.confidence} confidence` : null,

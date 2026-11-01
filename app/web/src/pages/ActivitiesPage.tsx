@@ -3,8 +3,7 @@
 // sortable table (full width) and, behind the "Map" toggle (remembered in localStorage), a map of all result tracks;
 // with the map open, selecting a row zooms the map to it and shows a summary (Open, Day, Compare, Closest) and clicking
 // it again opens the activity; without the map a click opens the activity. Groups tab: the places, regions, routes and workout tree
-// that the current filters leave. Tick rows to compare them. Every control lives in the URL; the old /search
-// (Find & group) URLs redirect here with the same filters.
+// that the current filters leave. Tick rows to compare them. Every control lives in the URL.
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi, type Activity, type Meta } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
@@ -18,7 +17,7 @@ import { PageHeader } from "../components/PageHeader";
 
 // ------------------------------------------------------------------ small controls
 /** text input that commits to the URL after a pause (or Enter / blur) */
-function QInput({ k, value, placeholder, width, title, list }: { k: string; value: string; placeholder?: string; width: number; title?: string; list?: string }) {
+function QInput({ k, value, placeholder, width, list }: { k: string; value: string; placeholder?: string; width: number; list?: string }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
   useEffect(() => {
@@ -27,7 +26,7 @@ function QInput({ k, value, placeholder, width, title, list }: { k: string; valu
     return () => clearTimeout(t);
   }, [v]);
   const commit = () => v !== value && setQuery({ [k]: v.trim() });
-  return <input type={k === "q" ? "search" : "text"} value={v} placeholder={placeholder} title={title} list={list}
+  return <input type={k === "q" ? "search" : "text"} value={v} placeholder={placeholder} list={list}
     style={{ width: width + "px" }} onInput={(e) => setV((e.target as HTMLInputElement).value)}
     onKeyDown={(e) => e.key === "Enter" && commit()} onBlur={commit} />;
 }

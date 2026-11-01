@@ -1,4 +1,4 @@
-// A map showing encoded-polyline tracks (Activities list, Day map, Home),
+// A map showing encoded-polyline tracks (Activities list, Day map),
 // coloured by sport, with optional highlight + click, fitted to the tracks.
 import type { Map as MLMap, MapLayerMouseEvent } from "maplibre-gl";
 import { Marker } from "maplibre-gl";

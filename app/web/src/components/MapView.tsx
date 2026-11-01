@@ -83,16 +83,12 @@ interface Props {
   style?: string | Record<string, string | number>;
   /** called once when the style is loaded; add sources/layers/handlers here */
   onReady?: (map: MLMap) => void;
-  /** initial view when no bbox is known */
-  bbox?: BBox | null;
-  interactive?: boolean;
   /** per-map default basemap; the user's toggle (stored) wins */
   defaultBasemap?: BasemapId;
   children?: ComponentChildren;
-  compact?: boolean;
 }
 
-export function MapView({ class: cls = "", style, onReady, bbox, interactive = true, defaultBasemap = "topo", children, compact }: Props) {
+export function MapView({ class: cls = "", style, onReady, defaultBasemap = "topo", children }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const [bm, setBm] = useState<BasemapId>(() => getBasemap(defaultBasemap));
   // Kartverket outside Norway is blank: this map shows OSM instead while its centre is abroad (the stored
@@ -114,16 +110,14 @@ export function MapView({ class: cls = "", style, onReady, bbox, interactive = t
     const map = new MLMap({
       container: el.current!,
       style: { version: 8, sources: { base: baseSource(bm) }, layers: [{ id: "base", type: "raster", source: "base" }] },
-      bounds: bbox ? (bbox as [number, number, number, number]) : undefined,
-      fitBoundsOptions: { padding: 30 },
-      center: bbox ? undefined : [10.73, 59.94], zoom: bbox ? undefined : 10,
-      attributionControl: false, interactive, dragRotate: false, pitchWithRotate: false,
+      center: [10.73, 59.94], zoom: 10,
+      attributionControl: false, dragRotate: false, pitchWithRotate: false,
     } as any);
     mapRef.current = map;
     (window as any).__map = map; // last created map, for debugging / automated checks
     map.touchZoomRotate?.disableRotation();
-    if (interactive) map.addControl(new NavigationControl({ showCompass: false }), "top-right");
-    if (!compact) map.addControl(new ScaleControl({ unit: "metric" }), "bottom-right");
+    map.addControl(new NavigationControl({ showCompass: false }), "top-right");
+    map.addControl(new ScaleControl({ unit: "metric" }), "bottom-right");
     map.addControl(new AttributionControl({ compact: true }), "bottom-right");
     let want: BasemapId = bm, shown: BasemapId = bm, loaded = false;
     const show = (id: BasemapId) => { if (id !== shown) { shown = id; applyBasemap(map, id); } setAuto(id !== want); };

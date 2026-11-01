@@ -126,9 +126,9 @@ function useTogetherCount(person: string): number | null {
 
 function Nav({ current, meta, activityId, person, path }:
   { current: string; meta: Meta | null; activityId: string | null; person: string; path: string }) {
-  const tab = (id: string, href: string, label: string, soon = false, badge?: number | null, badgeTitle?: string) => (
+  const tab = (id: string, href: string, label: string, badge?: number | null, badgeTitle?: string) => (
     <a class={"tab" + (current === id ? " current" : "")} href={href}>
-      {label}{soon && <span class="soon">soon</span>}{badge ? <span class="badge" title={badgeTitle}>{badge}</span> : null}
+      {label}{badge ? <span class="badge" title={badgeTitle}>{badge}</span> : null}
     </a>
   );
   const nTogether = useTogetherCount(person);
@@ -152,7 +152,7 @@ function Nav({ current, meta, activityId, person, path }:
       {tab("predictor", "/predictor", "Race predictor")}
       {club && <>
         <span class="group community" title="The running club: joint sessions, the club dashboard, members">Community</span>
-        {tab("community", "/community", "Sessions", false, nTogether, `${nTogether ?? 0} club sessions with you in the last 30 days`)}
+        {tab("community", "/community", "Sessions", nTogether, `${nTogether ?? 0} club sessions with you in the last 30 days`)}
         {tab("club", "/community/club", "Club")}
         {tab("members", "/community/members", "Members")}
         {current === "member" && memberName && <a class="tab sub current" href={path}>{memberName}</a>}
