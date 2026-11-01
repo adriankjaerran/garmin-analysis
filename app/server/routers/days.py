@@ -8,7 +8,7 @@ import datetime as dt
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..deps import get_store
-from ..store import Store
+from ..store import Store, volume_km
 
 router = APIRouter(tags=["days"])
 
@@ -16,7 +16,7 @@ router = APIRouter(tags=["days"])
 @router.get("/calendar")
 def calendar(date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to"),
              sport: str | None = None, store: Store = Depends(get_store)):
-    """Per day with activities: n, km, seconds, per-sport counts (for a heat calendar)."""
+    """Per day with activities: n, km (trusted distances only), seconds, per-sport counts (for a heat calendar)."""
     sports = set(sport.split(",")) if sport else None
     days: dict[str, dict] = {}
     for a in store.activities():
@@ -26,7 +26,7 @@ def calendar(date_from: str | None = Query(None, alias="from"), date_to: str | N
             continue
         d = days.setdefault(a["date"], {"date": a["date"], "n": 0, "km": 0.0, "s": 0, "sports": collections.Counter()})
         d["n"] += 1
-        d["km"] += a["dist_km"] or 0
+        d["km"] += volume_km(a)   # trusted distances only
         d["s"] += a["dur_s"] or 0
         d["sports"][a["sport"]] += 1
     out = []

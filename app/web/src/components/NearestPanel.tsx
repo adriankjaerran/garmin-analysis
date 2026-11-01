@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useApi } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
-import { dur, km, secs, speedUnit, speedVal } from "../lib/format";
+import { dur, secs, speedUnit, speedVal } from "../lib/format";
 import { decodePolyline, unionBBox, type BBox } from "../lib/geo";
 import { compareUrl, coreBBox, type NearestResult, type NearRow } from "../lib/search";
 import { Table } from "./Table";
 import { TracksMap } from "./TracksMap";
-import { SportDot, TogetherMark, workoutText as appWorkoutText, workoutTip } from "./ActivityBits";
+import { DistCell, SportDot, TogetherMark, distSort, workoutText as appWorkoutText, workoutTip } from "./ActivityBits";
 
 const PRESETS = [["balanced", "Balanced"], ["workout", "Same workout"], ["route", "Same route"], ["place", "Same place"]] as const;
 const KS = [5, 10, 20];
@@ -89,7 +89,7 @@ export function NearestPanel({ id }: { id: string }) {
               { key: "rank", label: "#", num: true, sort: (r) => -r.score, render: (r) => rows.indexOf(r) + 1 },
               { key: "date", label: "Date", render: (r) => <a href={`/activities/${r.id}`}>{r.date}</a> },
               { key: "workout", label: "Workout", sort: (r) => workoutText(r) ?? "", render: (r) => <span class="clip" style={{ maxWidth: "180px" }} title={workoutTip(r)}><SportDot sport={r.sport} /><TogetherMark a={r} />{workoutText(r)}</span> },
-              { key: "dist_km", label: "km", num: true, render: (r) => km(r.dist_km) },
+              { key: "dist_km", label: "km", num: true, render: (r) => <DistCell a={r} />, sort: distSort },
               { key: "moving_s", label: "Moving", num: true, render: (r) => dur(r.moving_s), title: "Moving time" },
               ...(intervals ? [
                 { key: "rep_pace_ms", label: `Rep ${unit}`, num: true, render: repPace, sort: (r: Row) => r.rep_pace_ms ?? r.rep_speed_ms ?? null, title: `Average rep pace (total rep distance / total rep time), ${unit}` },

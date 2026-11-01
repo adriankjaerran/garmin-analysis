@@ -11,21 +11,44 @@ export function TogetherMark({ a }: { a: { together?: TogetherLink | null } }) {
   const t = a.together;
   if (!t) return null;
   return (
-    <a class="tg-mark" href={`/together/${t.gid}`} onClick={(e) => e.stopPropagation()} aria-label={togetherWith(t)}
+    <a class="tg-mark" href={`/community/${t.gid}`} onClick={(e) => e.stopPropagation()} aria-label={togetherWith(t)}
        title={`${togetherWith(t)}${t.workout ? ` · ${t.workout}` : ""} — open the session`}>👥</a>
   );
 }
 export const SportDot = ({ sport }: { sport: string }) => <span class="dot" style={{ background: sportColor(sport) }} title={SPORT_LABEL[sport]} />;
 
+// ------------------------------------------------------------------ distance (trusted / estimate / unknown)
+type DistLike = { dist_km: number | null; dist_trusted?: boolean | null; dist_est_km?: number | null; dist_note?: string | null };
+/** km that count in totals: the trusted distance only (an indoor / no-GPS distance or its estimate doesn't) */
+export const trustedKm = (a: DistLike) => (a.dist_trusted === false ? 0 : a.dist_km || 0);
+/** sort key for a km column: trusted distance, else the estimate */
+export const distSort = (a: DistLike) => (a.dist_trusted === false ? a.dist_est_km ?? null : a.dist_km);
+/** "≈ 9.2" (lap estimate) / "—" (untrusted) / "8.0" as text, with `unit` " km" appended when asked */
+export function distStr(a: DistLike, unit = "", d?: number): string {
+  const f = (v: number) => (d !== undefined ? v.toFixed(d) : km(v));
+  if (a.dist_trusted === false) return a.dist_est_km ? `≈\u00a0${f(a.dist_est_km)}${unit}` : "—";
+  return a.dist_km ? `${f(a.dist_km)}${unit}` : "—";
+}
+/** km cell: trusted distance; untrusted: the estimate "≈ 9.2" (muted, tooltip = how it was estimated) or "—" */
+export function DistCell({ a, unit = "", d }: { a: DistLike; unit?: string; d?: number }) {
+  if (a.dist_trusted !== false) return <>{distStr(a, unit, d)}</>;
+  return <span class="dist-est" title={a.dist_note ?? "no trusted distance (no GPS)"}>{distStr(a, unit, d)}</span>;
+}
+/** km of a list for a "N activities, X km" line (trusted only) and how many were left out */
+export function kmTotal(rows: DistLike[]): { km: number; left_out: number } {
+  return { km: rows.reduce((s, r) => s + trustedKm(r), 0), left_out: rows.filter((r) => r.dist_trusted === false).length };
+}
+
 /** moving pace / speed in the sport's unit (lib/format speedText): /km on foot, /100 m for pool swims (swimming time
- *  only), km/h otherwise */
+ *  only), km/h otherwise; "—" when the distance isn't trusted (indoor / no GPS) */
 export function speedText(a: Activity): string {
   if (a.swim?.pace_100m_s) return dur(a.swim.pace_100m_s) + " /100 m";
+  if (a.dist_trusted === false) return "—";
   const s = a.dist_km && (a.moving_s || a.dur_s) ? (a.dist_km * 1000) / (a.moving_s || a.dur_s)! : null;
   return speedOf(a.sport, s);
 }
 /** sort key for the pace / speed column (m/s) */
-export const speedSort = (a: Activity) => (a.swim?.pace_100m_s ? 100 / a.swim.pace_100m_s : a.dist_km && a.moving_s ? (a.dist_km * 1000) / a.moving_s : null);
+export const speedSort = (a: Activity) => (a.swim?.pace_100m_s ? 100 / a.swim.pace_100m_s : a.dist_trusted === false ? null : a.dist_km && a.moving_s ? (a.dist_km * 1000) / a.moving_s : null);
 
 /** "Track run" (Garmin type, humanised server-side) */
 export const typeText = (a: Activity) => a.type_label || stypeLabel(a.stype) || typeLabel(a.type);
@@ -54,7 +77,7 @@ export function activityCols(opts: { date?: boolean } = {}): Col<Activity>[] {
   else cols.push({ key: "start", label: "Start", render: (a) => time(a.start) });
   cols.push(
     { key: "type", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "210px" }} title={[workoutTip(a), typeText(a)].filter(Boolean).join(" · ")}><SportDot sport={a.sport} /><TogetherMark a={a} />{workoutText(a)}</span>, sort: (a) => a.sport + what(a) },
-    { key: "dist_km", label: "km", num: true, render: (a) => km(a.dist_km) },
+    { key: "dist_km", label: "km", num: true, render: (a) => <DistCell a={a} />, sort: distSort },
     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s ?? a.dur_s) },
     { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: speedSort, title: "Moving pace: min/km on foot (run, walk, hike), /100 m for swims, km/h for ski, bike and other" },
     { key: "hr", label: "HR", num: true, render: (a) => num(a.hr), title: "Average heart rate, whole activity (bpm)" },
@@ -73,8 +96,8 @@ export function ActivityKV({ a }: { a: Activity }) {
     <dl class="kv two">
       <dt>Date</dt><dd><a href={`/day/${a.date}`}>{a.date}</a> {time(a.start)}</dd>
       <dt>Type</dt><dd><SportDot sport={a.sport} />{typeText(a)}</dd>
-      <dt>Workout</dt><dd title={workoutTip(a)}>{workoutText(a)}{a.together && <> · <a href={`/together/${a.together.gid}`}>👥 {togetherWith(a.together)}</a></>}</dd>
-      <dt>Distance</dt><dd>{a.dist_km ? `${a.dist_km.toFixed(2)} km` : "—"}</dd>
+      <dt>Workout</dt><dd title={workoutTip(a)}>{workoutText(a)}{a.together && <> · <a href={`/community/${a.together.gid}`}>👥 {togetherWith(a.together)}</a></>}</dd>
+      <dt>Distance</dt><dd><DistCell a={a} unit=" km" d={a.dist_trusted === false ? 1 : 2} />{a.dist_trusted === false ? <span class="muted"> {a.dist_est_km ? "estimate" : "no GPS"}</span> : null}</dd>
       <dt>Time</dt><dd>{dur(a.dur_s)} <span class="muted">moving {dur(a.moving_s)}</span></dd>
       <dt>{speedLabel(a.sport)}</dt><dd>{speedText(a)} <span class="muted">moving</span></dd>
       <dt>Heart rate</dt><dd>{a.hr ? <>{num(a.hr)} bpm <span class="muted">max {num(a.maxhr)}</span></> : "—"}</dd>

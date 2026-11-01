@@ -11,7 +11,8 @@ import { RAMP, quantile } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
 import { SeriesCharts, drawablePanels, type Band, type PanelKey } from "../components/SeriesCharts";
 import { Table, type Col } from "../components/Table";
-import { SportDot, placeHref, speedText, typeText, workoutTip, togetherWith } from "../components/ActivityBits";
+import { DistCell, SportDot, placeHref, speedText, typeText, workoutTip, togetherWith } from "../components/ActivityBits";
+import { RecordChips, WorkoutProgress, fastest } from "../components/ProgressCard";
 import { PageHeader } from "../components/PageHeader";
 import { NearestPanel } from "../components/NearestPanel";
 import { ShapeSection } from "../components/ShapeSection";
@@ -301,7 +302,9 @@ export function ActivityPage({ id }: { id: string }) {
   const a = data?.activity;
   const swim = data?.swim ?? null;
   // pace on foot (run, walk, hike), speed for ski / bike / other (lib/format onFoot)
-  const panels: PanelKey[] = swim ? ["pace100", "hr", "cad"] : a?.sport === "run" ? ["pace", "hr", "alt", "cad", "power"] : onFoot(a?.sport) ? ["paceSlow", "hr", "alt"] : ["speed", "hr", "alt"];
+  const panels0: PanelKey[] = swim ? ["pace100", "hr", "cad"] : a?.sport === "run" ? ["pace", "hr", "alt", "cad", "power"] : onFoot(a?.sport) ? ["paceSlow", "hr", "alt"] : ["speed", "hr", "alt"];
+  // an untrusted distance (indoor / no GPS) makes the pace / speed series nonsense: keep HR / cadence only
+  const panels = a?.dist_trusted === false ? panels0.filter((p) => !["pace", "paceSlow", "speed"].includes(p)) : panels0;
   const drawable = useMemo(() => (s ? drawablePanels(s, panels) : []), [s, panels.join(",")]);
   const bands = useMemo<Band[]>(() => {
     if (!data) return [];
@@ -353,7 +356,7 @@ export function ActivityPage({ id }: { id: string }) {
           tips={["Hover the chart to move a marker on the map, or hover the track to move the chart cursor", "Hover a rep / leg / lap row to see that stretch on the map",
             "Compare lines this workout up with similar ones", "← Older / Newer → step through your activities"]}>
           {a.together && (
-            <a class="tg-link" href={`/together/${a.together.gid}`} title="Who did it with you, and who was faster">
+            <a class="tg-link" href={`/community/${a.together.gid}`} title="Who did it with you, and who was faster">
               👥 {togetherWith(a.together)}{a.together.kind === "intervals" ? " · see results" : ""} ›</a>
           )}
           <a class="btn" href={`/day/${a.date}`}>Day view</a>
@@ -365,12 +368,15 @@ export function ActivityPage({ id }: { id: string }) {
           <dt>Type</dt><dd>{typeText(a)}{a.type_detail ? <span class="muted"> · {a.type_detail}</span> : null}</dd>
           <dt>Place</dt><dd>{a.place ? <a href={placeHref(a.place)}>{a.place_name ?? a.place}</a> : a.location ?? "—"}
             {startDiffers ? <span class="muted"> · start <a href={placeHref(a.start_place!)}>{a.start_place_name ?? a.start_place}</a></span> : a.region && a.region !== a.place_name ? <span class="muted"> · {a.region}</span> : null}</dd>
-          <dt>Distance</dt><dd>{a.dist_km ? `${a.dist_km.toFixed(2)} km` : "—"}{g.dist_trusted === false ? <span class="muted"> (no GPS, not trusted)</span> : null}</dd>
-          <dt>Route</dt><dd title={data.route?.name}>{data.route ? <><a href={`/places?route=${data.route.id}`}>{data.route.id} {data.route.name}</a> <span class="muted">{g.route_dir === "rev" ? "reverse direction, " : ""}{data.route.n} sessions</span></> : "—"}</dd>
+          <dt>Distance</dt><dd>{a.dist_trusted === false ? <><DistCell a={a} unit=" km" d={1} /><span class="muted" title={a.dist_note ?? ""}>{a.dist_est_km ? " estimated from the laps" : " (no GPS: the watch's distance isn't trusted)"} · watch said {a.dist_km?.toFixed(2) ?? "—"} km</span></>
+            : a.dist_km ? `${a.dist_km.toFixed(2)} km` : "—"}</dd>
+          <dt>Route</dt><dd title={data.route?.name}>{data.route ? <><a href={`/places?route=${data.route.id}`}>{data.route.id} {data.route.name}</a> <span class="muted">{g.route_dir === "rev" ? "reverse direction, " : ""}{data.route.n} sessions</span>
+            {data.route.rank && <span title="time on the route: moving time from the route's start line to its end (lead-in excluded)">{" · "}{data.route.rank.is_pb ? <span class="pr-chip">🏆 fastest of {data.route.rank.of}</span>
+              : <>{fastest(data.route.rank.rank)} of {data.route.rank.of} <span class="muted">({dur(data.route.rank.route_time_s)} on the route, best <a href={`/activities/${data.route.rank.best_id}`}>{dur(data.route.rank.best_s)}</a>)</span></>}</span>}</> : "—"}</dd>
           {swim ? <><dt>Swimming / rest</dt><dd>{dur(swim.active_s)} / {dur(swim.rest_s)} <span class="muted">{swim.n_rests ?? 0} rests{swim.longest_rest_s ? `, longest ${dur(swim.longest_rest_s)}` : ""}; pace from swimming time</span></dd></>
             : <><dt>Moving / paused</dt><dd>{dur(g.moving_s ?? a.moving_s)} / {dur(g.pause_s)} <span class="muted">{g.n_pauses ?? 0} pauses{g.longest_pause_s ? `, longest ${dur(g.longest_pause_s)}` : ""}</span></dd></>}
           <dt>Workout</dt><dd title={workoutTip(a)}>{a.workout_label ?? typeText(a)}{a.rep_pace_ms ? <span class="muted" title="average rep pace = total rep distance / total rep time of the main reps"> · avg rep pace {speedOf(sport, a.rep_pace_ms)}</span> : null}</dd>
-          <dt>{onFoot(sport) || swim ? "Pace" : "Speed"}</dt><dd>{speedText(a)}{swim ? null : <span class="muted"> moving</span>}</dd>
+          <dt>{onFoot(sport) || swim ? "Pace" : "Speed"}</dt><dd>{speedText(a)}{swim ? null : <span class="muted">{a.dist_trusted === false ? " no trusted distance, so no pace (see the reps)" : " moving"}</span>}</dd>
           <dt>Heart rate</dt><dd>{a.hr === null ? "—" : <>{num(a.hr)} bpm avg, {num(a.maxhr)} max <span class="muted">whole activity</span></>}</dd>
           {swim ? <>
             <dt>Pool</dt><dd>{swim.pool_m ? `${num(swim.pool_m)} m` : "—"} <span class="muted">{swim.n_lengths ?? swim.lengths?.length} lengths{swim.bad_lengths ? `, ${swim.bad_lengths} glitch lengths dropped` : ""}</span></dd>
@@ -380,6 +386,8 @@ export function ActivityPage({ id }: { id: string }) {
             <dt title="Garmin training load / aerobic training effect (0–5)">Training load / effect</dt><dd>{num(a.load)} / {a.te ?? "—"}</dd>
           </>}
         </dl>
+        <div class="act-chips"><RecordChips id={id} /></div>
+        <WorkoutProgress id={id} />
       </section>
 
       {(hasMap || hasCharts) ? (

@@ -250,6 +250,7 @@ dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow
   .split { flex-direction: column; }
   .split > .right { width: auto; border-left: 0; border-top: 1px solid var(--hairline); }
   dl.kv { grid-template-columns: max-content 1fr; }
+  dl.kv dd { white-space: normal; overflow-wrap: break-word; }   /* phone: wrap header values ("203 max whole activity") instead of an ellipsis */
 }
 .split > .left > .tablewrap, .pane > .tablewrap { flex: 1; min-height: 0; }
 
@@ -316,3 +317,19 @@ nav.side a.current .badge { background: var(--surface); }
 /* Closest activities: component bars + ⓘ, the reasons in the tooltip (no clipped "Why" text column) */
 .why-cell { display: inline-flex; align-items: center; gap: 6px; cursor: help; }
 .why-i { color: var(--text-muted); font-size: var(--fs-12); }
+
+/* an untrusted (indoor / no-GPS) distance: the lap estimate "≈ 9.2" or "—", how it was estimated in the tooltip */
+.dist-est { color: var(--text-muted); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+
+/* Activities on a phone (ActivitiesPage MobileList): two lines per activity instead of a sideways-scrolling table */
+.m-list { overflow: auto; max-height: 60vh; border-top: 1px solid var(--hairline); }
+.m-row { display: flex; flex-direction: column; gap: 1px; padding: 6px var(--space-3); border-bottom: 1px solid var(--hairline); color: var(--text);
+  font-variant-numeric: tabular-nums; }
+.m-row:hover, .m-row:active { background: var(--surface-hover); text-decoration: none; }
+.m-row .l1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-row .l1 .d { color: var(--text-muted); }
+.m-row .l2 { font-size: var(--fs-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-more { margin: var(--space-2) var(--space-3); }
+
+/* Places › route: the PB line with the time trend (PlacesPage) */
+.route-best { margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }

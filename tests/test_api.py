@@ -462,3 +462,126 @@ def test_person_prefix(client):
         assert r.status_code == 200 and r.json()["person"] == p
     assert client.get(f"/api/{base['person']}/activities").json()["n"] == base["n_activities"]
     assert client.get("/api/not-a-person/meta").status_code == 404
+
+
+# ---- polish audit 3: untrusted (indoor) distances, records, workout progression, route ranks, compare sets
+def test_untrusted_distance_fields(client, activities):
+    """indoor / no-GPS distances are flagged; indoor Bislett gets a lap-based estimate; km totals skip them"""
+    un = [a for a in activities if a["dist_trusted"] is False]
+    assert un, "expected some activities without a trusted distance"
+    assert all("dist_est_km" in a and "dist_note" in a for a in activities)
+    est = [a for a in un if a["dist_est_km"]]
+    assert est, "indoor Bislett sessions should have an estimate"
+    for a in est:
+        assert 2 < a["dist_est_km"] < 30 and "estimate" in a["dist_note"]
+    assert not any(a["dist_est_km"] for a in activities if a["dist_trusted"] is not False)
+    # search rows carry the same fields, and the search km total leaves untrusted distances out
+    s = client.get("/api/search?sport=run").json()
+    rows = s["rows"]
+    assert {"dist_trusted", "dist_est_km", "dist_note"} <= set(rows[0])
+    trusted_km = sum(r["dist_km"] or 0 for r in rows if r["dist_trusted"] is not False)
+    assert abs(s["km"] - trusted_km) < 0.6
+    # calendar km per day = trusted only
+    day = un[0]["date"]
+    cal = {d["date"]: d for d in client.get(f"/api/calendar?from={day}&to={day}").json()["days"]}
+    same_day = [a for a in activities if a["date"] == day]
+    assert abs(cal[day]["km"] - sum(a["dist_km"] or 0 for a in same_day if a["dist_trusted"] is not False)) < 0.06
+
+
+def test_indoor_rep_pace_uses_lap_distance(client, activities):
+    """indoor Bislett reps are whole laps (1086 m): the avg rep pace must not snap them to a 1000 m track rep"""
+    g = json.loads((DATA / "groups.json").read_text())["activities"]
+    n = 0
+    for a in activities:
+        ga = g.get(a["id"]) or {}
+        if ga.get("indoor_bislett") and a.get("rep_pace_ms") and ga.get("reps"):
+            reps = [r for r in ga["reps"] if r[0] and r[1]]
+            whole = sum(r[1] for r in reps) / sum(r[0] for r in reps)
+            assert a["rep_pace_ms"] > whole * 0.95, (a["id"], a["rep_pace_ms"], whole)
+            n += 1
+    assert n
+
+
+def test_home_volume_excludes_untrusted_km(client):
+    h = client.get("/api/home").json()
+    for r in h["volume"]:
+        assert "n_untrusted" in r["week"] and "n_untrusted" in r["year30"]
+    run = next(r for r in h["volume"] if r["sport"] == "run")
+    assert len(run["weekly_km"]) == 52
+
+
+def test_records(client, activities):
+    r = client.get("/api/records")
+    assert r.status_code == 200
+    d = r.json()
+    keys = [x["key"] for x in d["records"]]
+    assert keys[:3] == ["1k", "mile", "5k"], keys
+    A = {a["id"]: a for a in activities}
+    for rec in d["records"]:
+        assert rec["best"] == rec["top"][0] and rec["best"]["rank"] == 1
+        assert [t["time_s"] for t in rec["top"]] == sorted(t["time_s"] for t in rec["top"])
+        # only trusted-distance runs; the history ends (newest first) with the current best
+        for t in rec["top"]:
+            assert A[t["id"]]["dist_trusted"] is True and A[t["id"]]["sport"] == "run"
+        assert rec["history"][0]["id"] == rec["best"]["id"]
+        assert all(h["improved_s"] is None or h["improved_s"] > 0 for h in rec["history"])
+        if d["vdot_cap"]:
+            assert all(t["vdot"] is None or t["vdot"] <= d["vdot_cap"] for t in rec["top"])
+    # indoor Bislett 17 Feb 2026 (18.2 km watch distance, "2:04 /km" 1k split) must not be a record
+    five = next(x for x in d["records"] if x["key"] == "1k")
+    assert five["best"]["time_s"] > 150
+    for aid, lst in d["by_activity"].items():
+        assert all(x["rank"] <= 3 for x in lst)
+
+
+def test_progress_list_and_activity(client, activities):
+    d = client.get("/api/progress?days=36500&limit=100").json()
+    assert d["n"] >= 1
+    six = next(w for w in d["workouts"] if w["signature"] == "6×1000" and w["sport"] == "run")
+    assert six["n"] >= 17
+    pts = six["points"]
+    assert [p["date"] for p in pts] == sorted(p["date"] for p in pts)
+    assert six["best"]["speed"] == max(p["speed"] for p in pts)
+    assert six["trend"]["arrow"] in ("↗", "→", "↘")
+    # per activity: current = this occurrence, rank among all, trend only from earlier ones
+    first = pts[0]["id"]
+    w = client.get(f"/api/progress/{first}").json()["workout"]
+    assert w["current"]["id"] == first and w["trend"] is None and w["best_before"] is None
+    last = client.get(f"/api/progress/{pts[-1]['id']}").json()["workout"]
+    assert 1 <= last["rank"] <= last["n"]
+    easy = next(a for a in activities if a["workout_label"] == "Easy run")
+    assert client.get(f"/api/progress/{easy['id']}").json()["workout"] is None
+    assert client.get("/api/progress/1").status_code == 404
+
+
+def test_route_ranking(client):
+    r = client.get("/api/routes/R3").json()
+    assert r["ranked"]
+    m = r["members"]
+    ranks = sorted(x["rank"] for x in m)
+    assert ranks == list(range(1, len(m) + 1))
+    pb = next(x for x in m if x["rank"] == 1)
+    assert pb["is_pb"] and pb["delta_s"] == 0
+    assert all(x["route_time_s"] >= pb["route_time_s"] for x in m)
+    assert r["pbs"][0]["id"] == pb["id"]
+    # the activity page carries the same rank
+    a = client.get(f"/api/activities/{m[0]['id']}").json()
+    assert a["route"]["rank"]["rank"] == m[0]["rank"]
+    # routes list: PB per route, none for laps routes
+    rows = client.get("/api/routes").json()["routes"]
+    assert next(x for x in rows if x["id"] == "R3")["pb"]["id"] == pb["id"]
+    assert all(x["pb"] is None for x in rows if x["shape"] == "laps")
+
+
+def test_compare_suggest_best_and_last_year(client, activities):
+    six = next(a for a in activities if a["workout_label"] == "6×1000")
+    d = client.get(f"/api/compare/suggest?id={six['id']}").json()
+    best = next(s for s in d["sets"] if s["key"] == "best")
+    assert best["ids"][0] == six["id"] and len(best["ids"]) == 4
+    paces = [d["activities"][i]["rep_pace_ms"] for i in best["ids"][1:]]
+    assert paces == sorted(paces, reverse=True)
+    # the fastest 6×1000 is in the set, whatever its date (not limited to the latest 8)
+    allp = client.get("/api/progress?days=36500&limit=100").json()
+    w = next(x for x in allp["workouts"] if x["signature"] == "6×1000")
+    if w["best"]["id"] != six["id"]:
+        assert w["best"]["id"] in best["ids"]

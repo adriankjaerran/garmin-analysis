@@ -3,7 +3,7 @@ import type { Sport } from "./api";
 
 export interface SearchRow {
   id: string; date: string; start: string | null; name: string | null; sport: Sport; isport: string; atype: string; gps: boolean;
-  dist_km: number | null; dist_trusted: boolean | null; moving_s: number | null; avg_hr: number | null; climb_m: number | null;
+  dist_km: number | null; dist_trusted: boolean | null; dist_est_km?: number | null; dist_note?: string | null; moving_s: number | null; avg_hr: number | null; climb_m: number | null;
   speed_ms: number | null; place: string | null; place_src: string | null; places: string[]; region: string | null; regions: string[];
   route: string | null; route_name: string | null; family: string; family_label: string; category: string | null;
   signature: string | null; main_sig: string | null; exact_key: string | null; rep_count: number | null; reps_total: number | null;

@@ -77,7 +77,7 @@ export function DayPage({ date }: { date: string | null }) {
             <button disabled={!data?.next_active} onClick={() => go(data?.next_active ?? null)} title="Next day with an activity">Next active ⇥</button>
         </PageHeader>
         {joint.length > 0 && <p class="day-together">{joint.map((a) => (
-          <a key={a.id} class="tg-link" href={`/together/${a.together!.gid}`}>👥 {togetherWith(a.together!)}{a.together!.workout ? ` · ${a.together!.workout}` : ""} ›</a>))}</p>}
+          <a key={a.id} class="tg-link" href={`/community/${a.together!.gid}`}>👥 {togetherWith(a.together!)}{a.together!.workout ? ` · ${a.together!.workout}` : ""} ›</a>))}</p>}
         <div class="head">
           <select value={String(year)} onChange={(e) => {
             const y = (e.target as HTMLSelectElement).value;

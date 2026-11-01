@@ -14,10 +14,10 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useApi, qs, type Activity } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
 import { useTheme } from "../lib/theme";
-import { SPORT_LABEL, dur, num, km, stypeLabel, typeLabel, onFoot } from "../lib/format";
+import { SPORT_LABEL, dur, num, stypeLabel, typeLabel, onFoot } from "../lib/format";
 import { PageHeader } from "../components/PageHeader";
 import { Table, type Col } from "../components/Table";
-import { SportDot } from "../components/ActivityBits";
+import { DistCell, SportDot, distSort } from "../components/ActivityBits";
 import { CompareCharts, type CPanel } from "../components/CompareCharts";
 import { CompareMap } from "../components/CompareMap";
 import { paceRange, speedRange } from "../lib/chartAxes";
@@ -92,7 +92,7 @@ function Landing() {
         { key: "type", label: "Workout", render: (a) => <span><SportDot sport={a.sport} />{shortWhat(a)}</span> },
         { key: "place", label: "Place", render: (a) => a.place_name ?? a.place ?? a.location ?? "—" },
         { key: "route", label: "Route", render: (a) => <span title={a.route_name ?? ""}>{a.route ?? "—"}</span> },
-        { key: "dist_km", label: "km", num: true, render: (a) => km(a.dist_km) },
+        { key: "dist_km", label: "km", num: true, render: (a) => <DistCell a={a} />, sort: distSort },
         { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s) },
         { key: "hr", label: "HR", num: true, render: (a) => num(a.hr) },
       ]} />

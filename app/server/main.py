@@ -23,6 +23,7 @@ from .routers import (
     maps,
     meta,
     places,
+    progress,
     search,
     together,
 )
@@ -78,7 +79,7 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=2048)
     app.add_middleware(PersonPrefix)
     # each router owns its paths; later workers extend search/compare/fitness in their own file
-    for r in (meta, activities, days, home, maps, places, search, compare, fitness, together, community):
+    for r in (meta, activities, days, home, maps, places, progress, search, compare, fitness, together, community):
         app.include_router(r.router, prefix="/api")
 
     @app.get("/api/{rest:path}", include_in_schema=False)

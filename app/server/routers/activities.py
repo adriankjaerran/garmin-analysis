@@ -118,7 +118,10 @@ def get_activity(aid: str, max_points: int = Query(3600, ge=100, le=20000), stor
            **_neighbours(store, aid)}
     if a.get("route") and a["route"] in g["routes"]:
         rt = g["routes"][a["route"]]
-        out["route"] = {"id": a["route"], "name": a.get("route_name") or rt.get("name"), "n": rt.get("n"), "shape": rt.get("shape")}
+        from .places import route_rankings
+        out["route"] = {"id": a["route"], "name": a.get("route_name") or rt.get("name"), "n": rt.get("n"), "shape": rt.get("shape"),
+                        # time on the route and its rank (places.route_rankings): "3rd fastest of 19", null for laps routes
+                        "rank": route_rankings(store).get(a["route"], {}).get(aid)}
     s = store.series(aid)
     if s:
         arr, meta = s

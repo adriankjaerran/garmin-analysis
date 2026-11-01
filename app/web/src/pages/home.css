@@ -104,3 +104,15 @@ table.vol .vs > span { min-width: 40px; text-align: right; }
   .home-top .tools { margin-left: 0; width: 100%; }
   .home-shape { overflow-x: auto; max-width: 100%; }
 }
+
+/* training log labels: the full workout ("6×1200") on wide screens, the compact one ("6×1.2k") below 500 px;
+   both wrap only at "×" / before "+" (wbr), never inside a number */
+.tl-act .t { word-break: keep-all; overflow-wrap: normal; }
+.tl-act .t.short { display: none; }
+@media (max-width: 500px) {
+  .tl-act .t.full { display: none; }
+  .tl-act .t.short { display: inline; }
+  .tl-act .t .u { display: none; }       /* "13.0" (km in the tooltip) instead of a clipped "13.0 k" */
+  .tl-act { overflow: visible; }
+  .tl-act .t { font-size: 10.5px; letter-spacing: -0.2px; }
+}

@@ -1,0 +1,20 @@
+/* progression + records (ProgressCard.tsx) */
+.pr-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; border-radius: 999px; font-size: var(--fs-12);
+  background: var(--accent-surface); color: var(--text); white-space: nowrap; }
+td .pr-chip, a .pr-chip { margin-left: 4px; }
+.prog-spark { display: inline-block; vertical-align: middle; }
+.home-progress .up, .act-progress .up { color: var(--state-good); }
+.home-progress .down, .act-progress .down { color: var(--state-duplicate); }
+/* activity page: one wrapping line under the header */
+.act-progress { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3); border: 1px solid var(--hairline); border-radius: var(--radius-float); background: var(--surface-tint);
+  font-variant-numeric: tabular-nums; }
+.act-progress .lbl { font-weight: var(--fw-semibold); color: var(--text-muted); }
+.act-progress .more { margin-left: auto; }
+.act-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.pr-history { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); margin-top: var(--space-3); }
+.pr-history details { min-width: 280px; }
+.pr-history summary { cursor: pointer; color: var(--accent); }
+table.pr-hist { margin-top: var(--space-2); }
+table.pr-hist tr { cursor: pointer; }
+table.pr-hist tr:hover td { background: var(--surface-hover); }

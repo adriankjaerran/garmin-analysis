@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import threading
 from collections import OrderedDict
 
@@ -114,8 +115,10 @@ def _ids_before(rows: list[dict], aid: int, date: str, n: int) -> list[int]:
 def suggest(id: int, n: int = Query(8, ge=2, le=MAX_IDS), store: Store = Depends(get_store)):
     """Comparison sets for an activity, best first. Each set: key, label, n_total (sessions in the group),
     ids (this activity first, then the most recent others on or before its date), mode (suggested view).
-    Sets: exact workout (same reps and rest, or same route and effort for ski / runs), signature (same reps,
-    any rest or place), route (all members, up to MAX_IDS), nearest (similarity index, workout or balanced)."""
+    Sets: exact workout (same reps and rest, or same route and effort for ski / runs), best (same rep signature:
+    the 3 fastest by avg rep pace, any date), route_best (route: the 3 fastest times on it, same direction),
+    last_year (same signature / route, closest to one year before), signature (same reps, any rest or place),
+    route (all members, up to MAX_IDS), nearest (similarity index, workout or balanced)."""
     import similarity
 
     with _LOCK:
@@ -159,6 +162,45 @@ def suggest(id: int, n: int = Query(8, ge=2, le=MAX_IDS), store: Store = Depends
     if w.get("exact_key"):
         add("exact", f"Same workout: {w['exact_key']}", ix.search({"exact_key": w["exact_key"], "sport": q["sport"]}),
             why="same exact workout key (reps + rest, or route + effort)")
+    A = store.activity_map()
+
+    def add_ids(key, label, ids, m=mode, why="", n_total=None):
+        """a set from explicit ids (this activity first); skipped when it repeats a set or has < 2 usable"""
+        F = store.folders()
+        ids = [id] + [i for i in dict.fromkeys(ids) if i != id and str(i) in F]
+        if len(ids) < 2 or not comparable or any(s["ids"] == [str(i) for i in ids] for s in sets):
+            return
+        sets.append({"key": key, "label": label, "n_total": n_total or len(ids), "ids": [str(i) for i in ids], "mode": m, "why": why})
+
+    def last_year(rows):   # the sessions closest to one year before this one (± 60 days), up to n-1
+        d0 = dt.date.fromisoformat(q["date"]) - dt.timedelta(days=365)
+        near = [(abs((dt.date.fromisoformat(a["date"]) - d0).days), a["id"]) for a in rows if a["id"] != id]
+        return [i for dd, i in sorted(near) if dd <= 60][: max(1, min(n, 4) - 1)]
+
+    if reps and w.get("signature"):
+        # same workout, the fastest ever by avg rep pace (store.rep_pace): "am I as fit as my best?"
+        sig_rows = usable(ix.search({"signature": w["signature"], "sport": q["sport"]}))
+        ranked = sorted((a for a in sig_rows if a["id"] != id and (A.get(str(a["id"])) or {}).get("rep_pace_ms")),
+                        key=lambda a: -A[str(a["id"])]["rep_pace_ms"])
+        if ranked:
+            add_ids("best", f"{w['signature']}: your 3 fastest", [a["id"] for a in ranked[:3]],
+                    why="same rep signature, the 3 fastest by avg rep pace (any date)", n_total=len(sig_rows))
+        ly = last_year(sig_rows)
+        if ly:
+            add_ids("last_year", f"{w['signature']}: same time last year", ly, why="same rep signature, closest to one year before")
+    if q.get("route") and route_ok:
+        rm = mode if reps else "distance"
+        from .places import route_rankings
+        rk = route_rankings(store).get(q["route"], {})
+        me = rk.get(str(id))
+        if me:
+            fast = sorted((v["route_time_s"], int(k)) for k, v in rk.items() if v["group"] == me["group"] and int(k) != id)
+            if fast:
+                add_ids("route_best", f"Route {q['route']}: your 3 fastest", [k for _, k in fast[:3]], m=rm,
+                        why="the 3 fastest times on the route (same direction)", n_total=me["of"])
+            ly = last_year([a for a in ix.acts.values() if a.get("route") == q["route"] and rk.get(str(a["id"]), {}).get("group") == me["group"]])
+            if ly:
+                add_ids("route_last_year", f"Route {q['route']}: same time last year", ly, m=rm, why="same route, closest to one year before")
     if reps and w.get("signature"):
         if q.get("place"):
             add("sig_place", f"{w['signature']} at {q.get('place_name') or q['place']}", ix.search({"signature": w["signature"], "place": q["place"], "place_mode": "main"}),
@@ -175,7 +217,6 @@ def suggest(id: int, n: int = Query(8, ge=2, le=MAX_IDS), store: Store = Depends
         ids = [id] + [r["id"] for r in near]
         sets.append({"key": "nearest", "label": "Most similar", "n_total": len(near) + 1, "ids": [str(i) for i in ids],
                      "mode": mode, "why": "similarity index, " + ("workout" if reps else "balanced") + " weights"})
-    A = store.activity_map()
     return {"id": str(id), "date": q["date"], "mode": mode, "modes": allowed, "no_distance": no_dist,
             "comparable": comparable, "why_not": why_not, "sets": sets,
             "activities": {str(i): A.get(str(i)) for s in sets for i in s["ids"]}}

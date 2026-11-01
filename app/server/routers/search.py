@@ -95,12 +95,13 @@ def row(a: dict, poly: bool = True) -> dict:
     return r
 
 
-APP_FIELDS = ("workout_label", "workout_detail", "rep_pace_ms", "together")
+APP_FIELDS = ("workout_label", "workout_detail", "rep_pace_ms", "together", "dist_trusted", "dist_est_km", "dist_note")
 
 
 def app_fields(store: Store, rows: list[dict]) -> list[dict]:
     """add the app row's shared fields to search rows (in place): `workout_label` (the one workout name,
-    store.workout_name), `workout_detail`, `rep_pace_ms` (avg rep pace, store.rep_pace) and `together`
+    store.workout_name), `workout_detail`, `rep_pace_ms` (avg rep pace, store.rep_pace), `dist_trusted` /
+    `dist_est_km` / `dist_note` (store: untrusted indoor distance and its estimate) and `together`
     ({gid, label, kind, role, with, workout}: the 👥 marker, docs/together.md)"""
     A = store.activity_map()
     for r in rows:
@@ -200,7 +201,7 @@ def search(request: Request, sort: str = "-date", limit: int | None = None, poly
     rows = [row(a, bool(poly)) for a in (res[:limit] if limit else res)]
     app_fields(store, rows)
     return {"n": n, "truncated": bool(limit and n > limit), "filters": f,
-            "km": round(sum(a.get("dist_km") or 0 for a in res), 1),
+            "km": round(sum(a.get("dist_km") or 0 for a in res if a.get("dist_trusted") is not False), 1),   # trusted only
             "families": dict(Counter((a.get("workout") or {}).get("family") for a in res).most_common()),
             "rows": rows}
 

@@ -11,7 +11,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..deps import get_store
-from ..store import SPORTS, Store
+from ..store import SPORTS, Store, volume_km
 from . import days as days_router
 from . import fitness as fitness_router
 from .search import app_fields
@@ -29,13 +29,16 @@ def _d(s: str) -> dt.date:
 
 
 def _agg(acts) -> dict:
-    n = km = s = climb = 0
+    """n, km (trusted distances only: store.volume_km), s (moving), climb; n_untrusted = activities whose
+    distance isn't trusted (indoor / no GPS: their time counts, their km don't)"""
+    n = km = s = climb = nu = 0
     for a in acts:
         n += 1
-        km += a["dist_km"] or 0
+        km += volume_km(a)
+        nu += a.get("dist_trusted") is False
         s += a["moving_s"] or a["dur_s"] or 0
         climb += a["elev"] or 0
-    return {"n": n, "km": round(km, 1), "s": int(s), "climb": int(climb)}
+    return {"n": n, "km": round(km, 1), "s": int(s), "climb": int(climb), "n_untrusted": int(nu)}
 
 
 def _scale(x: dict, f: float) -> dict:
@@ -114,6 +117,7 @@ def build(store: Store, anchor: dt.date) -> dict:
                                                     "place_name": a["place_name"]}
         # app-row extras the search row lacks
         r.update({"dur_s": a["dur_s"], "type_label": a.get("type_label"), "fit": a["fit"], "track": a["track"],
+                  "dist_trusted": a.get("dist_trusted"), "dist_est_km": a.get("dist_est_km"), "dist_note": a.get("dist_note"),
                   "load": a.get("load"), "te": a.get("te"), "swim": a.get("swim")})
         rows.append(r)
     app_fields(store, rows)

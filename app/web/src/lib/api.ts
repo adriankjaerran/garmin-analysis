@@ -20,6 +20,11 @@ export interface Activity {
   workout_detail?: string | null;
   /** average rep pace of the main reps (total rep distance / total rep time), m/s */
   rep_pace_ms?: number | null;
+  /** mean HR over the same main reps */
+  rep_hr?: number | null;
+  /** false = the watch distance isn't trusted (indoor / no GPS): dist_km is kept but lists show dist_est_km
+   *  ("≈ 9.2", lap-based estimate, why in dist_note) or "—"; km totals and pace leave it out */
+  dist_trusted?: boolean | null; dist_est_km?: number | null; dist_note?: string | null;
 }
 export interface TogetherLink { gid: string; label: string; kind: string; role: string; with: string[]; workout?: string | null }
 export interface SwimSummary { pool_m: number | null; lengths?: number; n_lengths?: number; dist_m: number | null; active_s: number | null;
@@ -46,7 +51,7 @@ export interface Similar { id: number; score: number; reasons: string }
 export interface ActivityDetail {
   activity: Activity; group: Record<string, any>; legs: Leg[]; pauses: Pause[];
   similar: { route?: Similar[]; workout?: Similar[] } | null;
-  route: { id: string; name: string; n: number; shape: string } | null;
+  route: { id: string; name: string; n: number; shape: string; rank?: RouteRank | null } | null;
   laps: Lap[]; reps: Rep[]; breaks: any[]; series: Series | null; newer: string | null; older: string | null;
   swim?: (SwimSummary & { lengths: SwimLength[] }) | null;
 }
@@ -66,11 +71,18 @@ export interface Place { id: string; name: string; lat: number; lon: number; n: 
   kind?: string | null; src?: string | null }
 export interface RouteRow { id: string; name: string; place: string; sport: string; shape: string; dist_km: number;
   n: number; first: string | null; last: string | null; has_legs: boolean; place_name?: string | null; start_place_name?: string | null;
-  end_place_name?: string | null; via_names?: string[] | null; climb_m?: number | null; region?: string | null }
+  end_place_name?: string | null; via_names?: string[] | null; climb_m?: number | null; region?: string | null;
+  /** fastest time on the route (main direction); null for laps routes */
+  pb?: { id: string; route_time_s: number; best_date: string | null; of: number; group: string } | null }
+/** time on a route and its rank (places.route_rankings); point-to-point routes rank per direction */
+export interface RouteRank { route_time_s: number; time_src: string; rank: number; of: number; best_s: number; best_id: string;
+  best_date: string | null; delta_s: number; is_pb: boolean; dir: string | null; group: string }
 export interface RouteDetail extends RouteRow {
   medoid: number; ref: { id: number; lat: number[]; lon: number[]; km: number[]; alt: (number | null)[] } | null;
   waypoints: { km: number; name: string; lat: number; lon: number; share_stopped: number }[] | null;
-  legs_table: any; members: (Activity & { route_dir: string | null; pause_s: number | null; poly: string | null })[];
+  legs_table: any; members: (Activity & { route_dir: string | null; pause_s: number | null; poly: string | null } & Partial<RouteRank>)[];
+  ranked?: boolean; pbs?: (RouteRank & { id: string })[]; trend?: { id: string; date: string | null; route_time_s: number; group: string }[];
+  rank_definition?: string;
 }
 
 const memo = new Map<string, Promise<any>>();

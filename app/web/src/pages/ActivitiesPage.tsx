@@ -7,12 +7,12 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi, type Activity, type Meta } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
-import { SPORTS, SPORT_LABEL, addDays, dur, isoLocal, km, num, secs, sportColor, speedUnit, speedVal } from "../lib/format";
+import { SPORTS, SPORT_LABEL, addDays, dur, isoLocal, km, num, secs, shortDate, sportColor, speedUnit, speedVal } from "../lib/format";
 import { FILTER_KEYS, compareUrl, coreBBox, filterQuery, placeCount, repLen, type Group, type SearchOptions, type SearchResult, type SearchRow, type TreeNode } from "../lib/search";
 import { Table, type Col } from "../components/Table";
 import { TracksMap } from "../components/TracksMap";
 import { GroupsMap, type GLine } from "../components/GroupsMap";
-import { ActivityKV, SportDot, TogetherMark, workoutTip as appWorkoutTip } from "../components/ActivityBits";
+import { ActivityKV, DistCell, SportDot, TogetherMark, distSort, distStr, workoutTip as appWorkoutTip } from "../components/ActivityBits";
 import { PageHeader } from "../components/PageHeader";
 
 // ------------------------------------------------------------------ small controls
@@ -236,7 +236,7 @@ function resultCols(picked: Set<string>, togglePick: (id: string) => void): Col<
       render: (r) => (r.rep_count ? <span title={r.rep_time_s ? `median rep time ${secs(r.rep_time_s)}` : ""}>{speedCell(r.sport, r.rep_pace_ms ?? r.rep_speed_ms)}</span> : "") },
     { key: "rest_s", label: "Rest", num: true, title: "This activity's median rest between reps (the same-workout group's median in the tooltip; “rest ~2:30” in the workout name is that group's bin)",
       render: (r) => (r.rest_s ? <span title={r.rest_group_s ? `this activity ${secs(r.rest_s)} · its same-workout group ${secs(r.rest_group_s)}` : ""}>{secs(r.rest_s)}</span> : "") },
-    { key: "dist_km", label: "km", num: true, render: (r) => km(r.dist_km) },
+    { key: "dist_km", label: "km", num: true, render: (r) => <DistCell a={r} />, sort: distSort },
     { key: "moving_s", label: "Time", num: true, title: "Moving time", render: (r) => dur(r.moving_s) },
     { key: "speed_ms", label: "Pace", num: true, title: speedTitle,
       sort: (r) => fastKey(r.speed_ms), render: (r) => speedCell(r.sport, r.speed_ms) },
@@ -246,6 +246,43 @@ function resultCols(picked: Set<string>, togglePick: (id: string) => void): Col<
       render: (r) => <span class="clip" style={{ maxWidth: "120px" }} title={[(r.place_names ?? r.places).length ? "touches " + (r.place_names ?? r.places).join(", ") : "", r.region ? "region " + r.region : ""].filter(Boolean).join(" · ")}>{placeText(r) ?? "—"}</span> },
     { key: "route", label: "Route", sort: (r) => (r.route ? +r.route.slice(1) : null), render: (r) => <span title={r.route_name ?? ""}>{r.route ?? "—"}</span> },
   ];
+}
+
+/** true below `px` CSS pixels wide (follows resizes / rotation) */
+function useNarrow(px = 760): boolean {
+  const q = `(max-width: ${px}px)`;
+  const [on, set] = useState(() => window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q), f = () => set(m.matches);
+    m.addEventListener("change", f);
+    return () => m.removeEventListener("change", f);
+  }, [q]);
+  return on;
+}
+
+/** phone list: two lines per activity, "Sat 31 Oct · 6×1000 @ 3:27 /km" and "8.0 km · 5:25 /km · HR 132 · Bislett";
+ *  newest first, 100 at a time; tap = open the activity */
+function MobileList({ rows }: { rows: SearchRow[] }) {
+  const [n, setN] = useState(100);
+  const sorted = useMemo(() => [...rows].sort((a, b) => (b.start ?? b.date).localeCompare(a.start ?? a.date)), [rows]);
+  const year = new Date().getFullYear().toString();
+  return (
+    <div class="m-list">
+      {sorted.slice(0, n).map((r) => {
+        const w = workoutText(r), rp = r.rep_count && (r.rep_pace_ms ?? r.rep_speed_ms);
+        const second = [distStr(r, " km"), r.moving_s ? dur(r.moving_s) : null, r.speed_ms ? `${speedVal(r.sport, r.speed_ms)} ${speedUnit(r.sport)}` : null,
+          r.avg_hr ? `HR ${r.avg_hr}` : null, placeText(r)].filter((x) => x && x !== "—");
+        return (
+          <a key={r.id} class="m-row" href={`/activities/${r.id}`} title={workoutTip(r)}>
+            <span class="l1"><SportDot sport={r.sport} /><span class="d">{shortDate(r.date, year + "-01-01")}</span> · <TogetherMark a={r} /><b>{w}</b>
+              {rp ? <span class="muted"> @ {speedVal(r.sport, rp)}{speedUnit(r.sport) === "/km" ? " /km" : ` ${speedUnit(r.sport)}`}</span> : null}</span>
+            <span class="l2 muted">{second.join(" · ")}</span>
+          </a>
+        );
+      })}
+      {sorted.length > n && <button class="m-more" onClick={() => setN(n + 200)}>Show more ({sorted.length - n} left)</button>}
+    </div>
+  );
 }
 
 const clearFilters = () => { const p: Record<string, null> = {}; for (const k of FILTER_KEYS) p[k] = null; setQuery({ ...p, sel: null }); };
@@ -299,10 +336,12 @@ function Results({ data, error, picked, togglePick, sel }: { data: SearchResult 
     return { ...coreBBox(boxes), whole: boxes.length ? coreBBox(boxes, 1e6).fit : null };
   }, [rows]);
   const fit = selRow?.bbox && selRow.poly ? selRow.bbox : all ? core.whole : core.fit;
+  const narrow = useNarrow();
   return (
     <div class="split">
       <div class="left">
         {error ? <div class="err pane">Could not search the activities: {error}</div> : data && !rows.length ? <NoResults /> :
+          narrow && data ? <MobileList rows={rows} /> :
           <Table cols={cols} rows={rows} rowKey={(r) => r.id} highlight={hover} selected={sel} follow maxHeight="100%" defaultSort={["date", -1]} stickyCols={2}
             onRow={(r) => (r.id === sel ? navigate(`/activities/${r.id}`) : setQuery({ sel: r.id }))} onHover={(r) => setHover(r?.id ?? null)}
             empty={data ? "No activities match these filters." : "Loading…"} />}

@@ -94,8 +94,88 @@ def rep_pace(reps: list | None, w: dict, sport: str, track: bool = False) -> flo
     return round(sum(ds) / sum(ts), 3)
 
 
+def rep_hr(reps: list | None, w: dict, sport: str) -> int | None:
+    """mean HR over the same main reps as rep_pace (groups.json reps [time_s, dist_m, speed, hr]), time-weighted"""
+    if not reps or not w.get("rep_count"):
+        return None
+    try:
+        import similarity as sim
+        parts = sim.rep_parts(reps, sport == "ski")
+        g = parts[w.get("main_part") or 0] if len(parts) == len(w.get("parts") or parts) else max(parts, key=len)
+    except Exception:  # noqa: BLE001
+        g = range(len(reps))
+    xs = [(reps[j][0], reps[j][3]) for j in g if len(reps[j]) > 3 and reps[j][0] and reps[j][3]]
+    tt = sum(t for t, _ in xs)
+    return int(round(sum(t * h for t, h in xs) / tt)) if tt else None
+
+
+BISLETT_LAP_M = 546.5   # indoor Bislett: n whole laps = n x 546.5 m - 7.5 m (session_groups)
+
+
+def easy_speeds(G: dict) -> list[tuple[str, float]]:
+    """(date, m/s) of every trusted-distance easy run (groups.json type "easy"), sorted by date"""
+    out = []
+    for v in G.values():
+        if v.get("sport") == "run" and v.get("type") == "easy" and v.get("dist_trusted") and v.get("moving_s") and v.get("dist_km"):
+            sp = v["dist_km"] * 1000 / v["moving_s"]
+            if 1.5 < sp < 6:
+                out.append((v["date"], sp))
+    return sorted(out)
+
+
+def easy_speed_at(speeds: list[tuple[str, float]], date: str) -> float | None:
+    """median easy-run speed of the 365 days before `date` (all-time median when there are fewer than 5)"""
+    if not speeds:
+        return None
+    import datetime as _dt
+    lo = (_dt.date.fromisoformat(date) - _dt.timedelta(days=365)).isoformat()
+    win = [s for d, s in speeds if lo <= d <= date]
+    return float(np.median(win if len(win) >= 5 else [s for _, s in speeds]))
+
+
+def indoor_dist_estimate(ga: dict, easy_ms: float | None) -> tuple[float, str] | None:
+    """Estimated distance (km, note) of an indoor Bislett session whose watch distance is made up: the rep laps
+    (whole laps x 546.5 m - 7.5 m) + the moving time before the first and after the last rep at the person's
+    easy pace (median easy run of the year before). Breaks between reps count as standing (0 m). None when a rep
+    has no known lap count or there is no easy pace."""
+    ib = ga.get("indoor_bislett") or {}
+    rl = ib.get("rep_laps") or []
+    if not rl or not easy_ms:
+        return None
+    rm = ib.get("rep_m") or [None] * len(rl)
+    reps_m = []
+    for (t0, d, n), m in zip(rl, rm):
+        m = m or (n * BISLETT_LAP_M - 7.5 if n else None)
+        if not m:
+            return None
+        reps_m.append(m)
+    first = rl[0][0]
+    last = rl[-1][0] + rl[-1][1]
+    dur = ga.get("dur_s") or last
+    pauses = ga.get("pauses") or []   # [t, dur_s, ...]: stopped time outside the rep block doesn't count
+    p_out = sum(max(0.0, min(p[0] + p[1], first) - p[0]) + max(0.0, p[0] + p[1] - max(p[0], last)) for p in pauses)
+    jog_s = max(0.0, first + max(0.0, dur - last) - p_out)
+    km = (sum(reps_m) + jog_s * easy_ms) / 1000
+    note = (f"estimate: {len(reps_m)} reps = {sum(reps_m) / 1000:.2f} km (whole indoor laps) + {round(jog_s / 60)} min "
+            f"warm-up / cool-down at your easy pace ({int(1000 / easy_ms // 60)}:{int(1000 / easy_ms % 60):02d} /km); "
+            "breaks counted as standing. The watch said "
+            f"{ga.get('dist_km') or 0:.2f} km, which isn't trusted indoors")
+    return round(km, 1), note
+
+
 def _json(p: Path):
     return json.loads(p.read_text())
+
+
+def volume_km(a: dict) -> float:
+    """km that count in totals: the trusted distance, else 0 (an untrusted distance or its estimate doesn't)"""
+    return 0.0 if a.get("dist_trusted") is False else (a.get("dist_km") or 0.0)
+
+
+def moving_speed(a: dict) -> float | None:
+    """moving speed (m/s) from a trusted distance only"""
+    t = a.get("moving_s") or a.get("dur_s")
+    return round(a["dist_km"] * 1000 / t, 3) if a.get("dist_trusted") is not False and a.get("dist_km") and t else None
 
 
 class Store:
@@ -180,6 +260,7 @@ class Store:
         gpl = self.groups().get("places", {})
         pname = (lambda p: ix.place_name(p)) if ix else (lambda p: (gpl.get(p) or {}).get("name", p))
         tog = self.together_links()
+        speeds = easy_speeds(g)
         out = []
         for a in _json(self.dir / "activities_index.json"):
             aid = str(a["activityId"])
@@ -191,6 +272,10 @@ class Store:
             pl = x.get("place") or sp       # main place (index); start cluster without an index entry
             rt = ga.get("route")
             sw = ga.get("swim")
+            # distance trust (groups.json dist_ok: GPS-backed or a pool swim's lengths); None = not analysed
+            trusted = True if sw and sw.get("dist_m") else ga.get("dist_trusted")
+            est = indoor_dist_estimate(ga, easy_speed_at(speeds, ga.get("date") or a["startTimeLocal"][:10])) \
+                if trusted is False and ga.get("indoor_bislett") else None
             out.append({
                 "id": aid,
                 "start": a["startTimeLocal"],
@@ -202,6 +287,10 @@ class Store:
                 "sport": family(tk),
                 # pool swims: valid lengths x pool length (glitch lengths dropped, see session_groups.pool_swim)
                 "dist_km": _r(sw["dist_m"] / 1000, 2) if sw and sw.get("dist_m") else _r((a.get("distance") or 0) / 1000, 2) or None,
+                # dist_trusted false: dist_km is the watch's (inflated) number, kept for compatibility; lists show
+                # dist_est_km ("≈ 9.2 km", note in dist_note) or "—", and km totals / pace leave it out (volume_km)
+                "dist_trusted": trusted, "dist_est_km": est[0] if est else None,
+                "dist_note": est[1] if est else ("no trusted distance: no GPS (the watch's distance is a guess)" if trusted is False else None),
                 "dur_s": _r(a.get("duration"), 0),
                 "moving_s": ga.get("moving_s") or _r(a.get("movingDuration"), 0),
                 # whole-activity average HR (Garmin summary, incl. pauses); Compare's hr_avg is moving-only
@@ -222,7 +311,10 @@ class Store:
                 "workout_label": workout_name(tk, x.get("workout") or {}, tog.get(aid)),
                 "workout_detail": ((x.get("workout") or {}).get("exact_label") or (x.get("workout") or {}).get("signature")),
                 # average rep pace of the main reps = total rep distance / total rep time (m/s), see rep_pace()
-                "rep_pace_ms": rep_pace(ga.get("reps"), x.get("workout") or {}, family(tk), ga.get("type") == "intervals_track"),
+                "rep_pace_ms": rep_pace(ga.get("reps"), x.get("workout") or {}, family(tk),
+                                        # track reps count as their set distance; indoor Bislett laps (1086 m) are already exact
+                                        ga.get("type") == "intervals_track" and not ga.get("indoor_bislett")),
+                "rep_hr": rep_hr(ga.get("reps"), x.get("workout") or {}, family(tk)),
                 "swim": {k: sw.get(k) for k in ("pool_m", "lengths", "dist_m", "active_s", "rest_s", "pace_100m_s",
                                                 "strokes_per_length", "bad_lengths", "n_rests", "longest_rest_s")} if sw else None,
                 "fit": bool(folder and any(folder.glob("*.fit"))),

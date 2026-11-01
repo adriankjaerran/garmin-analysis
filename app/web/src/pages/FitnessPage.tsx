@@ -3,6 +3,7 @@
 // Two model variants: "pace" (performance only; top-level disciplines) and "hr" (variants.hr: HR decides how
 // maximal each hard session was), compared with fitness_eval.json (eval_variants).
 // ?d=interval,long,ski&ov=0&b=0&hr=0&from=2023-01-01&to=2026-10-31&sd=interval&sk=race&q=
+// (sk: default races + hard sessions; sk=all = every kind). #records = the personal records section
 import { useMemo, useState } from "preact/hooks";
 import { apiUrl, useApi } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
@@ -10,6 +11,7 @@ import { num } from "../lib/format";
 import { Table, type Col } from "../components/Table";
 import { PageHeader } from "../components/PageHeader";
 import { ShapeChart } from "../components/ShapeChart";
+import { RecordsSection } from "../components/ProgressCard";
 import "../fitness.css";
 import {
   DISCS, DISC_LABEL, KIND_HELP, KIND_LABEL, daysAgo, discColor, pm, raceT, signed, unitShort,
@@ -59,7 +61,8 @@ export function FitnessPage() {
   const hasHr = !!doc?.variants?.hr?.disciplines;
   const withHr = hasHr && query.get("hr") !== "0";
   const from = query.get("from"), to = query.get("to");
-  const sd = query.get("sd") ?? "", sk = query.get("sk") ?? "", q = (query.get("q") ?? "").toLowerCase();
+  // session kind filter: default = races + hard sessions (the evidence that moves the shape); "all" = every kind
+  const sd = query.get("sd") ?? "", sk = query.get("sk") ?? "rh", q = (query.get("q") ?? "").toLowerCase();
 
   const years = useMemo(() => {
     if (!doc) return [] as string[];
@@ -93,7 +96,7 @@ export function FitnessPage() {
   const demoted = useMemo(() => (doc?.sessions ?? []).filter((s) => s.hr?.note).sort((a, b) => b.date.localeCompare(a.date)), [doc]);
 
   const sessions = useMemo(() => (doc?.sessions ?? []).filter((s) =>
-    (!sd || s.discipline === sd) && (!sk || s.kind === sk) && (!from || s.date >= from) && (!to || s.date <= to) &&
+    (!sd || s.discipline === sd) && (sk === "all" || (sk === "rh" ? s.kind === "race" || s.kind === "hard" : s.kind === sk)) && (!from || s.date >= from) && (!to || s.date <= to) &&
     (!q || `${s.name ?? ""} ${s.type} ${s.explain} ${s.date}`.toLowerCase().includes(q))), [doc, sd, sk, from, to, q]);
 
   if (error) return (
@@ -152,7 +155,8 @@ export function FitnessPage() {
     { key: "shape_at", label: "Your shape", num: true, render: (s) => (s.shape_at === null ? "—" : s.shape_at.toFixed(1)), title: "your smoothed shape that day" },
     { key: "delta", label: "vs shape", num: true, sort: (s) => (s.shape_at === null ? null : s.score - s.shape_at),
       render: (s) => { if (s.shape_at === null || s.kind === "implausible") return "—"; const d = s.score - s.shape_at, r = Math.abs(d).toFixed(1);
-        return r === "0.0" ? "level" : `${r} ${d > 0 ? "above" : "below"}`; }, title: "score compared with your shape that day" },
+        if (s.kind === "bound" && d < 0) return <span class="muted" title={`${r} below: a lower bound (easy / long run) only counts when it is above your shape`}>easy: no effect</span>;
+        return r === "0.0" ? "level" : `${r} ${d > 0 ? "above" : "below"}`; }, title: "score compared with your shape that day (lower bounds below it: no effect)" },
   ];
 
   const yFrom = from?.slice(0, 4) ?? "", yTo = to?.slice(0, 4) ?? "";
@@ -215,6 +219,8 @@ export function FitnessPage() {
         </div>
       </section>
 
+      <RecordsSection anchor={doc.built.slice(0, 10)} />
+
       <section>
         <div class="head"><h2>By year</h2><span class="sub">mean and max of the daily shape; n = races + hard sessions; * = 0–2 pieces of evidence (interpolated)</span></div>
         <Table rows={yearRows} rowKey={(r) => r.y} cols={yearCols} defaultSort={["y", -1]} />
@@ -223,14 +229,15 @@ export function FitnessPage() {
       <section>
         <div class="head">
           <h2>Sessions</h2><span class="count">{sessions.length}</span>
-          <span class="sub">every session that counts; hover to find it in the chart, click to open</span>
+          <span class="sub">{sk === "rh" ? "races and hard sessions (lower bounds: one click away); " : ""}hover to find it in the chart, click to open</span>
           <div class="tools">
             <input type="search" placeholder="Filter…" value={query.get("q") ?? ""} onInput={(e) => setQuery({ q: (e.target as HTMLInputElement).value })} />
             <div class="seg">
               {["", ...DISCS].map((k) => <button key={k} class={sd === k ? "on" : ""} onClick={() => setQuery({ sd: k })}>{k ? DISC_LABEL[k] : "All"}</button>)}
             </div>
             <div class="seg">
-              {(["", "race", "hard", "bound", "implausible"] as const).map((k) => <button key={k} class={sk === k ? "on" : ""} onClick={() => setQuery({ sk: k })}>{k ? KIND_LABEL[k] : "All kinds"}</button>)}
+              {(["rh", "race", "hard", "bound", "implausible", "all"] as const).map((k) => <button key={k} class={sk === k ? "on" : ""} onClick={() => setQuery({ sk: k === "rh" ? null : k })}
+                title={k === "rh" ? "races and hard sessions: the evidence that sets your shape" : k === "bound" ? KIND_HELP.bound : undefined}>{k === "rh" ? "Races + hard" : k === "all" ? "All kinds" : KIND_LABEL[k]}</button>)}
             </div>
           </div>
         </div>

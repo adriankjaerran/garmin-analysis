@@ -9,7 +9,7 @@ import { SPORT_LABEL, dur, km, num, sportColor, typeLabel } from "../lib/format"
 import { decodePolyline, type BBox } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
 import { Table, type Col } from "../components/Table";
-import { SportDot, TogetherMark, placeHref, speedSort, speedText, whatShort } from "../components/ActivityBits";
+import { DistCell, SportDot, TogetherMark, distSort, placeHref, speedSort, speedText, whatShort } from "../components/ActivityBits";
 import { PageHeader } from "../components/PageHeader";
 
 const SHAPE: Record<string, string> = { laps: "laps", out_and_back: "out & back", point_to_point: "point to point", loop_cw: "loop ↻", loop_ccw: "loop ↺" };
@@ -26,8 +26,26 @@ const routeCols: Col<RouteRow>[] = [
   { key: "id", label: "Route", sort: (r) => Number(r.id.slice(1)) },
   { key: "name", label: "Name", render: (r) => <span class="clip" style={{ maxWidth: "255px" }} title={[r.name, r.via_names?.length ? `via ${r.via_names.join(", ")}` : ""].filter(Boolean).join(" · ")}><SportDot sport={r.sport} />{r.name}</span> },
   { key: "n", label: "Activities", num: true },
+  { key: "pb", label: "Best", num: true, sort: (r) => r.pb?.route_time_s ?? null, title: "fastest time on the route (main direction; laps routes aren't ranked)",
+    render: (r) => (r.pb ? <span title={r.pb.best_date ?? ""}>{dur(r.pb.route_time_s)}</span> : <span class="muted">—</span>) },
   { key: "last", label: "Last", render: (r) => r.last ?? "—" },
 ];
+/** time on the route per session, oldest left; lower = faster (drawn upward), the PB ringed */
+function RouteTrend({ pts }: { pts: { date: string | null; route_time_s: number }[] }) {
+  if (pts.length < 2) return null;
+  const w = 160, h = 26, v = pts.map((p) => p.route_time_s), lo = Math.min(...v), hi = Math.max(...v), rg = hi - lo || 1;
+  const x = (i: number) => 3 + (i / (pts.length - 1)) * (w - 6), y = (t: number) => 3 + ((t - lo) / rg) * (h - 6);
+  const bi = v.indexOf(lo);
+  return (
+    <svg class="spark" width={w} height={h} style={{ display: "inline-block", verticalAlign: "middle" }} role="img">
+      <polyline points={pts.map((p, i) => `${x(i).toFixed(1)},${y(p.route_time_s).toFixed(1)}`).join(" ")} fill="none" stroke="var(--accent)" stroke-width={1.5} />
+      {pts.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.route_time_s)} r={1.8} fill="var(--accent)"><title>{p.date}: {dur(p.route_time_s)}</title></circle>)}
+      <circle cx={x(bi)} cy={y(lo)} r={4} fill="none" stroke="var(--state-good)" stroke-width={1.5} />
+    </svg>
+  );
+}
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+type Member = RouteDetail["members"][number];
 const placeCols: Col<Place & { fam: string }>[] = [
   { key: "name", label: "Place", render: (p) => <span class="clip" style={{ maxWidth: "255px" }} title={p.name}><SportDot sport={p.fam} />{p.name}</span> },
   { key: "n", label: "Activities", num: true, render: countText, title: COUNT_HELP },
@@ -55,7 +73,7 @@ export function PlacesPage() {
   const actCols = useMemo<Col<Activity>[]>(() => [
     { key: "start", label: "Date", render: (a) => a.date },
     { key: "type", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "220px" }} title={[whatShort(a), a.route_name, a.name].filter(Boolean).join(" · ")}><SportDot sport={a.sport} /><TogetherMark a={a} />{whatShort(a)}</span>, sort: (a) => whatShort(a) },
-    { key: "dist_km", label: "km", num: true, render: (a) => km(a.dist_km) },
+    { key: "dist_km", label: "km", num: true, render: (a) => <DistCell a={a} />, sort: distSort },
     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s ?? a.dur_s) },
     { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: speedSort },
   ], []);
@@ -175,6 +193,9 @@ export function PlacesPage() {
   }, [map, hlMember, rd.data]);
 
   const r = route ? rd.data : null;
+  // the main ranking group (a point-to-point route ranks each direction on its own): the PB and trend shown
+  const mainPb = r?.pbs?.length ? r.pbs.reduce((a, b) => (b.of > a.of ? b : a)) : null;
+  const trendPts = (r?.trend ?? []).filter((t) => t.group === mainPb?.group);
   const legendSports = [...new Set(places.map((p) => p.fam))].sort();
   return (
     <main class="full">
@@ -217,22 +238,40 @@ export function PlacesPage() {
                   <dt>Shape</dt><dd>{SHAPE[r.shape] ?? r.shape}{r.via_names?.length ? <span class="muted"> via {r.via_names.join(", ")}</span> : null}</dd>
                   <dt>Distance</dt><dd>{km(r.dist_km)} km{r.climb_m ? <span class="muted"> · {num(r.climb_m)} m climb</span> : null}</dd>
                   <dt>Activities</dt><dd>{r.n}</dd>
+
                   <dt>First / last</dt><dd>{r.first} / {r.last}</dd>
                 </dl>
+                {mainPb && <p class="route-best" title={r.rank_definition}>🏆 Best <b>{dur(mainPb.route_time_s)}</b> on the route ·{" "}
+                  <a href={`/activities/${mainPb.id}`}>{mainPb.best_date}</a>
+                  {r.pbs!.length > 1 ? <span class="muted"> ({mainPb.group === "rev" ? "reverse" : "main"} direction)</span> : null}{" "}
+                  <span class="muted">every time, oldest left (up = faster):</span> <RouteTrend pts={trendPts} /></p>}
                 <p class="note">Dashed = reference session{r.waypoints?.length ? ", circles = common stops" : ""}. Compare lines them up along the route (gap, pace, HR, legs).</p>
               </div>
               <div class="pane" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                <div class="head"><h2>Activities</h2><span class="count">{r.members.length}</span></div>
-                <Table rows={r.members} rowKey={(a) => a.id} highlight={hlMember} onHover={(a) => setHlMember(a?.id ?? null)}
+                <div class="head"><h2>Activities</h2><span class="count">{r.members.length}</span>
+                  {r.ranked && <span class="sub">ranked by time on the route (start line to end, lead-in excluded){r.pbs && r.pbs.length > 1 ? ", per direction" : ""}</span>}</div>
+                <Table<Member> rows={r.members} rowKey={(a) => a.id} highlight={hlMember} onHover={(a) => setHlMember(a?.id ?? null)}
                   onRow={(a) => navigate(`/activities/${a.id}`)} defaultSort={["date", -1]} cols={[
+                    ...(r.ranked ? [{ key: "rank", label: "#", num: true, title: "rank by time on the route (per direction on a point-to-point route)",
+                      sort: (a: Member) => (a.rank ? (a.group === mainPb?.group ? 0 : 1000) + a.rank : null),
+                      render: (a: Member) => (a.rank ? <span title={`${a.rank === 1 ? "fastest" : `${ordinal(a.rank)} fastest`} of ${a.of}${r.pbs && r.pbs.length > 1 ? ` (${a.group === "rev" ? "reverse" : "main"} direction)` : ""}`}>{a.is_pb ? "🏆" : a.rank}</span> : "—") }] : []),
                     { key: "date", label: "Date" },
-                    { key: "stype", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "110px" }} title={`${whatShort(a)} · ${a.name ?? ""}`}><TogetherMark a={a} />{whatShort(a)}</span>, sort: (a) => whatShort(a) },
-                    { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s) },
-                    { key: "pause_s", label: "Paused", num: true, render: (a) => dur(a.pause_s) },
+                    { key: "stype", label: "Workout", render: (a: Member) => <span class="clip" style={{ maxWidth: r.ranked ? "90px" : "110px" }} title={`${whatShort(a)} · ${a.name ?? ""}`}><TogetherMark a={a} />{whatShort(a)}</span>, sort: (a: Member) => whatShort(a) },
+                    ...(r.ranked ? [
+                      { key: "route_time_s", label: "On route", num: true, title: "time on the route: moving time from its start line to its end (lead-in / cool-down excluded); hover for moving / paused",
+                        render: (a: Member) => <span title={`moving ${dur(a.moving_s)} · paused ${dur(a.pause_s)}${a.time_src === "moving" ? " · whole moving time (no leg split)" : ""}`}>{a.route_time_s ? dur(a.route_time_s) : "—"}</span> },
+                      { key: "delta_s", label: "Δ best", num: true, title: "behind the fastest time on the route (same direction)",
+                        render: (a: Member) => (a.delta_s === undefined ? "—" : a.delta_s === 0 ? <span class="muted">best</span> : `+${dur(a.delta_s)}`) },
+                    ] : [
+                      { key: "moving_s", label: "Moving", num: true, render: (a: Member) => dur(a.moving_s) },
+                      { key: "pause_s", label: "Paused", num: true, render: (a: Member) => dur(a.pause_s) },
+                    ]),
                     // one sport per route: "Pace" or "Speed" (the long "Pace / speed" header pushed Dir out of the pane)
                     { key: "speed", label: r.sport === "run" || r.sport === "hike" ? "Pace" : "Speed", num: true, render: speedText, sort: speedSort },
                     { key: "hr", label: "HR", num: true, render: (a) => a.hr ?? "—" },
-                    { key: "route_dir", label: "Dir", title: "direction along the route: → as the reference, ← reversed", render: (a) => (a.route_dir === "rev" ? <span title="reversed">←</span> : a.route_dir ? <span title="same direction as the reference">→</span> : "—") },
+                    // direction only when the sessions differ (else it's a column of → that pushes HR out of the pane)
+                    ...(new Set(r.members.map((m) => m.route_dir ?? "")).size > 1 ? [{ key: "route_dir", label: "Dir", title: "direction along the route: → as the reference, ← reversed",
+                      render: (a: Member) => (a.route_dir === "rev" ? <span title="reversed">←</span> : a.route_dir ? <span title="same direction as the reference">→</span> : "—") }] : []),
                   ]} />
               </div>
             </>

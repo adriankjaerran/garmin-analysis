@@ -13,9 +13,11 @@ const COUNTS: Record<string, string> = { race: "a race: counts fully", hard: "a 
 /** `not_scored` (WP-A): why the model skipped this activity */
 type SessionResp = FitnessSession & { not_scored?: { key: string; text: string } | null };
 
-/** "1.3 above your shape" / "0.4 below" / "at your shape" */
-function vsShape(d: number | null): string {
+/** "1.3 above your shape" / "0.4 below" / "at your shape"; a lower bound (easy / long run) below the shape says
+ *  nothing about it: "Easy effort: doesn't change your shape" (no number, it isn't a shortfall) */
+export function vsShape(d: number | null, kind?: string): string {
   if (d === null) return "—";
+  if (kind === "bound" && d < 0) return "Easy effort: doesn't change your shape";
   const r = Math.abs(d).toFixed(1);
   return r === "0.0" ? "right at your shape" : `${r} ${d > 0 ? "above" : "below"} your shape that day`;
 }
@@ -50,7 +52,7 @@ export function ShapeSection({ id }: { id: string }) {
             </p>
             <dl class="kv">
               <dt>Fitness score</dt><dd><b>{s.score.toFixed(1)}</b> {unitShort(s.discipline)} <span class="muted">{s.label}</span></dd>
-              <dt>Compared with you</dt><dd>{vsShape(delta)}</dd>
+              <dt>Compared with you</dt><dd title={s.kind === "bound" && delta !== null && delta < 0 ? `the score is a lower bound (${delta.toFixed(1)} vs your shape): an easy or long run isn't all-out, so it only counts when it shows more than your shape` : undefined}>{vsShape(delta, s.kind)}</dd>
               <dt>Race equivalents</dt><dd>{eq ? `5k ${raceT(eq["5k"])} · 10k ${raceT(eq["10k"])} · half ${raceT(eq.half)}` : <span class="muted">{s.discipline === "ski" ? "none (ski has its own scale)" : "—"}</span>}</dd>
               <dt>How it counts</dt><dd title={KIND_HELP[s.kind]}>{COUNTS[s.kind] ?? KIND_LABEL[s.kind]}</dd>
               <dt>Your shape that day</dt><dd>{sh ? <>{pm(s.shape_at ?? sh.mean, sh.sd)}{s.shape_race_equivalents_s ? <span class="muted"> · 5k {raceT(s.shape_race_equivalents_s["5k"])}</span> : null}</> : "—"}</dd>
