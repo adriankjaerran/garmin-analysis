@@ -146,12 +146,63 @@ function cellMain(c: Cell, timeSlot: boolean) {
   return repTime(c.partial ? c.own_time_s ?? c.time_s : c.result_s ?? c.time_s);
 }
 
-/** results per rep: a row per rep, a column per person (fastest of the rep in bold) */
+/** results per rep: a table (a row per rep, a column per person) or a leaderboard per rep (a column per rep, fastest first) */
 function RepResults({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
+  const [view, setView] = useState<"table" | "board">(() => localStorage.getItem("session.repView") === "board" ? "board" : "table");
+  const pick = (v: "table" | "board") => { setView(v); localStorage.setItem("session.repView", v); };
   return (
     <div class="card tg-rep-results">
-      <div class="head sm"><h2>Rep by rep</h2><span class="sub">bold = fastest of the rep · +s behind it · = dead heat · * partial (not ranked) · ≈ from the speed step · ? suspect (hover)</span></div>
-      <Standings s={s} iv={iv} sel={sel} onSel={onSel} />
+      <div class="head sm"><h2>Rep by rep</h2>
+        <span class="sub" title="bold = fastest of the rep · +s behind it · = dead heat · * partial (not ranked) · ≈ from the speed step · ? suspect (hover)">
+          {view === "board" ? "fastest first in each rep" : "bold = fastest of the rep"}</span>
+        <div class="tools"><div class="seg">
+          <button class={view === "table" ? "on" : ""} aria-pressed={view === "table"} onClick={() => pick("table")}>Table</button>
+          <button class={view === "board" ? "on" : ""} aria-pressed={view === "board"} onClick={() => pick("board")}>Leaderboard</button>
+        </div></div>
+      </div>
+      {view === "board" ? <RepBoards iv={iv} sel={sel} onSel={onSel} /> : <Standings s={s} iv={iv} sel={sel} onSel={onSel} />}
+    </div>
+  );
+}
+
+/** a column per rep; in each, the people fastest first: the leader with the time, the others with +gap (time in the tooltip) */
+function RepBoards({ iv, sel, onSel }: { iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
+  const keys = Object.keys(iv.reps);
+  const slots = iv.slots.filter((sl) => !sl.warmup);
+  return (
+    <div class="tg-boards">
+      {slots.map((sl) => {
+        const st = iv.standings[sl.slot];
+        const timeSlot = sl.target?.kind === "time";
+        const ranked = st.order.map((o) => o.person);
+        const rest = keys.filter((k) => iv.reps[k][sl.slot] && !ranked.includes(k));   // ran it but not ranked (partial, alone)
+        const cu = iv.rep_closeups.find((c) => c.slot === sl.label);
+        return (
+          <div key={sl.slot} class={"bd" + (sel === sl.label ? " selected" : "") + (cu?.available ? " clickable" : "")}
+            onClick={cu?.available ? () => onSel(sl.label) : undefined}>
+            <div class="bd-head">{rl(sl.label)}<span class="muted"> {sl.target?.text ?? ""}</span></div>
+            {st.order.map((o, i) => {
+              const c = iv.reps[o.person][sl.slot]!;
+              const main = cellMain(c, timeSlot);
+              const gap = timeSlot && o.gap_m !== null ? `+${Math.round(o.gap_m)} m` : `+${o.gap_s.toFixed(1)}`;
+              return (
+                <div key={o.person} class="bd-row" title={`${o.rank}. ${personName(o.person)} ${main}${i ? ` (${gap} behind)` : ""}${o.tie ? " · dead heat" : ""}${c.suspect ? ` · suspect: ${c.suspect}` : ""}`}>
+                  <span>{personName(o.person)}</span>
+                  <span>{i === 0 ? <b>{main}</b> : o.tie ? "=" : gap}{c.suspect ? "?" : ""}</span>
+                </div>
+              );
+            })}
+            {rest.map((k) => {
+              const c = iv.reps[k][sl.slot]!;
+              return (
+                <div key={k} class="bd-row muted" title={c.partial ? "partial, not ranked" : "not ranked: only one full result"}>
+                  <span>{personName(k)}</span><span>{cellMain(c, timeSlot)}{c.partial ? "*" : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -196,7 +247,6 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
                         <span class="v">{o?.rank === 1 && st.order.length >= 2 ? <b>{cellMain(c, timeSlot)}</b> : cellMain(c, timeSlot)}{c.source === "onset" ? <sup>≈</sup> : null}</span>
                         {o && o.gap_s > 0.05 && <span class="g">{timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : many ? secs(o.gap_s, 1) : behind(o.gap_s)}</span>}
                         {c.partial && c.own_dist_m ? <span class="g">{Math.round(c.own_dist_m)} m</span> : null}
-                        {c.effort_pct ? <span class="e">{c.effort_pct} %</span> : null}
                       </td>
                     );
                   })}
@@ -206,7 +256,6 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
           </tbody>
         </table>
       </div>
-      <p class="note small">% = peak HR as % of {effortLabel(iv.leaderboard[0]?.effort_mode)}</p>
     </>
   );
 }

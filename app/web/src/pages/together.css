@@ -40,7 +40,6 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 .tg-tbl .cell .v b { font-weight: var(--fw-semibold); }
 .tg-tbl .cell .v sup { font-weight: var(--fw-regular); color: var(--text-muted); margin-left: 1px; }
 .tg-tbl .cell .g { margin-left: 6px; font-size: var(--fs-12); color: var(--text-muted); }
-.tg-tbl .cell .e { margin-left: 6px; font-size: 11px; color: var(--text-muted); opacity: 0.85; }
 .tg-tbl .cell.partial .v { font-style: italic; font-weight: var(--fw-regular); }
 .tg-tbl .cell.partial, .tg-tbl .cell.unranked { color: var(--text-muted); }
 .tg-tbl .cell.unranked .v { font-weight: var(--fw-regular); }
@@ -137,7 +136,6 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 @media (max-width: 500px) {
   .tg-tbl .opt { display: none; }
   .tg-tbl.mx th.pcol { min-width: 0; }
-  .tg-tbl .cell .e { display: none; }
 }
 .tg-tbl.lb tr.hasub td { border-bottom: 0; }
 .tg-tbl.lb tr.subrow td { height: 20px; padding-bottom: 6px; vertical-align: top; }
@@ -193,3 +191,11 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 /* warm-up / cool-down "reps" (run alone outside the main set, clearly easy): shown, not counted */
 
 .tg-tbl tr.warmup td { color: var(--text-muted); font-style: italic; }
+
+/* Rep by rep, Leaderboard view: a block per rep in rep order (wraps), fastest first */
+.tg-boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0 var(--space-4); }
+.tg-boards .bd { padding: 6px 4px; border-top: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
+.tg-boards .bd.clickable { cursor: pointer; }
+.tg-boards .bd.selected { background: var(--accent-surface); }
+.tg-boards .bd-head { font-weight: var(--fw-semibold); margin-bottom: 2px; }
+.tg-boards .bd-row { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; line-height: 1.6; }
