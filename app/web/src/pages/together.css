@@ -192,10 +192,12 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 
 .tg-tbl tr.warmup td { color: var(--text-muted); font-style: italic; }
 
-/* Rep by rep, Leaderboard view: a block per rep in rep order (wraps), fastest first */
-.tg-boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0 var(--space-4); }
-.tg-boards .bd { padding: 6px 4px; border-top: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
-.tg-boards .bd.clickable { cursor: pointer; }
-.tg-boards .bd.selected { background: var(--accent-surface); }
-.tg-boards .bd-head { font-weight: var(--fw-semibold); margin-bottom: 2px; }
-.tg-boards .bd-row { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; line-height: 1.6; }
+/* Rep by rep (Table and Leaderboard): cells = initials in the person's colour + time / +gap, fastest first */
+.tg-tbl.reps th.clickable, .tg-tbl.reps tr.clickable { cursor: pointer; }
+.tg-tbl.reps th.selected { background: var(--accent-surface); }
+.tg-tbl.reps td.rc { white-space: nowrap; font-variant-numeric: tabular-nums; padding-right: var(--space-4); }
+.tg-tbl.reps td.rc.unranked { color: var(--text-muted); }
+.tg-tbl.reps .rv { display: inline-block; min-width: 3.6em; text-align: right; }
+.pdot { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 3px;
+  margin-right: 6px; border-radius: 9px; font-size: 10px; font-weight: var(--fw-semibold); color: #fff; vertical-align: middle; }
+.tg-tbl.reps { width: auto; }

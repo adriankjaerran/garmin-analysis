@@ -166,97 +166,93 @@ function RepResults({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: st
 }
 
 /** a column per rep; in each, the people fastest first: the leader with the time, the others with +gap (time in the tooltip) */
+/** one rep's results, fastest first: ranked people, then those who ran it but aren't ranked (partial, or alone) */
+type RepEntry = { person: string; text: string; lead: boolean; ranked: boolean; tip: string };
+function repEntries(iv: Intervals, sl: Intervals["slots"][number]): RepEntry[] {
+  const st = iv.standings[sl.slot];
+  const timeSlot = sl.target?.kind === "time";
+  const out: RepEntry[] = st.order.map((o, i) => {
+    const c = iv.reps[o.person][sl.slot]!;
+    const main = cellMain(c, timeSlot);
+    const gap = timeSlot && o.gap_m !== null ? `+${Math.round(o.gap_m)} m` : `+${o.gap_s.toFixed(1)}`;
+    const text = (i === 0 ? main : o.tie ? "=" : gap) + (c.suspect ? "?" : "") + (c.source === "onset" ? "≈" : "");
+    const tip = [`${o.rank}. ${personName(o.person)} ${main}`, i && !o.tie ? `${gap} s behind` : null, o.tie ? "dead heat" : null,
+      c.suspect ? `suspect: ${c.suspect}` : null, c.source === "onset" ? "from the speed step" : null].filter(Boolean).join(" · ");
+    return { person: o.person, text, lead: i === 0 && st.order.length >= 2, ranked: true, tip };
+  });
+  for (const k of Object.keys(iv.reps)) {
+    const c = iv.reps[k][sl.slot];
+    if (!c || st.order.some((o) => o.person === k)) continue;
+    out.push({ person: k, text: cellMain(c, timeSlot) + (c.partial ? "*" : ""), lead: false, ranked: false,
+      tip: `${personName(k)} ${cellMain(c, timeSlot)} · ${c.partial ? "partial, not ranked" : "not ranked: only one full result"}` });
+  }
+  return out;
+}
+
+/** a person as a small coloured circle with their initials */
+function PersonDot({ k }: { k: string }) {
+  return <span class="pdot" style={{ background: personColour(k) }}>{personInfo(k).initials}</span>;
+}
+
+function RepCell({ e }: { e: RepEntry | undefined }) {
+  if (!e) return <td class="rc" />;
+  return <td class={"rc" + (e.ranked ? "" : " unranked")} title={e.tip}><PersonDot k={e.person} /><span class="rv">{e.lead ? <b>{e.text}</b> : e.text}</span></td>;
+}
+
+/** Leaderboard: a column per rep, a row per place (1st on top) */
 function RepBoards({ iv, sel, onSel }: { iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
-  const keys = Object.keys(iv.reps);
   const slots = iv.slots.filter((sl) => !sl.warmup);
+  const cols = slots.map((sl) => repEntries(iv, sl));
+  const places = Math.max(0, ...cols.map((c) => c.length));
+  const click = (sl: Intervals["slots"][number]) => iv.rep_closeups.find((c) => c.slot === sl.label)?.available ? () => onSel(sl.label) : undefined;
   return (
-    <div class="tg-boards">
-      {slots.map((sl) => {
-        const st = iv.standings[sl.slot];
-        const timeSlot = sl.target?.kind === "time";
-        const ranked = st.order.map((o) => o.person);
-        const rest = keys.filter((k) => iv.reps[k][sl.slot] && !ranked.includes(k));   // ran it but not ranked (partial, alone)
-        const cu = iv.rep_closeups.find((c) => c.slot === sl.label);
-        return (
-          <div key={sl.slot} class={"bd" + (sel === sl.label ? " selected" : "") + (cu?.available ? " clickable" : "")}
-            onClick={cu?.available ? () => onSel(sl.label) : undefined}>
-            <div class="bd-head">{rl(sl.label)}<span class="muted"> {sl.target?.text ?? ""}</span></div>
-            {st.order.map((o, i) => {
-              const c = iv.reps[o.person][sl.slot]!;
-              const main = cellMain(c, timeSlot);
-              const gap = timeSlot && o.gap_m !== null ? `+${Math.round(o.gap_m)} m` : `+${o.gap_s.toFixed(1)}`;
-              return (
-                <div key={o.person} class="bd-row" title={`${o.rank}. ${personName(o.person)} ${main}${i ? ` (${gap} behind)` : ""}${o.tie ? " · dead heat" : ""}${c.suspect ? ` · suspect: ${c.suspect}` : ""}`}>
-                  <span>{personName(o.person)}</span>
-                  <span>{i === 0 ? <b>{main}</b> : o.tie ? "=" : gap}{c.suspect ? "?" : ""}</span>
-                </div>
-              );
-            })}
-            {rest.map((k) => {
-              const c = iv.reps[k][sl.slot]!;
-              return (
-                <div key={k} class="bd-row muted" title={c.partial ? "partial, not ranked" : "not ranked: only one full result"}>
-                  <span>{personName(k)}</span><span>{cellMain(c, timeSlot)}{c.partial ? "*" : ""}</span>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
+    <div class="tg-mxwrap">
+      <table class="tg-tbl reps boards">
+        <thead><tr>
+          <th></th>
+          {slots.map((sl) => <th key={sl.slot} class={(sel === sl.label ? "selected " : "") + (click(sl) ? "clickable" : "")}
+            title={sl.target?.text ?? ""} onClick={click(sl)}>{rl(sl.label)}</th>)}
+        </tr></thead>
+        <tbody>
+          {Array.from({ length: places }, (_, p) => (
+            <tr key={p}>
+              <td class="muted">{p + 1}.</td>
+              {cols.map((c, i) => <RepCell key={slots[i].slot} e={c[p]} />)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
+/** Table: a row per rep, fastest to the left */
 function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
   void s;
-  const keys = Object.keys(iv.reps);
-  const many = keys.length > 3;
+  const rows = iv.slots.map((sl) => ({ sl, es: repEntries(iv, sl) }));
+  const places = Math.max(0, ...rows.map((r) => r.es.length));
   return (
-    <>
-      <div class="tg-mxwrap">
-        <table class="tg-tbl mx">
-          <thead><tr>
-            <th>Rep</th><th>Set</th>
-            {keys.map((k) => <th key={k} class="pcol" title={personName(k)}>{many ? personInfo(k).initials : personName(k)}</th>)}
-          </tr></thead>
-          <tbody>
-            {iv.slots.map((sl) => {
-              const st = iv.standings[sl.slot];
-              const timeSlot = sl.target?.kind === "time";
-              const ranked = st.order.length > 0;
-              const cu = iv.rep_closeups.find((c) => c.slot === sl.label);
-              return (
-                <tr key={sl.slot} class={(sel === sl.label ? "selected " : "") + (cu?.available ? "clickable " : "") + (!sl.anchor ? "extra" : "") + (sl.warmup ? " warmup" : "")}
-                  onClick={cu?.available ? () => onSel(sl.label) : undefined} title={!ranked ? "Not ranked: only one person has a full result" : ""}>
-                  <td class="rl">{rl(sl.label)}</td>
-                  <td class="muted">{sl.target?.text ?? ""}</td>
-                  {keys.map((k) => {
-                    const c = iv.reps[k][sl.slot];
-                    if (!c) return <td key={k} class="cell none muted">—</td>;
-                    const o = st.order.find((x) => x.person === k);
-                    const tip = [c.suspect ? `suspect: ${c.suspect}` : null,
-                      c.partial ? `partial: ${dur(c.own_time_s)} for ${Math.round(c.own_dist_m ?? 0)} m, not ranked` : null,
-                      c.source === "onset" ? "from the speed step (no rep detected on this watch)" : null,
-                      c.method === "merged" ? "two detected pieces merged" : null, c.method === "interpolated" ? "time at the set distance (interpolated)" : null,
-                      c.own_dist_m ? `GPS ${Math.round(c.own_dist_m)} m` : null, o?.tie ? `dead heat (within ${o.tie_s} s)` : null,
-                      o && o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : behind(o.gap_s)) + " the rep's fastest" : null,
-                      c.hr_peak ? `peak HR ${c.hr_peak} bpm` : null].filter(Boolean).join(" · ");
-                    return (
-                      <td key={k} class={"cell" + (c.partial ? " partial" : "") + (!o && !c.partial ? " unranked" : "") + (c.suspect ? " suspect" : "")} title={tip}>
-                        <span class="m">{c.suspect ? <span class="sus">?</span> : o?.tie ? <span class="tie" title="dead heat">=</span> : c.partial ? "*" : ""}</span>
-                        <span class="v">{o?.rank === 1 && st.order.length >= 2 ? <b>{cellMain(c, timeSlot)}</b> : cellMain(c, timeSlot)}{c.source === "onset" ? <sup>≈</sup> : null}</span>
-                        {o && o.gap_s > 0.05 && <span class="g">{timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : many ? secs(o.gap_s, 1) : behind(o.gap_s)}</span>}
-                        {c.partial && c.own_dist_m ? <span class="g">{Math.round(c.own_dist_m)} m</span> : null}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </>
+    <div class="tg-mxwrap">
+      <table class="tg-tbl reps mx">
+        <thead><tr>
+          <th>Rep</th><th>Set</th>
+          {Array.from({ length: places }, (_, p) => <th key={p} class="muted">{p + 1}.</th>)}
+        </tr></thead>
+        <tbody>
+          {rows.map(({ sl, es }) => {
+            const cu = iv.rep_closeups.find((c) => c.slot === sl.label);
+            return (
+              <tr key={sl.slot} class={(sel === sl.label ? "selected " : "") + (cu?.available ? "clickable " : "") + (!sl.anchor ? "extra" : "") + (sl.warmup ? " warmup" : "")}
+                onClick={cu?.available ? () => onSel(sl.label) : undefined}>
+                <td class="rl">{rl(sl.label)}</td>
+                <td class="muted">{sl.target?.text ?? ""}</td>
+                {Array.from({ length: places }, (_, p) => <RepCell key={p} e={es[p]} />)}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
