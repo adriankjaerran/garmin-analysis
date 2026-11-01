@@ -32,6 +32,7 @@ uv run scripts/fetch_daily.py adrian --days 14 --min-interval 1   #    sleep, in
 uv run scripts/session_groups.py adrian                           # 2. places, routes, legs, reps -> groups.json
 uv run scripts/similarity.py adrian build                         # 3. similarity index (names, search, nearest)
 uv run scripts/fitness_model.py adrian                            # 4. fitness.json (shape per discipline)
+uv run scripts/hr_settings.py adrian                             #    max HR (highest in a run) + resting HR -> profile/hr_settings.json
 uv run scripts/together.py build                                 #    together.json: workouts run with others (all people)
 uv run garmin-app-cache adrian && uv run garmin-app               # 5. app cache (series, tracks, rep times) + app
 ```

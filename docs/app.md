@@ -117,6 +117,12 @@ on a row carries `{gid, label, kind, role, with, workout}`.
 ## Vocabulary
 - **Avg rep pace** = total rep distance / total rep time of the main reps (`rep_pace_ms`, `store.rep_pace`; reps
   without a distance fall back to the index's median rep speed). Shown as "6×1000 @ 3:27 /km".
+- <a id="rep-pace"></a>**Track reps = set distance**: in a track session (groups.json type `intervals_track`:
+  Bislett or the watch's track mode) a rep from 5 % under to 12.5 % over a round track distance (400, 800, 1000,
+  1600 m …) counts as exactly that distance (`session_groups.track_set_m`): 392–450 m is a 400. A track rep is never
+  really short; GPS and outer lanes make it look longer. The measured value is not shown (the API keeps it as
+  `gps_dist`). This applies to avg rep pace, the activity page's reps and Compare.
+  Together already scores the set distance.
 - **Pace / speed** (`lib/format.ts` `speedText(sport, ms)`): m:ss /km on foot (run, walk, hike), /100 m for swims,
   km/h for ski, bike and other.
 - Seconds always with a unit (`secs`: "56 s", ≥ 60 s as m:ss); gaps unsigned with words (`gapText`: "12 s behind",

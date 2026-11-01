@@ -1,6 +1,6 @@
 # Polish audit 2 — 2026-11-01
 
-**Status: fixed** (2026-11-01) — all P1, P2 and P3 items and app-level proposals 1–6 were addressed by three fix passes (Compare, Together, app shell). Left open: rep pace on tracks uses GPS distance (patrik's 10×400 shows 3:29 /km vs 3:33 from set distance); a "More columns" toggle for the route Sessions table; button groups on mobile scroll instead of becoming dropdowns.
+**Status: fixed** (2026-11-01) — all P1, P2 and P3 items and app-level proposals 1–6 were addressed by three fix passes (Compare, Together, app shell). Since fixed: track reps count as the set distance ([app.md](../app.md#rep-pace)). Left open: a "More columns" toggle for the route Sessions table; button groups on mobile scroll instead of becoming dropdowns.
 
 First-time-user walk of the whole app at http://127.0.0.1:8765 (built dist, no code changed). 1440 px wide in
 dark and light; mobile 390×844. adrian: every page; patrik: Home, Activities, Together, a session, Fitness.

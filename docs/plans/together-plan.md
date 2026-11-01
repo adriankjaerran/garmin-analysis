@@ -110,5 +110,5 @@ everything works for N people.
 - Layout for 8 people.
 
 ## Questions for the user (not blocking)
-1. Your and Patrik's real max and resting HR (for effort as % of HR reserve)?
+1. ~~Real max and resting HR~~: from the data (scripts/hr_settings.py): adrian 214 / 48, patrik 210 / 54.
 2. Are the defaults above OK, especially hiding near-misses and showing the head-to-head record?

@@ -242,6 +242,10 @@ class _Store:
             self._dirty = True
             self.save()
         out = {int(i): (c.get(("reps", int(i))) or {}).get("r") for i in ids}
+        for i in ids:   # track sessions: a rep is its set distance (a 416 m GPS rep is 400 m), session_groups.track_set_m
+            r = out.get(int(i))
+            if r and r.get("reps") and (sg.on_track(self.act(i)) or r.get("mode") == "track"):
+                out[int(i)] = {**r, "reps": [sg.snap_track_rep(q) for q in r["reps"]]}
         for i in ids:   # Bislett indoor: reps = the manual run laps (groups.json), whole laps n x 546.5 m - 7.5 m
             ind = (self.act(i) or {}).get("indoor_bislett")
             if ind and ind.get("rep_laps"):

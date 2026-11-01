@@ -37,7 +37,8 @@ export interface Lap { start: number | null; time: number | null; timer: number 
   hr: number | null; maxhr: number | null; climb: number | null; desc: number | null; intensity: string | null; trigger: string | null;
   kind?: "swim" | "rest" | null; swim_s?: number | null; pace_100m_s?: number | null }
 export interface Rep { start?: number; end?: number; time?: number; time_s?: number; dist?: number; dist_m?: number;
-  speed?: number; speed_ms?: number; hr: number | null; maxhr?: number | null }
+  speed?: number; speed_ms?: number; hr: number | null; maxhr?: number | null;
+  gps_dist?: number; dist_source?: string }  // dist_source "track_set": track rep counted as its set distance, gps_dist = measured
 export interface Leg { t: number; dur_s: number; dist_m: number; kmh: number; hr: number | null; hr_max: number | null;
   climb_m: number; desc_m: number; grade_pct: number | null }
 export interface Pause { t: number; dur_s: number; lat: number | null; lon: number | null; km: number; timer: number }

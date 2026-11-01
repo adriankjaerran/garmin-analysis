@@ -73,11 +73,12 @@ def workout_name(type_key: str | None, w: dict, together: dict | None) -> str | 
     return w.get("family_label") or type_label(type_key)
 
 
-def rep_pace(reps: list | None, w: dict, sport: str) -> float | None:
+def rep_pace(reps: list | None, w: dict, sport: str, track: bool = False) -> float | None:
     """average speed of the main reps (m/s) = total rep distance / total rep time — the one "avg rep pace" of the
     app (Home, Activities, Closest, activity page). groups.json reps are [time_s, dist_m, speed, hr]; the main part
     is the similarity index's (`main_part` of `rep_parts`). Reps without a distance (Bislett indoor laps): the
-    index's median rep speed."""
+    index's median rep speed. On a track (`track`) each rep counts as its set distance (session_groups.track_set_m:
+    a 416 m GPS rep is 400 m)."""
     if not reps or not w.get("rep_count"):
         return None
     try:
@@ -87,7 +88,7 @@ def rep_pace(reps: list | None, w: dict, sport: str) -> float | None:
     except Exception:  # noqa: BLE001 — a label helper must not take the list down
         return w.get("rep_speed_ms")
     ts = [reps[j][0] for j in g if reps[j][0] and reps[j][1]]
-    ds = [reps[j][1] for j in g if reps[j][0] and reps[j][1]]
+    ds = [((sim.sg.track_set_m(reps[j][1]) or reps[j][1]) if track else reps[j][1]) for j in g if reps[j][0] and reps[j][1]]
     if not ts or sum(ts) <= 0:
         return w.get("rep_speed_ms")
     return round(sum(ds) / sum(ts), 3)
@@ -221,7 +222,7 @@ class Store:
                 "workout_label": workout_name(tk, x.get("workout") or {}, tog.get(aid)),
                 "workout_detail": ((x.get("workout") or {}).get("exact_label") or (x.get("workout") or {}).get("signature")),
                 # average rep pace of the main reps = total rep distance / total rep time (m/s), see rep_pace()
-                "rep_pace_ms": rep_pace(ga.get("reps"), x.get("workout") or {}, family(tk)),
+                "rep_pace_ms": rep_pace(ga.get("reps"), x.get("workout") or {}, family(tk), ga.get("type") == "intervals_track"),
                 "swim": {k: sw.get(k) for k in ("pool_m", "lengths", "dist_m", "active_s", "rest_s", "pace_100m_s",
                                                 "strokes_per_length", "bad_lengths", "n_rests", "longest_rest_s")} if sw else None,
                 "fit": bool(folder and any(folder.glob("*.fit"))),

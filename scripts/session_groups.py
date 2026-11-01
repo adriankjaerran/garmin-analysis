@@ -102,6 +102,38 @@ FIELDS = {
 }
 
 
+# ---------------------------------------------------------------- track set distances
+# On a running track the rep is the set distance: GPS (and outer lanes) measure a 400 m rep at 392–450 m, never really
+# short, so reps of a track session from 5 % under to 12.5 % over a round track distance count as exactly that
+# distance (400–450 m = 400; docs/app.md#rep-pace). Where two fit, the nearer one (1632 m = 1600, not 1500).
+TRACK_SET_M = (100, 150, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 1600, 2000, 2400, 3000, 4000, 5000)
+TRACK_UNDER, TRACK_OVER = 0.05, 0.125
+
+
+def on_track(ga: dict | None) -> bool:
+    """a track session: groups.json type intervals_track (Bislett and other tracks) or the watch's track mode"""
+    return bool(ga) and (ga.get("type") == "intervals_track" or ga.get("mode") == "track")
+
+
+def track_set_m(d):
+    """the round track distance a measured rep distance stands for, else None"""
+    if not d:
+        return None
+    fit = [x for x in TRACK_SET_M if x * (1 - TRACK_UNDER) <= d <= x * (1 + TRACK_OVER)]
+    return min(fit, key=lambda x: abs(d - x) / x) if fit else None
+
+
+def snap_track_rep(r: dict, dist="dist", time="time", speed="speed") -> dict:
+    """a rep dict with its distance set to the track set distance (gps_dist keeps the measured one)"""
+    m = track_set_m(r.get(dist))
+    if m is None or m == r.get(dist):
+        return r
+    out = {**r, dist: m, "gps_dist": r.get(dist), "dist_source": "track_set"}
+    if r.get(time):
+        out[speed] = m / r[time]
+    return out
+
+
 # ---------------------------------------------------------------- geometry helpers
 def hav(a, b):
     return gq.hav(a, b)

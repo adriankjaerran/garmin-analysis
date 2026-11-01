@@ -32,7 +32,7 @@ tg.people_info(); tg.hr_norm(person)         # display names / colours; HR max /
 |---|---|
 | `data/together.json` | groups (cross-person, at the top of `data/`, not a person folder) |
 | `data/people.json` | optional, hand-edited: `{id: {name, initials, colour, colour_dark}}`. Missing people / fields are automatic: name = folder name capitalised, colours from a fixed palette (blue, orange, green, purple, teal, ochre, red, slate: each ≥ 3:1 contrast on the light and the dark background), initials = the shortest name prefix no one else has |
-| `data/<person>/profile/hr_settings.json` | optional, hand-edited: `{max_hr, rest_hr}` for effort as % of HR reserve. Without it: max (and rest, if set) from the watch's `heart_rate_zones.json`, effort as % of max HR, with a warning |
+| `data/<person>/profile/hr_settings.json` | `{max_hr, rest_hr}` for effort as % of HR reserve, written by `scripts/hr_settings.py` (max = highest HR held 12 s in a run, rest = median daily resting HR of the last 365 days; `"source": "manual"` = hand-edited, never overwritten). Without it: max (and rest, if set) from the watch's `heart_rate_zones.json`, effort as % of max HR, with a warning |
 | `data/_together/cache.pkl` | FIT start times (by mtime + size), pair results (by both FIT keys + groups.json type / place / indoor fields + `PARAM_VERSION`) |
 | `data/_together/sessions.pkl` | session payloads, by a fingerprint of the group record, the participants' FIT files / groups.json entries, HR settings, fitness.json, people.json and the engine code **as loaded by the process** (a hash taken at import: a long-running server with older code can't store old-format payloads under the new key) |
 
