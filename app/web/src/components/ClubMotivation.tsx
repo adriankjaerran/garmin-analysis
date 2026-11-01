@@ -6,7 +6,7 @@ import { apiUrl } from "../lib/api";
 import { isoLocal, shortDate } from "../lib/format";
 import { personColour, personName } from "../lib/people";
 import { useTheme } from "../lib/theme";
-import { delta, deltaCls, monthLabel, paceKm, plural, type Badge, type Company, type CompanyShort, type Goal, type Goals, type Rivalry } from "../lib/community";
+import { delta, deltaCls, monthLabel, paceKm, plural, rivalrySplit, type Badge, type Company, type CompanyShort, type Goal, type Goals, type Rivalry } from "../lib/community";
 import { Av } from "./CommunityBits";
 import "../pages/club-motivation.css";
 
@@ -30,6 +30,16 @@ export function GoalBar({ g, big }: { g: Goal; big?: boolean }) {
       {g.status !== "done" && g.status !== "upcoming" && g.expected_pct > 0 && g.expected_pct < 1 &&
         <b style={{ left: `${g.expected_pct * 100}%` }} title={`by today at an even pace: ${fmtV(g.expected, g.unit)} ${g.unit}`} />}
     </div>
+  );
+}
+
+/** compact club goal for page headers (Community · Sessions): 🎯 title, a thin bar, value / target; links to the Club page */
+export function GoalLink({ g }: { g: Goal }) {
+  return (
+    <a class={"cg-link " + g.status} href="/community/club" title={`${g.title}: ${g.text} · ${STATUS[g.status]} — open the Club page`}>
+      <span aria-hidden="true">🎯</span><span class="t">{g.title}</span><GoalBar g={g} />
+      <b>{fmtV(g.value, g.unit)}<span class="muted">/{fmtV(g.target, g.unit)}</span></b>
+    </a>
   );
 }
 
@@ -150,7 +160,7 @@ export function CompanyCard({ p, c, full }: { p: string; c: CompanyShort | Compa
           <span class="h">{c.text ?? `Not enough data for ${personName(p)} yet`}</span>
           <span class="muted small">
             {v === null ? "needs a scored club session and a solo session of the same kind within 60 days"
-              : <>together {delta(c.joint_avg)} ({c.n_joint}) · alone {delta(c.solo_avg)} ({c.n_solo}) · VDOT vs form</>}
+              : <>together {delta(c.joint_avg)} ({c.n_joint_cmp ?? c.n_joint}) · alone {delta(c.solo_avg)} ({c.n_solo_cmp ?? c.n_solo}) · VDOT vs form</>}
             {c.thin && v !== null && <span class="cc-thin" title="few sessions to compare: read it as a hint, not a verdict"> · thin data</span>}
           </span>
         </div>
@@ -258,7 +268,7 @@ export function RivalryCard({ r, viewer }: { r: Rivalry; viewer?: string | null 
         <b class="cr-score">{r.wins[a]}<span class="dash">–</span>{r.wins[b]}</b>
         <span class="cm-pl rt">{personName(b)}<Av p={b} size="lg" /></span>
       </div>
-      <div class="cr-sub muted small">shared reps won (and races) over {plural(r.sessions, "session")}{r.ties ? ` · ${plural(r.ties, "tie")}` : ""}</div>
+      <div class="cr-sub muted small">{rivalrySplit(r, a, b)}</div>
       {r.trend && <div class={"cr-trend " + r.trend.kind}><span aria-hidden="true">{r.trend.kind === "closing" ? "📉" : r.trend.kind === "pulling_away" ? "📈" : r.trend.kind === "turned" ? "🔄" : "➖"}</span>{r.trend.text}</div>}
       <div ref={box}><svg class="cr-svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={r.headline} onMouseLeave={() => setHover(null)}>
         <text x="2" y={top + midH / 2 + 4} class="ax">wins</text>
@@ -281,7 +291,9 @@ export function RivalryCard({ r, viewer }: { r: Rivalry; viewer?: string | null 
         })}
       </svg></div>
       <div class="cr-dates">{tl.map((t, i) => (i % Math.max(1, Math.ceil(52 / Math.max(1, (W - L - R) / Math.max(1, n - 1)))) === 0 || hover === i) &&
-        <a href={`/community/${t.gid}`} class={hover === i ? "on" : ""} style={{ left: `${(xs(i) / W) * 100}%` }}>{monthLabel(t.date.slice(0, 7), true)}</a>)}</div>
+        <a href={`/community/${t.gid}`} class={hover === i ? "on" : ""} style={{ left: `${(xs(i) / W) * 100}%` }}>{
+          /* several sessions in one month: the day too, else "Oct 26" three times */
+          (tl.filter((x) => x.date.slice(0, 7) === t.date.slice(0, 7)).length > 1 ? `${+t.date.slice(8, 10)} ` : "") + monthLabel(t.date.slice(0, 7), true)}</a>)}</div>
       <div class="cr-read small">
         {h ? <>
           <b>{shortDate(h.date, isoLocal())}</b> {h.title} · {h.kind === "race" ? "race" : plural(h.n, "shared rep")}:

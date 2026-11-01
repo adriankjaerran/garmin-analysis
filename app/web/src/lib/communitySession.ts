@@ -253,7 +253,7 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
     }
     if (sameTarget) {
       const best = iv.leaderboard.filter((l) => l.best).sort((a, b) => a.best!.result_s - b.best!.result_s)[0];
-      if (best?.best) hl.push({ id: "fastest", emoji: "⚡", title: "Fastest rep", person: best.person, rep: best.best.label,
+      if (best?.best) hl.push({ id: "fastest", emoji: "🏎️", title: "Fastest rep", person: best.person, rep: best.best.label,
         value: `${name(best.person)} · ${t1(best.best.result_s)}`, sub: `Rep ${best.best.label}, ${iv.slots[shared[0]].target!.text}` });
     }
     // recovery: who's HR dropped more, per break
@@ -292,7 +292,7 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
     if (front && front[1] >= 300 && front[0] !== race[0]?.person) hl.push({ id: "front", emoji: "🧭", title: "Most in front", person: front[0], value: `${name(front[0])} · ${(front[1] / 1000).toFixed(1)} km`, sub: "in front by more than 2 s" });
     let fk: { k: string; km: number; t: number } | null = null;
     for (const r of cont.km_splits ?? []) for (const [k, v] of Object.entries(r.people)) if (v.time_s && (!fk || v.time_s < fk.t)) fk = { k, km: r.km, t: v.time_s };
-    if (fk && (cont.km_splits?.length ?? 0) >= 2) hl.push({ id: "fastkm", emoji: "⚡", title: "Fastest km", person: fk.k, value: `${name(fk.k)} · ${hms(fk.t)}`, sub: `km ${fk.km}` });
+    if (fk && (cont.km_splits?.length ?? 0) >= 2) hl.push({ id: "fastkm", emoji: "🏎️", title: "Fastest km", person: fk.k, value: `${name(fk.k)} · ${hms(fk.t)}`, sub: `km ${fk.km}` });
   }
   // form: how each did against their current shape
   if (c) {

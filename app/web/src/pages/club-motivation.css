@@ -135,3 +135,13 @@ a.cb:hover { text-decoration: none; border-color: var(--cat-race); box-shadow: 0
 .cmx-badges span { font-size: 15px; margin-right: 1px; }
 .cmx-next { flex-basis: 100%; }
 .cr-list.one { grid-template-columns: minmax(0, 1fr); }
+
+/* compact goal link in the Sessions header (GoalLink) */
+.cg-link { display: inline-flex; align-items: center; gap: var(--space-2); height: var(--control); padding: 0 var(--space-3); border: 1px solid var(--hairline);
+  border-radius: var(--radius-control); color: var(--text); font-size: var(--fs-12); white-space: nowrap; min-width: 0; }
+.cg-link:hover { text-decoration: none; background: var(--surface-hover); }
+.cg-link .t { overflow: hidden; text-overflow: ellipsis; max-width: 22ch; }
+.cg-link .cg-bar { width: 90px; flex: none; margin: 0; height: 6px; }
+.cg-link b { font-variant-numeric: tabular-nums; }
+.cg-link b .muted { font-weight: var(--fw-regular); }
+@media (max-width: 500px) { .cg-link .t { display: none; } }

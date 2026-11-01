@@ -5,14 +5,7 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 .tg .bad { color: var(--state-duplicate); }
 .tg .warn { color: var(--state-version); }
 
-/* avatar: initials on the person colour */
-.tg-av { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; border-radius: 50%;
-  color: #fff; font-size: 11px; font-weight: var(--fw-semibold); line-height: 1; letter-spacing: -0.02em; box-shadow: 0 0 0 1.5px var(--surface); }
-.tg-av.sm { width: 18px; height: 18px; font-size: 10px; }
-.tg-av.lg { width: 30px; height: 30px; font-size: 13px; }
-.tg-av.dim { opacity: 0.45; }
-.tg-av .role { position: absolute; right: -5px; bottom: -4px; font-style: normal; font-size: 10px; color: var(--text); background: var(--surface); border-radius: 50%; line-height: 1; }
-:root[data-theme="dark"] .tg-av { color: #111; }
+/* person name with its avatar (CommunityBits Av) */
 .tg .pn { display: inline-flex; align-items: center; gap: 6px; vertical-align: middle; }
 
 /* label badges */

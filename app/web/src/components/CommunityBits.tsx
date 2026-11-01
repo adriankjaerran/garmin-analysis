@@ -1,4 +1,4 @@
-// Small shared pieces of the Community pages: avatars (Av; Avatar on the session page), category chips, form-delta chips, stat tiles, the
+// Small shared pieces of the Community pages: avatars (Av), category chips, form-delta chips, stat tiles, the
 // head-to-head card, a debounced search box and a tile-free route sketch (SVG of the members' tracks).
 import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
@@ -12,26 +12,20 @@ import type { H2H } from "../lib/together";
 
 type N = number | null;
 
-/** initials on the person colour; `href` makes it a link (member page) */
-export function Av({ p, size, dim, title, href }: { p: string; size?: "xs" | "sm" | "lg" | "xl"; dim?: boolean; title?: string; href?: string }) {
+/** The one avatar of the Community pages: initials on the person colour. `href` makes it a link (member page),
+ *  `role` "partial" adds ◐ (part of the workout), "other" fades it (another workout). */
+export function Av({ p, size, dim, title, href, role }:
+  { p: string; size?: "xs" | "sm" | "lg" | "xl"; dim?: boolean; title?: string; href?: string; role?: string }) {
   useTheme();
   const i = personInfo(p);
-  const cls = "cm-av" + (size ? " " + size : "") + (dim ? " dim" : "");
+  const cls = "cm-av" + (size ? " " + size : "") + (dim || role === "other" ? " dim" : "");
   const style = { background: personColour(p) };
-  return href
-    ? <a class={cls} style={style} href={href} title={title ?? personName(p)} onClick={(e) => e.stopPropagation()}>{i.initials}</a>
-    : <span class={cls} style={style} title={title ?? personName(p)}>{i.initials}</span>;
-}
-/** session-page avatar (tg-av, pages/together.css): initials on the person colour, ◐ for a partial participant */
-export function Avatar({ p, role, size, dim }: { p: string; role?: string; size?: "sm" | "lg"; dim?: boolean }) {
-  useTheme();
-  const i = personInfo(p);
   const roleText = role === "partial" ? " · partial (part of the workout)" : role === "other" ? " · other workout" : "";
-  return (
-    <span class={"tg-av" + (size ? " " + size : "") + (role === "other" || dim ? " dim" : "")} style={{ background: personColour(p) }} title={personName(p) + roleText}>
-      {i.initials}{role === "partial" && <i class="role" aria-hidden="true">◐</i>}
-    </span>
-  );
+  const tip = (title ?? personName(p)) + roleText;
+  const mark = role === "partial" && <i class="role" aria-hidden="true">◐</i>;
+  return href
+    ? <a class={cls} style={style} href={href} title={tip} onClick={(e) => e.stopPropagation()}>{i.initials}{mark}</a>
+    : <span class={cls} style={style} title={tip}>{i.initials}{mark}</span>;
 }
 /** overlapping avatars */
 export const AvStack = ({ people, size, max = 6 }: { people: string[]; size?: "sm" | "lg"; max?: number }) => (
@@ -54,6 +48,9 @@ export function CatChip({ id, label, solid }: { id: string; label?: string; soli
 export function FormChip({ v, info, p, showNone }: { v: N | undefined; info?: FormInfo | null; p?: string; showNone?: boolean }) {
   if (v === null || v === undefined) {
     return showNone ? <span class="cm-form none" title={(p ? personName(p) + ": " : "") + "no form score for this session (easy run, hike, no watch data)"}>{p && <Av p={p} size="xs" />}—</span> : null;
+  }
+  if (info?.confidence === "none") {   // rejected by the fitness model itself: no number, like the session page
+    return <span class="cm-form unrel" title={(p ? personName(p) + ": " : "") + `score unreliable (${delta(v)} vs form, far off and rejected by the fitness model — e.g. HR not maximal, a mislabelled session)`}>{p && <Av p={p} size="xs" />}?</span>;
   }
   const low = info?.confidence === "low";
   const tip = [

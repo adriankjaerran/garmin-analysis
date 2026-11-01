@@ -13,6 +13,7 @@ import { byMonth, catInfo, catVar, CATS, hrs, kms, monthLabel, periods, plural, 
 import { PageHeader } from "../components/PageHeader";
 import { Av, CatChip, FormChip, PairCard, RouteSketch, SearchBox, Stat, usePeopleTracks } from "../components/CommunityBits";
 import { kudosOverride, toggleKudos } from "../lib/communitySession";
+import { GoalLink } from "../components/ClubMotivation";
 import "./community.css";
 
 function Headline({ g }: { g: CGroup }) {
@@ -180,6 +181,7 @@ export function CommunityPage() {
   const catN = new Map((data?.categories ?? []).map((c) => [c.id, c.n]));
   const totalN = [...catN.values()].reduce((a, b) => a + b, 0);
   const periodLabel = per ? per.label : "All time";
+  const goal = all.data?.goal ?? data?.goal ?? null;
 
   return (
     <main class="cm">
@@ -192,6 +194,7 @@ export function CommunityPage() {
           "Cards show the cover photo, else a sketch of everyone's tracks; 🏆 = a club record or PB was set",
           "Click a month on the Club page's chart to see its sessions here",
         ]}>
+        {goal && <GoalLink g={goal} />}
         <div class="seg" role="group" aria-label="View">
           <button class={view === "cards" ? "on" : ""} aria-pressed={view === "cards"} onClick={() => setQuery({ view: null })}>▦ Cards</button>
           <button class={view === "list" ? "on" : ""} aria-pressed={view === "list"} onClick={() => setQuery({ view: "list" })}>☰ List</button>

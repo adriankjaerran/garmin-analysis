@@ -99,6 +99,8 @@ nav.side .foot { margin-top: auto; }
 nav.side .foot .built { margin-top: 0; }
 nav.side .theme { padding: 0 var(--space-4) var(--space-4); }
 nav.side .theme .seg button { height: 22px; font-size: var(--fs-12); padding: 0 var(--space-2); }
+nav.side .who-theme { display: none; border-top: 1px solid var(--hairline); margin-top: 4px; padding-top: 4px; }
+nav.side .who-theme .theme { padding: 0 var(--space-3) 4px; }
 
 /* main */
 main { flex: 1; min-width: 0; overflow: auto; padding: var(--space-4) var(--space-5) var(--space-6); }
@@ -223,12 +225,15 @@ dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow
 @media (max-width: 760px) {
   .cols { grid-template-columns: 1fr !important; }
   .app { flex-direction: column; height: auto; min-height: 100vh; }
-  nav.side { width: auto; flex-direction: row; flex-wrap: wrap; padding: var(--space-2); border-right: 0; border-bottom: 1px solid var(--hairline); }
+  nav.side { width: auto; flex-direction: row; flex-wrap: wrap; padding: var(--space-2); border-right: 0; border-bottom: 1px solid var(--hairline); overflow: visible; position: relative; z-index: 40; }
   nav.side .who:not(.menu), nav.side .built, nav.side .step:not(.home) { display: none; }
   nav.side .who.menu { padding: 0; }
   nav.side .step.home { margin: 0; padding: 4px var(--space-2); font-weight: var(--fw-semibold); }
   nav.side .foot { margin-top: 0; display: flex; align-items: center; }
   nav.side .theme { padding: 0 var(--space-2); }
+  /* with a person menu the theme toggle moves into it (one row less in the top bar) */
+  nav.side:has(.who.menu) .foot { display: none; }
+  nav.side .who-theme { display: block; }
   /* every table scrolls sideways inside its box; maps take the full width; button groups wrap */
   .tablewrap { max-width: 100%; }
   .map { max-width: 100%; }

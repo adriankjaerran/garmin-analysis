@@ -61,7 +61,42 @@ one) next to each person. Also play the whole session. Speed control, scrub, key
   category mix, records, highlights, heatmap).
 - **Member** `/community/members/<person>`: profile.
 
-## Status
-- [ ] Phase 1: backend API, form deltas, replay upgrade, app audit (parallel workers)
-- [ ] Phase 2: Community pages (nav + list + club + member; session page)
-- [ ] Phase 3: audit fixes, QA with screenshots, docs
+## Status (2026-11-01, end of day)
+- [x] Phase 1: backend API (`scripts/community.py`, `routers/community.py`), form deltas (`scripts/form_delta.py`),
+  replay upgrade, app audit.
+- [x] Phase 2: Community pages — Sessions feed (cards / list, month groups, season strip, head-to-head, filters, goal
+  link), session page (hero, note, story, members + form chips, collective, records, last time here, highlights,
+  replay, splits, breaks, photos, kudos, share card), Club (totals, goal, badges, faster together?, rivalry, months,
+  highlights, attendance, category mix, pairs, records, heatmap, places, recent), Members + member profile, Wrapped.
+- [x] Phase 3: audits + QA in the browser (adrian / patrik, light / dark, 1600 / 390 px; screenshots
+  `data/adrian/screenshots/2026-11-01/qa-*.png`), docs (docs/community.md, docs/app.md). `data/community.json` is
+  empty (no test titles / photos / kudos) and `data/_community/photos/` has no files.
+
+### Fixed in the last QA pass
+- Mobile top bar 4 → 3 rows: the theme toggle moved into the person menu (the menu was also clipped by the bar: fixed).
+- Intervals emoji ⏱️ (pale grey on Apple) → ⚡; fastest rep / km highlight and best-rep chip → 🏎️; badge "Day of
+  days" → 🌟 (so ⚡ only means intervals).
+- One avatar component (`Av` in CommunityBits) everywhere; `Avatar` / `.tg-av` removed.
+- Club "This year" card said "Most loyal: Patrik · 17 sessions" (the all-time count, and a tie): now this year's
+  count, hidden on a tie; Wrapped's "Always there" handles ties ("Everyone … every single one, together").
+- Rivalry 27–0 vs head-to-head 26–0: the rivalry counts the race too; the card now says "shared reps 26–0 · race
+  1–0 · 6 sessions · 1 tied rep"; the timeline labels show the day when a month has several sessions.
+- "Faster together than alone?" showed averages that didn't add up to the verdict (−5.9 vs +2.4 → "1.1 better
+  alone"): the averages are now over the compared sessions only (+1.3 vs +2.4 → −1.1).
+- Member "Best sessions" listed a score the fitness model rejects (+13.9 "score unreliable"); form chips with
+  confidence none now show "?" (dashed) like the session page.
+- Session member card showed km/h rep pace for a run logged as Multisport: uses the group's sport.
+- `fitness_eval.json` NaN → null (writer + router guard; tests); `data/patrik/fitness_eval.json` regenerated.
+- Unknown member page: a proper message with a link back.
+
+### Open questions for the user
+1. **Rivalry score**: count races in the rivalry score (27–0, now explained) or show reps only (26–0, same as the
+   head-to-head card) with races beside it?
+2. **Members without a watch file** (Patrik in 7 hikes of July 2023) count as attending: 17 sessions / 100 % for
+   both. Keep, or count only timed members for attendance, streaks and badges?
+3. **Person-hours**: Sessions shows "43.0 person-hours side by side", Club "64 person-hours out there together" (two
+   different measures). Keep both or pick one name everywhere?
+4. **Emoji**: happy with ⚡ intervals / 🏎️ fastest rep, or prefer another set?
+5. **Splits "Avg" row** averages all reps a person ran (suspect reps left out), the leaderboard's avg only the shared
+   reps (1:17.6 vs 1:17.2 for the same person): label it, or align them?
+6. "Last time here" uses scores the fitness model marks unreliable (Patrik 44.8 on 15 Oct): hide those?

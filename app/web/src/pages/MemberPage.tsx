@@ -60,7 +60,7 @@ export function MembersPage() {
               <div class="cm-mix">{CATS.map((k) => m.by_category[k.id] ? <i style={{ flex: m.by_category[k.id], background: catVar(k.id) }} title={`${k.label}: ${m.by_category[k.id]}`} /> : null)}</div>
               {(m.company?.text || m.badges) && (
                 <div class="cm-mcard-x">
-                  {m.company?.text && <span class={"cmx-company " + (m.company.verdict ?? "")} title={`together ${delta(m.company.joint_avg)} (${m.company.n_joint}) vs alone ${delta(m.company.solo_avg)} (${m.company.n_solo})${m.company.thin ? " · thin data" : ""}`}>
+                  {m.company?.text && <span class={"cmx-company " + (m.company.verdict ?? "")} title={`together ${delta(m.company.joint_avg)} (${m.company.n_joint_cmp ?? m.company.n_joint}) vs alone ${delta(m.company.solo_avg)} (${m.company.n_solo_cmp ?? m.company.n_solo})${m.company.thin ? " · thin data" : ""}`}>
                     {m.company.verdict === "company" ? <><b>👯 {delta(m.company.diff)}</b> with company</> : m.company.verdict === "alone" ? <><b>🧘 {Math.abs(m.company.diff ?? 0).toFixed(1)}</b> better alone</> : <><b>⚖️ same</b> together or alone</>}</span>}
                   {m.badges && <span class="cmx-badges" title={m.badges.latest.map((b) => `${b.emoji} ${b.name} (${b.date})`).join("\n")}>
                     {m.badges.latest.slice(0, 4).map((b) => <span aria-hidden="true">{b.emoji}</span>)} <b>{m.badges.earned}</b>/{m.badges.total} badges</span>}
@@ -139,7 +139,7 @@ export function MemberPage({ person }: { person: string }) {
     for (const v of out.values()) v.sort((a, b) => a.dist_m - b.dist_m);
     return out;
   }, [m]);
-  if (error) return <main class="cm"><a class="cm-back" href="/community/members">‹ Members</a><h1>Member not found</h1><p class="note">{error}</p></main>;
+  if (error) return <main class="cm"><a class="cm-back" href="/community/members">‹ Members</a><h1>Member not found</h1><p class="note">{/^(404|no member)/.test(error) ? <>There is no club member “{person}”. <a href="/community/members">See all members →</a></> : error}</p></main>;
   if (!m) return <main class="cm"><a class="cm-back" href="/community/members">‹ Members</a><p class="muted">{loading ? "Loading…" : ""}</p></main>;
   const t = m.totals;
   const best = m.best_sessions.filter((s) => s.form && s.form.delta > 0);
@@ -178,7 +178,7 @@ export function MemberPage({ person }: { person: string }) {
         <section class="cm-panel">
           <div class="head"><h2>Faster together than alone?</h2><span class="sub">club vs solo sessions of the same kind, ±{m.company.window_days} days</span></div>
           <CompanyCard p={m.person} c={m.company} full />
-          <div class="cc-note">Each dot = one session's form delta (score − shape the day before); the bar = the average. Together = club sessions, alone = {personName(m.person)}'s own sessions of the same discipline near a club one. Click a dot to open it.</div>
+          <div class="cc-note">Each dot = one session's form delta (score − shape the day before); the bar = the average over the sessions that have a partner to compare with (same kind, within 60 days). Together = club sessions, alone = {personName(m.person)}'s own sessions of the same discipline near a club one. Click a dot to open it.</div>
         </section>
 
         <section class="cm-panel">

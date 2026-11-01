@@ -8,7 +8,7 @@ import { useApi } from "../lib/api";
 import { isoLocal, shortDate } from "../lib/format";
 import { personColour, personName, setPeopleInfo } from "../lib/people";
 import { useTheme } from "../lib/theme";
-import { catInfo, catVar, delta, monthLabel, paceKm, plural, type Wrapped, type WrappedMember } from "../lib/community";
+import { catInfo, catVar, delta, monthLabel, paceKm, plural, rivalrySplit, type Wrapped, type WrappedMember } from "../lib/community";
 import { Av, AvStack } from "../components/CommunityBits";
 import "./community.css";
 import "./club-wrapped.css";
@@ -80,7 +80,7 @@ function MemberSlide({ m, year, i }: { m: WrappedMember; year: number; i: number
           {m.partner && <li><span class="k">Ran most with</span><span class="cm-pl"><Av p={m.partner.person} size="sm" />{personName(m.partner.person)} · {plural(m.partner.sessions, "session")}</span></li>}
           {m.company.text && <li><span class="k">Company</span><b>{m.company.text}</b>{m.company.thin ? <span class="muted small wr-tr">thin data: a hint, not a verdict</span> : null}</li>}
           {m.company.pace.filter((p) => Math.abs(p.diff_s_km) >= 1).slice(0, 1).map((p) => <li><span class="k">Rep pace</span><b>{p.text}</b><span class="muted small wr-tr">{p.label}: {paceKm(p.joint_s_km)} vs {paceKm(p.solo_s_km)} /km</span></li>)}
-          {m.rivalry.map((r) => <li><span class="k">vs {personName(r.other)}</span><b>{r.won}–{r.lost}</b> in shared reps{r.trend ? <span class="muted wr-tr">{r.trend}</span> : null}</li>)}
+          {m.rivalry.map((r) => <li><span class="k">vs {personName(r.other)}</span><b>{r.won}–{r.lost}</b> head-to-head{r.trend ? <span class="muted wr-tr">{r.trend}</span> : null}</li>)}
           {m.streak_weeks >= 2 && <li><span class="k">Best streak</span><b>🔥 {m.streak_weeks} weeks</b></li>}
         </ul>
         {m.badges.length > 0 && <div class="wr-mbadges">{m.badges.map((b) => <a href={b.gid ? `/community/${b.gid}` : undefined} title={`${b.name}: ${b.description} (${b.date})`}><span>{b.emoji}</span>{b.name}</a>)}</div>}
@@ -202,9 +202,14 @@ export function WrappedPage({ year }: { year: string | null }) {
       {w.most_loyal && (
         <Slide tone={personColour(w.most_loyal.person)} kicker="Always there">
           {() => <>
-            <div class="wr-mhead center"><Av p={w.most_loyal!.person} size="xl" /></div>
-            <div class="wr-huge">{personName(w.most_loyal!.person)}</div>
-            <div class="wr-lead">showed up to <b>{w.most_loyal!.sessions}</b> of {w.most_loyal!.of} sessions{w.most_loyal!.sessions === w.most_loyal!.of ? " — every single one" : ""}</div>
+            {(() => {
+              const L = w.most_loyal!, all = [L.person, ...(L.tied_with ?? [])], every = L.sessions === L.of;
+              return <>
+                <div class="wr-mhead center">{all.map((p) => <Av key={p} p={p} size="xl" />)}</div>
+                <div class="wr-huge">{all.length > 1 && all.length === people.length && every ? "Everyone" : all.map(personName).join(" & ")}</div>
+                <div class="wr-lead">{all.length > 1 ? (every ? "showed up to " : "each showed up to ") : "showed up to "}<b>{L.sessions}</b> of {L.of} sessions{every ? (all.length > 1 ? " — every single one, together" : " — every single one") : ""}</div>
+              </>;
+            })()}
             {w.top_pair && <div class="wr-also">Strongest pair: <Av p={w.top_pair.a} size="sm" /> {personName(w.top_pair.a)} & <Av p={w.top_pair.b} size="sm" /> {personName(w.top_pair.b)} · {plural(w.top_pair.sessions, "session")} together</div>}
           </>}
         </Slide>
@@ -218,7 +223,7 @@ export function WrappedPage({ year }: { year: string | null }) {
               <b class="sc">{r0.wins[r0.a]}<i>–</i>{r0.wins[r0.b]}</b>
               <span><Av p={r0.b} size="xl" /><b>{personName(r0.b)}</b></span>
             </div>
-            <div class="wr-lead">shared reps won over {plural(r0.sessions, "session")}{r0.ties ? ` · ${plural(r0.ties, "tie")}` : ""}</div>
+            <div class="wr-lead">{rivalrySplit(r0, r0.a, r0.b)}</div>
             {r0.trend && <div class="wr-trend">{r0.trend.text}</div>}
             {w.rivalry.slice(1, 4).map((r) => <div class="wr-also">{r.headline}</div>)}
           </>}

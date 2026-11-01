@@ -47,7 +47,7 @@ moved to `data/community.bad-<unix time>.json` before the next write (never sile
 old gid (together's `aliases`) are merged into the current gid and rewritten under it on the next edit.
 
 ## Categories
-Six: `intervals` ⏱️, `tempo` 🔥, `long` 🛣️, `easy` 🌿, `race` 🏁, `other` 🥾. Automatic (`category_auto`, with
+Six: `intervals` ⚡, `tempo` 🔥, `long` 🛣️, `easy` 🌿, `race` 🏁, `other` 🥾. Automatic (`category_auto`, with
 `category_reason`); a manual `category` in community.json wins (`category_manual: true`). Rules, first match:
 
 1. **race**: group kind `race` / label `same_race`.
@@ -92,7 +92,9 @@ community sessions (not near-misses, not user-hidden), oldest first.
 - **Form**: the member's form deltas (`form_delta`, confidence ≠ none) in club sessions vs their **solo** sessions
   (activities in no together group at all, hidden / near-miss ones included) of the **same discipline** within
   ±60 days of a club session (the "same period"). `diff` = the mean over club sessions of (club delta − mean of its
-  window's solo deltas) — a paired comparison; `joint_avg` / `solo_avg` are the plain means. `verdict`: `company`
+  window's solo deltas) — a paired comparison; `joint_avg` = the mean of the compared club sessions
+  (`n_joint_cmp`), `solo_avg` = the mean of their solo baselines (over `n_solo_cmp` solo sessions), so
+  `joint_avg − solo_avg = diff` (the page shows "together −1.1 (6) · alone +1.2 (27)"). `verdict`: `company`
   (diff ≥ +0.3), `alone` (≤ −0.3), `even`; `text` "Patrik runs +1.8 better with company" / "Adrian runs 2.0 better
   alone". `thin`: fewer than 3 compared club sessions or 3 solo sessions (shown as "thin data").
 - **Rep pace** per family: interval sessions' reps from groups.json (`reps` [dur, dist, …]; reps within 0.6–1.6× the
@@ -121,7 +123,9 @@ without intervals, the same race result. Per session `wins`, `ties`, `mean_gap_s
 `gap_s_km` (gap ÷ the slot's set distance), `closest_s`; over time `cum_wins`. Trend over the gap per km (else per
 rep): mean of the first third vs the last third of the sessions → `closing` ("Patrik is closing in: gap 30 → 17
 s/km"), `pulling_away`, `turned` (the faster one changed), `steady`. Rep wins from reps match together's
-head-to-head exactly (tested); races are added on top.
+head-to-head exactly (tested); races are added on top — so a rivalry score (27–0) can be one more than the
+head-to-head card's reps (26–0); `races`, `race_wins`, `race_ties` give the split, shown as "shared reps 26–0 · race
+1–0 · 6 sessions · 1 tied rep".
 
 ### Goals
 `goals` in community.json (list; id, title, metric `sessions | km | hours | person_hours | reps | climb_m`, target
@@ -147,7 +151,7 @@ words in gid, date, place, workout, people, title, note, guests, category; `near
 `hidden=1` also the sessions the user hid. `categories[].n` counts the rows after all filters but `category`.
 ```
 {n, viewer, built, people: {id: {name, initials, colour, colour_dark, auto}},
- categories: [{id: "intervals", label: "Intervals", emoji: "⏱️", description, n: 5}, ...],
+ categories: [{id: "intervals", label: "Intervals", emoji: "⚡", description, n: 5}, ...],
  totals: {sessions: 17, km: 357.3, hours: 45.7, person_hours_together: 43.0, reps: 68, photos: 0, guests: 0},
  h2h: [...as /api/together], form_available: true, store_error: null, compute_ms,
  groups: [{gid, date, start_local, start_utc, sport, sports, kind, label, label_text, score, hidden, place, workout,
@@ -206,13 +210,13 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
 ```
 {from, to, today, viewer, people, form_available, store_error, compute_ms,
  totals: {sessions, km, hours, person_hours_together, person_hours_shared, reps, climb_m, kcal, members, guests,
-          guest_visits, photos, kudos, places, first, last, this_year: {year, sessions, km, hours}},
+          guest_visits, photos, kudos, places, first, last, this_year: {year, sessions, km, hours, most_loyal: {person, sessions} | null}},
  months: [{month: "2026-10", sessions, km, hours, person_hours_together, reps, climb_m, members: [..], n_members,
            by_category: {intervals: 3}, gids: [..]}]          /* every month first..last, zeros included */,
  attendance: [{person, display, sessions, share /* of all sessions */, first_seen, last_seen, last_gid, days_since,
                streak_weeks /* consecutive weeks with a session, alive if the last is this or last week */,
                best_streak_weeks, weeks_active, km, hours, reps, by_category, favourite_place, avg_form_delta, n_form}],
- most_loyal: {person, sessions},
+ most_loyal: {person, sessions} | null (the period's single top attender; null on a tie),
  pairs: [{a, b, sessions, last, h2h: {...together's head-to-head}}],
  pair_matrix: {people: [ids], n: [[sessions together; diagonal = own sessions]]},
  categories: [{id, label, emoji, description, n, km, hours}],
@@ -237,14 +241,14 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
              form, numbers, rank, of_people, rep_wins, avg_s, pace_s_km, records, n_photos, kudos}]   /* newest first */,
  form_series: [{date, gid, score, shape, delta, discipline, …}]     /* oldest first, sessions with a delta */,
  partners: [{person, display, sessions, last, gids, rep_wins, rep_losses, rep_ties, h2h}],
- best_sessions: [≤ 5 sessions by form delta],
+ best_sessions: [≤ 5 sessions by form delta, confidence ≠ none],
  personal_bests: [efforts: {gid, date, measure, dist_m, label, value_s, n}],
  shape: {built, disciplines: {interval | long | ski: {label, unit, personal_best, current: {...fitness.json},
          weekly: [{date, mean, sd}] /* from 120 days before the first session */}}} | null}
 ```
 
 ### Motivation endpoints
-- `/api/community/club` adds `company: {person: {diff, verdict, text, n_joint, n_solo, n_compared, joint_avg, solo_avg,
+- `/api/community/club` adds `company: {person: {diff, verdict, text, n_joint, n_solo, n_compared, n_joint_cmp, n_solo_cmp, joint_avg, solo_avg,
   thin, pace: [{family, label, diff_s_km, text, n_joint, n_solo, joint_s_km, solo_s_km}]}}` (over the period when
   `from` / `to` are given), `rivalry: [...]` (over the period), `latest_badges` (10 newest, all members, `person` +
   badge), `goal`, `goals`, `goal_metrics`; each `attendance` row (and `/members` rows) gets `company` and
@@ -256,7 +260,7 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
   `solo: [{activity_id, date, delta, discipline, type, name}]`, pace `joint` / `solo` lists) and `rivalry` (the
   member's pairs).
 - `GET /api/community/badges` → `{people, badges: {person: badges}, latest (20), definitions}`.
-- `GET /api/community/rivalry?from=&to=` → `{people, rivalry: [{a, b, sessions, reps, wins, ties, mean_gap_s_km,
+- `GET /api/community/rivalry?from=&to=` → `{people, rivalry: [{a, b, sessions, reps, wins, ties, races, race_wins, race_ties, mean_gap_s_km,
   mean_gap_s, leader, trend: {kind, text, early, late, unit, leader_now, window} | null, headline,
   timeline: [{gid, date, kind: reps | race, title, n, wins, ties, mean_gap_s, gap_s_km, closest_s, cum_wins, cum_ties}]}]}`.
 - `GET /api/community/goals` → `{goal, goals: [{id, title, metric, target, from, to, default?, unit, metric_label,
@@ -268,7 +272,7 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
   `{year, years, people, totals: {sessions, km, hours, person_hours_together, reps, climb_m, kcal, members, places},
   previous (the year before | null), first, last, top_place: {name, sessions, others}, favourite_category: {…, n, mix},
   months: [12 × {month, sessions, km}], busiest_month, biggest_day (most km), longest (+ minutes together),
-  form_jump (+ person, delta, text), closest_finish, most_loyal: {person, sessions, of}, top_pair: {a, b, sessions},
+  form_jump (+ person, delta, text), closest_finish, most_loyal: {person, sessions, of, tied_with: [person]}, top_pair: {a, b, sessions},
   records_set, records_standing (club records set this year that still stand), badges (earned this year),
   rivalry, members: [{person, sessions, share, km, hours, reps, climb_m, top_place, favourite_category, partner,
   best_session, avg_form_delta, records, badges, streak_weeks, company (this year), rivalry: [{other, won, lost,

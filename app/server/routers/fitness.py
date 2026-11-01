@@ -7,6 +7,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import math
 import threading
 import time
 
@@ -122,11 +123,23 @@ def _eval_variants(store: Store) -> dict | None:
         if not p.exists():
             return None
         try:
-            return json.loads(p.read_text()).get("variants")
-        except (OSError, ValueError):
+            # older files may hold NaN (too few races): null them, a NaN would make the response fail
+            return _finite(json.loads(p.read_text()).get("variants"))
+        except (OSError, ValueError, AttributeError):
             log.warning("unreadable %s", p)
             return None
     return store._memoize("fitness_eval", lambda: [p], build)
+
+
+def _finite(x):
+    """`x` with NaN / ±inf floats replaced by None, recursively (strict JSON for the response)."""
+    if isinstance(x, dict):
+        return {k: _finite(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [_finite(v) for v in x]
+    if isinstance(x, float) and not math.isfinite(x):
+        return None
+    return x
 
 
 def explain(s: dict, app: dict | None = None) -> str:

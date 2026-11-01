@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 import random
+from pathlib import Path
 from urllib.parse import quote
 
 import pytest
@@ -585,3 +586,28 @@ def test_compare_suggest_best_and_last_year(client, activities):
     w = next(x for x in allp["workouts"] if x["signature"] == "6×1000")
     if w["best"]["id"] != six["id"]:
         assert w["best"]["id"] in best["ids"]
+
+
+def test_fitness_eval_nan_is_null(tmp_path):
+    """fitness_eval.json from a person with too few races may hold NaN: the router nulls it (strict JSON)."""
+    from types import SimpleNamespace
+
+    from app.server.routers import fitness as fr
+
+    (tmp_path / "fitness_eval.json").write_text('{"variants": {"interval": {"pace": NaN, "hr": [1.5, Infinity]}}}')
+    calls = {}
+    store = SimpleNamespace(dir=tmp_path, _memoize=lambda key, deps, build: calls.setdefault(key, build()))
+    v = fr._eval_variants(store)
+    assert v == {"interval": {"pace": None, "hr": [1.5, None]}}
+    json.dumps(v, allow_nan=False)
+
+
+def test_fitness_eval_writer_finite():
+    import sys
+
+    import numpy as np
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import fitness_eval
+
+    assert fitness_eval.finite({"a": float("nan"), "b": [np.float64("inf"), np.int64(3), 2.5]}) == {"a": None, "b": [None, 3, 2.5]}

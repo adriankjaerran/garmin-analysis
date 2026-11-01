@@ -43,7 +43,7 @@ FORM_PY = Path(__file__).resolve().parent / "form_delta.py"
 VERSION = 1
 
 CATEGORIES = [   # id, label, emoji, description
-    ("intervals", "Intervals", "⏱️", "reps run together (track, road, hills, ski intervals)"),
+    ("intervals", "Intervals", "⚡", "reps run together (track, road, hills, ski intervals)"),
     ("tempo", "Tempo", "🔥", "a continuous hard run (tempo / threshold)"),
     ("long", "Long run", "🛣️", "a continuous run of ≥ 90 min or ≥ 16 km together"),
     ("easy", "Easy", "🌿", "an easy / steady continuous run"),
@@ -1008,7 +1008,12 @@ def club(date_from=None, date_to=None, viewer=None) -> dict:
     place_rows = [{"id": pid, "name": next(G[g]["place"].get("name") for g in gids if G[g]["place"].get("id") == pid),
                    "sessions": n, "last": max(G[g]["date"] for g in gids if G[g]["place"].get("id") == pid)}
                   for pid, n in places.most_common()]
-    loyal = attendance[0] if attendance else None
+    # most loyal = the single member with the most sessions (none on a tie: "most loyal" of two equals says nothing)
+    loyal = attendance[0] if attendance and (len(attendance) == 1 or attendance[1]["sessions"] < attendance[0]["sessions"]) else None
+    ycount = Counter(p["person"] for g in ytd for key, p in _keys(G[g]) if p["role"] != "other" and "#" not in key)
+    ytop = ycount.most_common(2)
+    totals["this_year"]["most_loyal"] = ({"person": ytop[0][0], "sessions": ytop[0][1]}
+                                         if ytop and (len(ytop) == 1 or ytop[1][1] < ytop[0][1]) else None)
     M = motivation(B, store, tdoc)
     company = {}
     for a in attendance:
@@ -1168,7 +1173,7 @@ def member(person: str, viewer=None) -> dict:
         plist.append({"person": p, "display": info.get(p), **x,
                       "rep_wins": (h or {}).get("rep_wins", {}).get(person), "rep_losses": (h or {}).get("rep_wins", {}).get(p),
                       "rep_ties": (h or {}).get("rep_ties"), "h2h": h})
-    best = sorted([s for s in sess if s["form"] and s["form"].get("delta") is not None],
+    best = sorted([s for s in sess if s["form"] and s["form"].get("delta") is not None and s["form"].get("confidence") != "none"],
                   key=lambda s: -s["form"]["delta"])[:5]
     my_eff = [e for e in B["efforts"] if e["person"] == person and e["gid"] in set(gids)]
     pbs = {}
@@ -1295,13 +1300,19 @@ def company_effect(B, store, tdoc, person, sess=None, date_from=None, date_to=No
         by_disc.append({"discipline": d, "n_joint": len(js), "n_solo": len(ss), "joint_avg": _r(ja, 2), "solo_avg": _r(sa, 2),
                         "diff": _r(ja - sa, 2) if ja is not None and sa is not None else None})
     # paired: each joint session against the solo sessions of its discipline in its own window
-    pairs = []
+    # joint_avg / solo_avg are over exactly the sessions in these pairs, so "together x (n) · alone y (m)" adds up to diff
+    # (solo_avg = the mean of each pair's solo baseline, so together − alone = diff exactly)
+    pairs, j_used, base, s_used = [], [], [], set()
     for j in joint:
-        w = [x["delta"] for x in solo if x["discipline"] == j["discipline"] and abs(dn(j["date"]) - dn(x["date"])) <= COMPANY_WINDOW_D]
+        w = [x for x in solo if x["discipline"] == j["discipline"] and abs(dn(j["date"]) - dn(x["date"])) <= COMPANY_WINDOW_D]
         if w:
-            pairs.append(j["delta"] - sum(w) / len(w))
-    ja = _mean([j["delta"] for j in joint if any(b["discipline"] == j["discipline"] and b["n_solo"] for b in by_disc)])
-    sa = _mean([x["delta"] for x in solo])
+            b = sum(x["delta"] for x in w) / len(w)
+            pairs.append(j["delta"] - b)
+            j_used.append(j["delta"])
+            base.append(b)
+            s_used.update(x["activity_id"] for x in w)
+    ja = _mean(j_used)
+    sa = _mean(base)
     diff = _mean(pairs)
     n_cmp = len(pairs)
     verdict = None if diff is None else "company" if diff >= COMPANY_EVEN else "alone" if diff <= -COMPANY_EVEN else "even"
@@ -1338,6 +1349,7 @@ def company_effect(B, store, tdoc, person, sess=None, date_from=None, date_to=No
                      "solo": [{"activity_id": x["activity_id"], "date": x["date"], "pace_s_km": _r(x["pace_s_km"], 1)}
                               for x in sorted(ss, key=lambda x: x["date"])]})
     return {"person": person, "window_days": COMPANY_WINDOW_D, "n_joint": len(joint), "n_solo": len(solo), "n_compared": n_cmp,
+            "n_joint_cmp": len(j_used), "n_solo_cmp": len(s_used),
             "joint_avg": _r(ja, 2), "solo_avg": _r(sa, 2), "diff": _r(diff, 2), "verdict": verdict, "text": text,
             "thin": n_cmp < 3 or len(solo) < 3, "by_discipline": by_disc, "pace": pace,
             "joint": joint, "solo": sorted(solo, key=lambda x: x["date"])}
@@ -1449,10 +1461,15 @@ def rivalries(B, store, tdoc, gids=None) -> list[dict]:
                 kind, text = "steady", f"Steady: {nm(lead_now)} about {abs(late):.0f} {unit} ahead"
             trend = {"kind": kind, "text": text, "early": _r(abs(early), 1), "late": _r(abs(late), 1), "unit": unit,
                      "leader_now": lead_now, "window": k}
+        rc = [t for t in tl if t["kind"] == "race"]
+        race_wins = {a: sum(t["wins"][a] for t in rc), b: sum(t["wins"][b] for t in rc)}
         out.append({"a": a, "b": b, "sessions": len(tl), "reps": sum(t["n"] for t in tl), "wins": dict(cum), "ties": ties,
+                    # the score = shared reps + races; the split so pages can say "reps 26–0 · races 1–0"
+                    "races": len(rc), "race_wins": race_wins, "race_ties": sum(t["ties"] for t in rc),
                     "mean_gap_s_km": _r(overall, 1) if g_km else None, "mean_gap_s": _r(_mean(g_rep), 1),
                     "leader": leader, "trend": trend, "timeline": tl,
-                    "headline": (f"{nm(a)} {cum[a]}–{cum[b]} {nm(b)} in shared reps" + (f" · {trend['text']}" if trend else ""))})
+                    "headline": (f"{nm(a)} {cum[a]}–{cum[b]} {nm(b)} in shared reps" + (" and races" if rc else "")
+                                 + (f" · {trend['text']}" if trend else ""))})
     out.sort(key=lambda r: -r["reps"])
     return out
 
@@ -1488,7 +1505,7 @@ BADGES = [  # id, emoji, name, description, group
     ("all_rounder", "🎨", "All-rounder", "sessions in 4 different categories", "effort"),
     ("racer", "🏁", "Race day", "a race together with the club", "effort"),
     ("beat_form", "🚀", "Beat your form", "+2 or more vs your form in a session", "form"),
-    ("career_day", "⚡", "Day of days", "+4 or more vs your form in a session", "form"),
+    ("career_day", "🌟", "Day of days", "+4 or more vs your form in a session", "form"),
     ("rep_winner", "🥇", "Rep winner", "10 shared reps won head-to-head", "rivalry"),
     ("photo_finish", "🤏", "Photo finish", "a shared rep or race decided by ≤ 1 s", "rivalry"),
     ("record_breaker", "💥", "Record breaker", "set a club record or a club PB", "records"),
@@ -1643,7 +1660,7 @@ def motivation(B, store, tdoc) -> dict:
 
 
 def _company_short(c):
-    return {k: c.get(k) for k in ("diff", "verdict", "text", "n_joint", "n_solo", "n_compared", "joint_avg", "solo_avg", "thin")} \
+    return {k: c.get(k) for k in ("diff", "verdict", "text", "n_joint", "n_solo", "n_compared", "n_joint_cmp", "n_solo_cmp", "joint_avg", "solo_avg", "thin")} \
         | {"pace": [{k: x[k] for k in ("family", "label", "diff_s_km", "text", "n_joint", "n_solo", "joint_s_km", "solo_s_km")}
                     for x in c.get("pace") or []]}
 
@@ -1928,10 +1945,12 @@ def wrapped(year: int | str, viewer=None) -> dict:
             "biggest_day": sess_row(biggest) if biggest else None,
             "longest": {**sess_row(longest), "minutes": round(_together_s(G[longest]) / 60)} if longest else None,
             "form_jump": jump, "closest_finish": hl.get("closest_finish"),
-            "most_loyal": {"person": att.most_common(1)[0][0], "sessions": att.most_common(1)[0][1], "of": len(gids)} if att else None,
+            "most_loyal": {"person": att.most_common(1)[0][0], "sessions": att.most_common(1)[0][1], "of": len(gids),
+                           "tied_with": [p for p, n in att.most_common()[1:] if n == att.most_common(1)[0][1]]} if att else None,
             "top_pair": {"a": pairs.most_common(1)[0][0][0], "b": pairs.most_common(1)[0][0][1], "sessions": pairs.most_common(1)[0][1]} if pairs else None,
             "records_set": recs, "records_standing": standing, "badges": badges,
-            "rivalry": [{k: r[k] for k in ("a", "b", "sessions", "reps", "wins", "ties", "trend", "headline")} for r in riv],
+            "rivalry": [{k: r[k] for k in ("a", "b", "sessions", "reps", "wins", "ties", "races", "race_wins", "race_ties", "trend", "headline")}
+                        for r in riv],
             "members": per, "compute_ms": round((time.time() - T0) * 1000, 1)}
 
 

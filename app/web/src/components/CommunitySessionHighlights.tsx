@@ -9,7 +9,7 @@ import { personColour, personName } from "../lib/people";
 import { useTheme } from "../lib/theme";
 import { repTime } from "../lib/together";
 import { useCommunity, type CsSession, type Facts } from "../lib/communitySession";
-import { Avatar } from "./CommunityBits";
+import { Av } from "./CommunityBits";
 import "../pages/community-session.css";
 
 export function SessionStory({ f }: { f: Facts }) {
@@ -69,7 +69,7 @@ function LastTimeBody({ c, gid, same, base }: { c: CsSession; gid: string; same:
         <ul class="cs-last">
           {rows.map(({ m, o, now, then, d, rep }) => (
             <li key={m.key}>
-              <span class="pn"><Avatar p={m.key} size="sm" /><b>{personName(m.key)}</b></span>
+              <span class="pn"><Av p={m.key} size="sm" /><b>{personName(m.key)}</b></span>
               {!o ? <span class="muted small">wasn't there</span> : (
                 <span class="cs-last-v">
                   {d !== null

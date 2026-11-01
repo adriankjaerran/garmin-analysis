@@ -20,7 +20,7 @@ import {
 import { TLine, type TSeries } from "../components/TLine";
 import { TogetherMap, type MapDot, type MapLine } from "../components/TogetherMap";
 import { ReplayPanel } from "../components/Replay";
-import { Avatar } from "../components/CommunityBits";
+import { Av } from "../components/CommunityBits";
 import { CommunitySessionHero } from "../components/CommunitySessionHero";
 import { CommunitySessionMembers } from "../components/CommunitySessionMembers";
 import { CommunitySessionSplits } from "../components/CommunitySessionSplits";
@@ -158,7 +158,7 @@ function Leaderboard({ s, iv }: { s: TSession; iv: Intervals }) {
             return [
               <tr key={l.person} class={more ? "hasub" : ""}>
                 <td class="rank">{l.total_s !== null ? MEDAL[l.rank - 1] ?? l.rank : ""}</td>
-                <td><span class="pn"><Avatar p={l.person} /><span class={l.person === s.viewer ? "me" : ""}>{personName(l.person)}</span></span></td>
+                <td><span class="pn"><Av p={l.person} /><span class={l.person === s.viewer ? "me" : ""}>{personName(l.person)}</span></span></td>
                 <td class="num"><b>{l.total_s !== null ? repTime(l.total_s) : "—"}</b></td>
                 <td class="num"><span class="nm2 r">{sameT && <span>{repTime(l.avg_s)}</span>}<span class={sameT ? "muted small" : ""}>{paceText(l.pace_s_km, sport)}</span></span></td>
                 <td class="num">{l.rank === 1 ? <span class="muted">leader</span> : behind(l.gap_s)}</td>
@@ -203,7 +203,7 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
         <table class="tg-tbl mx">
           <thead><tr>
             <th>Rep</th><th>Set</th>
-            {keys.map((k) => <th key={k} class="pcol"><span class="pn"><Avatar p={k} size="sm" />{many ? personInfo(k).initials : personName(k)}</span></th>)}
+            {keys.map((k) => <th key={k} class="pcol"><span class="pn"><Av p={k} size="sm" />{many ? personInfo(k).initials : personName(k)}</span></th>)}
             {keys.length === 2 && <th class="num opt">Gap</th>}
             <th class="rp" aria-label="Replay"></th>
           </tr></thead>
@@ -384,7 +384,7 @@ function Breaks({ s, iv }: { s: TSession; iv: Intervals }) {
         <table class="tg-tbl br" style={{ width: "auto" }}>
           <thead>
             <tr><th rowSpan={2}>After rep</th>
-              {keys.map((k) => <th key={k} colSpan={3} class="pgrp" style={{ borderBottomColor: personColour(k) }}><span class="pn"><Avatar p={k} size="sm" />{personName(k)}</span></th>)}
+              {keys.map((k) => <th key={k} colSpan={3} class="pgrp" style={{ borderBottomColor: personColour(k) }}><span class="pn"><Av p={k} size="sm" />{personName(k)}</span></th>)}
               <th rowSpan={2} title="Who's HR dropped more in the first 30 s">Faster recovery</th></tr>
             <tr>{keys.map((k) => [<th key={k + "d"} class="num">Break</th>, <th key={k + "h"} class="num" title="HR drop in the first 30 s of the break">HR drop 30 s</th>, <th key={k + "n"} class="num">Next start</th>])}</tr>
           </thead>
@@ -404,7 +404,7 @@ function Breaks({ s, iv }: { s: TSession; iv: Intervals }) {
                       <td key={k + "n"} class="num" title={b.hr_next_start ? `${b.hr_next_start} bpm` : ""}>{b.hr_next_start_pct !== null ? `${b.hr_next_start_pct} %` : "—"}</td>,
                     ];
                   })}
-                  <td>{rf ? <span class="pn"><Avatar p={rf.person} size="sm" />{personName(rf.person)}</span> : ""}</td>
+                  <td>{rf ? <span class="pn"><Av p={rf.person} size="sm" />{personName(rf.person)}</span> : ""}</td>
                 </tr>
               );
             })}
@@ -561,7 +561,7 @@ function ContinuousView({ s, replay, hr, top, middle }: { s: TSession; replay: R
                 <thead><tr><th></th><th>Person</th><th class="num">Time</th><th class="num">Gap</th><th class="num">Distance</th><th class="num">{speedLabel(sport)}</th></tr></thead>
                 <tbody>{c.race.map((r) => (
                   <tr key={r.person}><td class="rank">{MEDAL[r.rank - 1] ?? r.rank}</td>
-                    <td><span class="pn"><Avatar p={r.person} /><span class={r.person === s.viewer ? "me" : ""}>{personName(r.person)}</span></span></td>
+                    <td><span class="pn"><Av p={r.person} /><span class={r.person === s.viewer ? "me" : ""}>{personName(r.person)}</span></span></td>
                     <td class="num"><b>{dur(r.time_s)}</b></td><td class="num">{r.rank === 1 ? <span class="muted">winner</span> : behind(r.gap_s)}</td>
                     <td class="num">{r.dist_km ? `${r.dist_km.toFixed(2)} km` : "—"}</td><td class="num">{r.dist_km ? speedText(sport, (r.dist_km * 1000) / r.time_s) : "—"}</td></tr>
                 ))}</tbody>
@@ -625,7 +625,7 @@ function ContinuousView({ s, replay, hr, top, middle }: { s: TSession; replay: R
               <div class="head sm"><h2>Splits per km</h2><span class="sub">{race ? "each person's own distance, the whole race" : c.clock === "moving" ? "moving time on the shared route" : "on the shared route"}</span></div>
               <div class="tg-mxwrap">
                 <table class="tg-tbl mx km">
-                  <thead><tr><th>km</th>{keys.map((k) => <th key={k} class="pcol"><span class="pn"><Avatar p={k} size="sm" />{personName(k)}</span></th>)}</tr></thead>
+                  <thead><tr><th>km</th>{keys.map((k) => <th key={k} class="pcol"><span class="pn"><Av p={k} size="sm" />{personName(k)}</span></th>)}</tr></thead>
                   <tbody>{c.km_splits!.map((r) => (
                     <tr key={r.km}><td class="rl">{r.km}</td>
                       {keys.map((k) => {
@@ -695,7 +695,7 @@ function Unverified({ s, replay }: { s: TSession; replay: Replay | null }) {
           <div class="tg-mxwrap"><table class="tg-tbl lb">
             <thead><tr><th>Person</th><th>Activity</th><th class="num">Distance</th><th class="num">Time</th><th>Track</th></tr></thead>
             <tbody>{s.participants.map((p) => (
-              <tr key={p.key}><td><span class="pn"><Avatar p={p.key} />{personName(p.key)}</span></td>
+              <tr key={p.key}><td><span class="pn"><Av p={p.key} />{personName(p.key)}</span></td>
                 <td><a href={withPerson(`/activities/${p.activity_id}`, p.person)}>{p.name}</a></td>
                 <td class="num">{p.dist_km ? `${km(p.dist_km)} km` : "—"}</td><td class="num">{dur(p.dur_s)}</td>
                 <td>{p.has_gps ? "GPS" : p.has_fit ? "no GPS" : <span class="muted">no watch file</span>}</td></tr>

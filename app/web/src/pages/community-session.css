@@ -151,7 +151,7 @@
 .cs-sp-date { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cs-sp-wk { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cs-sp-ppl { display: inline-flex; }
-.cs-sp-ppl .tg-av + .tg-av { margin-left: -5px; }
+.cs-sp-ppl .cm-av + .cm-av { margin-left: -5px; }
 
 /* ------------------------------------------------------------------ splits */
 .tg-tbl.cs-sp { width: auto; }

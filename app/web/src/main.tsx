@@ -123,6 +123,8 @@ function PersonMenu({ person, path }: { person: string; path: string }) {
             <a role="menuitem" href={simple(p)} class={p === person ? "on" : ""} aria-current={p === person}
                onClick={(e) => go(e as unknown as MouseEvent, p)}><Avatar p={p} />{personName(p)}</a>
           ))}
+          {/* phones: the theme toggle lives here instead of taking its own row in the top bar */}
+          <div class="who-theme"><span class="who-hint">Theme</span><ThemeToggle /></div>
         </div>
       )}
     </div>

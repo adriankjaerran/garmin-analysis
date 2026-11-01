@@ -117,7 +117,7 @@ export function ClubPage() {
               <span class="lbl">This year · {t.this_year.year}</span>
               <div class="big"><b>{t.this_year.sessions}</b> sessions</div>
               <div class="cm-stats"><Stat v={Math.round(t.this_year.km)} label="km" /><Stat v={t.this_year.hours.toFixed(1)} label="hours" /></div>
-              {c.most_loyal && <div class="loyal"><Av p={c.most_loyal.person} size="sm" /><span>Most loyal: <b>{personName(c.most_loyal.person)}</b> · {plural(c.most_loyal.sessions, "session")}</span></div>}
+              {t.this_year.most_loyal && <div class="loyal"><Av p={t.this_year.most_loyal.person} size="sm" /><span>Most loyal: <b>{personName(t.this_year.most_loyal.person)}</b> · {t.this_year.most_loyal.sessions} of {plural(t.this_year.sessions, "session")}</span></div>}
               {t.this_year.sessions > 0 && <a class="cm-wrapped-link" href={`/community/wrapped/${t.this_year.year}`}>✨ {t.this_year.year} Wrapped ›</a>}
             </div>
           )}

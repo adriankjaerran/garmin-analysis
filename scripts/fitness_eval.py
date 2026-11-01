@@ -337,11 +337,26 @@ def run(person, out=True):
     R["q_loglik"] = qrow
     r3v = [(dt.date.fromisoformat(r["date"]).toordinal(), r["moving_s"]) for r in (R.get("R3_holmenkollen") or {}).get("sessions", [])]
     R["variants"] = compare_variants(acts, feats, races, r3v)
+    R = finite(R)   # too few races etc. give NaN means: write null (strict JSON; the API refuses NaN)
     if out:
         p = ROOT / "data" / person / "fitness_eval.json"
-        p.write_text(json.dumps(R, ensure_ascii=False, indent=1, default=float))
-        print(json.dumps(R, ensure_ascii=False, indent=1, default=float)[:20000])
+        js = json.dumps(R, ensure_ascii=False, indent=1, default=float, allow_nan=False)
+        p.write_text(js)
+        print(js[:20000])
     return R
+
+
+def finite(x):
+    """`x` with every NaN / ±inf float (also numpy scalars) replaced by None, recursively."""
+    if isinstance(x, dict):
+        return {k: finite(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [finite(v) for v in x]
+    if isinstance(x, (float, np.floating)):
+        return float(x) if math.isfinite(x) else None
+    if isinstance(x, np.integer):
+        return int(x)
+    return x
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import { speedVal, speedUnit } from "../lib/format";
 import { personColour, personName } from "../lib/people";
 import { useTheme } from "../lib/theme";
 import { repTime, type Cell, type TSession } from "../lib/together";
-import { Avatar } from "./CommunityBits";
+import { Av } from "./CommunityBits";
 import "../pages/community-session.css";
 
 type N = number | null;
@@ -54,7 +54,7 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
         <table class="tg-tbl cs-sp">
           <thead>
             <tr><th rowSpan={2}>Rep</th><th rowSpan={2} class="set">Set</th>
-              {keys.map((k) => <th key={k} colSpan={3} class="pgrp" style={{ borderBottomColor: personColour(k) }}><span class="pn"><Avatar p={k} size="sm" />{personName(k)}</span></th>)}</tr>
+              {keys.map((k) => <th key={k} colSpan={3} class="pgrp" style={{ borderBottomColor: personColour(k) }}><span class="pn"><Av p={k} size="sm" />{personName(k)}</span></th>)}</tr>
             <tr>{keys.map((k) => [<th key={k + "t"} class="num">Time</th>, <th key={k + "p"} class="num">{speedUnit(sport) === "km/h" ? "km/h" : "Pace"}</th>, <th key={k + "h"} class="num">HR</th>])}</tr>
           </thead>
           <tbody>

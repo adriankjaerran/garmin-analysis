@@ -13,7 +13,7 @@ import {
   climbFun, distanceFun, hoursMin, patchSession, useCommunity,
   type CsForm, type CsMember, type CsRecord, type CsSession, type Facts,
 } from "../lib/communitySession";
-import { Avatar } from "./CommunityBits";
+import { Av } from "./CommunityBits";
 import { LastTimeHere } from "./CommunitySessionHighlights";
 import "../pages/community-session.css";
 
@@ -51,7 +51,7 @@ function MemberCard({ m, s, c, f }: { m: CsMember; s: TSession; c: CsSession; f:
   const lb = s.intervals?.leaderboard.find((l) => l.person === m.key);
   const race = s.continuous?.race?.find((r) => r.person === m.key);
   const n = m.numbers;
-  const sport = p?.sport ?? s.group.sport;
+  const sport = p?.sport && p.sport !== "other" ? p.sport : s.group.sport;   // a multisport file ("other") in a run session: run pace
   const rank = m.rank ?? race?.rank ?? null;
   const ofPeople = s.intervals ? s.intervals.leaderboard.filter((l) => l.total_s !== null).length : s.continuous?.race?.length ?? 0;
   const iv = !!s.intervals && m.reps_done !== null;
@@ -60,7 +60,7 @@ function MemberCard({ m, s, c, f }: { m: CsMember; s: TSession; c: CsSession; f:
   const me = m.key === c.viewer;
   const pf = f.people[m.key];
   const badges: { t: string; tip: string }[] = [];
-  if (pf?.bestRep && f.sameTarget) badges.push({ t: `⚡ Best rep R${pf.bestRep.label} · ${repTime(pf.bestRep.s)}`, tip: `${personName(m.key)}'s fastest rep (suspect reps left out)` });
+  if (pf?.bestRep && f.sameTarget) badges.push({ t: `🏎️ Best rep R${pf.bestRep.label} · ${repTime(pf.bestRep.s)}`, tip: `${personName(m.key)}'s fastest rep (suspect reps left out)` });
   if (pf && pf.breaks >= 2 && pf.recoveries > 0) badges.push({ t: `💚 Faster recovery ${pf.recoveries}/${pf.breaks}`, tip: `the bigger heart-rate drop in the first 30 s of ${pf.recoveries} of ${pf.breaks} breaks` });
   if (pf?.strongFinish !== null && pf?.strongFinish !== undefined && pf.strongFinish < -0.5) badges.push({ t: "📈 Finished stronger", tip: `the last 3 reps ${Math.abs(pf.strongFinish).toFixed(1)} s faster per rep than the first 3` });
   const stats: [string, string, string?][] = [];
@@ -78,7 +78,7 @@ function MemberCard({ m, s, c, f }: { m: CsMember; s: TSession; c: CsSession; f:
   return (
     <div class={"cs-member" + (m.role === "other" ? " other" : "") + (me ? " me" : "")} style={{ "--pc": personColour(m.key) } as any}>
       <div class="cs-m-top">
-        <Avatar p={m.key} role={m.role} size="lg" />
+        <Av p={m.key} role={m.role} size="lg" />
         <div class="cs-m-name">
           <span><b>{personName(m.key)}</b>{me && <span class="muted"> · you</span>}</span>
           <span class="cs-m-wk" title={m.type ?? undefined}>{m.workout ?? "—"}{roleText ? <span class="cs-role"> · {roleText}</span> : null}</span>
@@ -185,7 +185,7 @@ function Records({ c, base }: { c: CsSession; base: string }) {
         {c.records.map((r, i) => (
           <li key={i}>
             <span class={"cs-rec-badge " + r.kind}>{recordBadge(r)}</span>
-            <span class="pn"><Avatar p={r.key ?? r.person} size="sm" /><b>{personName(r.key ?? r.person)}</b></span>
+            <span class="pn"><Av p={r.key ?? r.person} size="sm" /><b>{personName(r.key ?? r.person)}</b></span>
             <span>{r.measure === "avg" ? "average rep" : r.measure === "race" ? "race" : "fastest rep"} {r.label}: <b>{r.measure === "race" ? dur(r.value_s) : repTime(r.value_s)}</b></span>
             {r.improvement_s ? <span class="good small">{secs(r.improvement_s, 1)} faster</span> : null}
             {r.prev_s ? <span class="muted small">than {r.prev_person && r.prev_person !== r.person ? `${personName(r.prev_person)}'s ` : "the old "}{r.measure === "race" ? dur(r.prev_s) : repTime(r.prev_s)}
@@ -210,7 +210,7 @@ function SamePlace({ c, base }: { c: CsSession; base: string }) {
             <a href={`${base}/${encodeURIComponent(x.gid)}`}>
               <span class="cs-sp-date">{shortDate(x.date, c.date)}</span>
               <span class="cs-sp-wk">{emoji(x.category)} {x.workout}</span>
-              <span class="cs-sp-ppl">{x.people.map((p) => <Avatar key={p} p={p} size="sm" />)}</span>
+              <span class="cs-sp-ppl">{x.people.map((p) => <Av key={p} p={p} size="sm" />)}</span>
             </a>
           </li>
         ))}
