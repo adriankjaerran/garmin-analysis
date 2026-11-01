@@ -35,7 +35,7 @@ KIND_RANK = {"race": 0, "hard": 1}          # bound / implausible never give a d
 CONF_SD = (2.0, 3.0)                        # total sd (reference sd ⊕ session sigma): < 2 high, < 3 medium, else low
 OUTLIER_Z = 3.0                             # |delta| / total sd above this: flagged (glitch, mislabel or partial session)
 SPARSE_SD = 3.0                             # reference sd above this: little evidence near the session
-CODE_VERSION = 2                            # bump when the definition changes (invalidates the disk cache)
+CODE_VERSION = 3                            # bump when the definition changes (invalidates the disk cache)
 
 _memo: dict[str, tuple[list, dict]] = {}
 
@@ -64,7 +64,10 @@ def _compute(doc: dict) -> dict:
     for disc, rows in by_disc.items():
         rows = sorted(rows, key=lambda s: s["date"])
         days = [dt.date.fromisoformat(s["date"]).toordinal() for s in rows]
-        obs = [(d, float(s["score"]), float(s["sigma"]), s["kind"]) for d, s in zip(days, rows)]
+        # the reference uses the shape model's robust weight (sigma / sqrt(weight)): a session the model rejected
+        # (glitch / mislabel, weight << 1) must not inflate everyone else's form either
+        obs = [(d, float(s["score"]), float(s["sigma"]) / math.sqrt(max(float(s.get("weight") if s.get("weight") is not None else 1.0), 0.02)),
+                s["kind"]) for d, s in zip(days, rows)]
         d0, d1 = min(days) - 7, max(days)       # same grid start as fitness_model._model
         for j, (d, s) in enumerate(zip(days, rows)):
             r = {k: s.get(k) for k in ("id", "date", "discipline", "type", "score", "kind", "sigma", "weight", "shape_at")}
