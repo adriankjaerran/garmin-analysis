@@ -84,12 +84,12 @@ export function FitnessPage() {
         last: c.last_evidence?.date ?? null, lastId: c.last_evidence ? String(c.last_evidence.id) : null,
         lastDays: c.last_evidence ? daysAgo(c.last_evidence.date, ref) : null };
     });
-    // one race prediction: interval + long blended by precision (fitness.json overall.current.race_prediction)
-    const pr = (doc.disciplines.overall?.current as any)?.race_prediction as { vdot: number; sd: number; weights: Record<string, number>;
+    // one race prediction from the distance curve (fitness.json overall.current.race_prediction; vdot/sd at 10k)
+    const pr = (doc.disciplines.overall?.current as any)?.race_prediction as { vdot: number; sd: number;
       race_equivalents_s: Record<string, number> } | null | undefined;
     if (pr) rows.push({ key: "pred", label: "Race prediction", mean: pr.vdot, sd: pr.sd, hrMean: null, hrSd: null, conf: null, pct: null, pb: null,
       r5: pr.race_equivalents_s["5k"], r10: pr.race_equivalents_s["10k"], rh: pr.race_equivalents_s.half, trend: null,
-      last: Object.entries(pr.weights).map(([k, w]) => `${DISC_LABEL[k]} ${Math.round(w * 100)} %`).join(" · "), lastId: null, lastDays: null });
+      last: "VDOT at 10k, from the distance curve", lastId: null, lastDays: null });
     const o = doc.disciplines.overall;
     if (o) rows.push({ key: "overall", label: DISC_LABEL.overall, mean: o.current.mean, sd: o.current.sd,
       hrMean: H?.overall?.current.mean ?? null, hrSd: H?.overall?.current.sd ?? null, conf: null, pct: o.current.mean,

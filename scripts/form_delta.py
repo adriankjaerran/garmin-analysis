@@ -10,7 +10,9 @@ The session score is the fitness model's own per-session score (fitness.json `se
 for the session's main race/hard evidence item (race > hard, then smaller sigma, then interval). Easy runs, long-run
 bounds, hikes, rides and unscored types -> None. The reference is `fitness_model.smooth_series` (robust Kalman + RTS,
 same q / sigmas / robust weights as fitness.json) on every other evidence item of that discipline, read at the day
-before: the session can't pull its own reference towards itself. It uses later sessions too (like the shape curve),
+before: the session can't pull its own reference towards itself. Running (interval + long) uses the distance curve
+(`fitness_model.smooth_curve` on every other running item, read at the session's own distance `km`) when fitness.json
+has one (model_version >= 2). It uses later sessions too (like the shape curve),
 so an old session's delta can move a little when fitness.json is rebuilt.
 
 Only fitness.json is read (no FIT files). One leave-one-out refit per race/hard session (~1.5 s for adrian, cold),
@@ -35,7 +37,7 @@ KIND_RANK = {"race": 0, "hard": 1}          # bound / implausible never give a d
 CONF_SD = (2.0, 3.0)                        # total sd (reference sd ⊕ session sigma): < 2 high, < 3 medium, else low
 OUTLIER_Z = 3.0                             # |delta| / total sd above this: flagged (glitch, mislabel or partial session)
 SPARSE_SD = 3.0                             # reference sd above this: little evidence near the session
-CODE_VERSION = 3                            # bump when the definition changes (invalidates the disk cache)
+CODE_VERSION = 4                            # bump when the definition changes (invalidates the disk cache)
 
 _memo: dict[str, tuple[list, dict]] = {}
 
@@ -61,6 +63,12 @@ def _compute(doc: dict) -> dict:
         by_disc.setdefault(s["discipline"], []).append(s)
     qs = {**fm.P["q_per_day"], **((doc.get("params") or {}).get("q_per_day") or {})}
     out: dict[str, list[dict]] = {}
+    curve = bool(doc.get("predictor")) and any(s.get("km") for s in doc.get("sessions") or [])
+    if curve:
+        # running (interval + long) is one distance curve in fitness.json (model_version >= 2): the reference is the
+        # leave-one-out curve at the session's own distance (`km`), same q / robust weights as fitness_model
+        rows = sorted([s for d in ("interval", "long") for s in by_disc.pop(d, []) if s.get("km")], key=lambda s: s["date"])
+        _curve_refs(rows, doc, out)
     for disc, rows in by_disc.items():
         rows = sorted(rows, key=lambda s: s["date"])
         days = [dt.date.fromisoformat(s["date"]).toordinal() for s in rows]
@@ -79,6 +87,29 @@ def _compute(doc: dict) -> dict:
                 r["ref"], r["ref_sd"] = float(m[k]), float(sd[k])
             out.setdefault(str(s["id"]), []).append(r)
     return out
+
+
+def _curve_refs(rows: list[dict], doc: dict, out: dict) -> None:
+    """Leave-one-out distance-curve reference for the running rows (fitness_model.smooth_curve), read on the day
+    before at the row's own distance."""
+    if not rows:
+        return
+    cp = {**fm.CURVE, **(doc.get("curve") or {})}
+    days = [dt.date.fromisoformat(s["date"]).toordinal() for s in rows]
+    obs = [(d, float(s["score"]), float(s["sigma"]) / math.sqrt(max(float(s.get("weight") if s.get("weight") is not None else 1.0), 0.02)),
+            s["kind"], math.log2(float(s["km"]) / cp["ref_km"])) for d, s in zip(days, rows)]
+    d0, d1 = min(days) - 7, max(days)
+    for j, (d, s) in enumerate(zip(days, rows)):
+        r = {k: s.get(k) for k in ("id", "date", "discipline", "type", "score", "kind", "sigma", "weight", "shape_at", "km")}
+        r["hr_kind"] = (s.get("hr") or {}).get("kind")
+        r["n_other"] = sum(1 for i, o in enumerate(obs) if i != j and o[3] != "bound")
+        if s["kind"] in KIND_RANK and r["n_other"]:
+            _, M, C, _, _ = fm.smooth_curve(obs[:j] + obs[j + 1:], d0, d1, q_theta=cp["q_theta"], q_slope=cp["q_slope"],
+                                            slope_sd=cp["slope_prior_sd"])
+            k = max(d - 1 - d0, 0)
+            m, sd = fm.curve_at(M[k], C[k], obs[j][4])
+            r["ref"], r["ref_sd"] = float(m), float(sd)
+        out.setdefault(str(s["id"]), []).append(r)
 
 
 def _table(person: str) -> dict:

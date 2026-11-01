@@ -9,6 +9,7 @@ import { DayPage } from "./pages/DayPage";
 import { PlacesPage } from "./pages/PlacesPage";
 import { HomePage } from "./pages/HomePage";
 import { FitnessPage } from "./pages/FitnessPage";
+import { RacePredictorPage } from "./pages/RacePredictorPage";
 import { ComparePage } from "./pages/ComparePage";
 import { TogetherSession } from "./pages/TogetherSession";
 import { CommunityPage } from "./pages/CommunityPage";
@@ -32,6 +33,7 @@ const ROUTES: { path: string; nav?: string; render: (p: Record<string, string>) 
   { path: "/search", nav: "activities", render: () => redirect("/activities") },
   { path: "/compare", nav: "compare", render: () => <ComparePage /> },
   { path: "/fitness", nav: "fitness", render: () => <FitnessPage /> },
+  { path: "/predictor", nav: "predictor", render: () => <RacePredictorPage /> },
   // Community (the running club): sessions feed, club dashboard, members; a session = the Together session page
   { path: "/community", nav: "community", render: () => <CommunityPage /> },
   { path: "/community/club", nav: "club", render: () => <ClubPage /> },
@@ -163,6 +165,7 @@ function Nav({ current, meta, activityId, person, path }:
       <span class="step">Analysis</span>
       {tab("compare", "/compare", "Compare")}
       {tab("fitness", "/fitness", "Fitness")}
+      {tab("predictor", "/predictor", "Race predictor")}
       {club && <>
         <span class="group community" title="The running club: joint sessions, the club dashboard, members">Community</span>
         {tab("community", "/community", "Sessions", false, nTogether, `${nTogether ?? 0} club sessions with you in the last 30 days`)}

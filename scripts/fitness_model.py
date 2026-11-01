@@ -3,7 +3,7 @@
 Usage: uv run scripts/fitness_model.py adrian [--eval] [--workers 8]
 Writes data/<person>/fitness.json (see docs/fitness-model.md). Needs data/<person>/groups.json
 (scripts/session_groups.py). Per-session features are cached in data/<person>/cache/fitness_model.pkl
-(keyed by FIT mtime+size and MODEL_VERSION).
+(keyed by FIT mtime+size and FEATURE_VERSION).
 
 Scale: Daniels VDOT (ml/kg/min-equivalent, "running VO2max as shown by performance"). Every VDOT
 maps to equivalent race times (`race_time`), e.g. VDOT 60 = 10k in 35:22.
@@ -17,12 +17,15 @@ Disciplines (see docs):
   ski       XC/roller ski: mechanical power from climb rate + rolling friction + drag, converted to
             VO2 with an assumed gross efficiency, scored like a run (best sustained demand / Daniels %VO2max).
   overall   precision-weighted mix of the disciplines as % of each one's personal best.
+Running (interval + long) is published from one coupled distance curve (`smooth_curve`, `CURVE`): VDOT(km, t) =
+theta_t + slope_t * log2(km/5); interval = the curve at 5 km, long = at the 10k-half log-mean (~14.5 km), and the
+race predictor (fitness.json `predictor`, any distance) reads the same curve.
 
 Two variants: "pace" (performance only; HR is diagnostics) and "hr" (same scores, but HR effort decides whether a
 hard session was maximal: sub-max -> lower bound, else weighted by p(maximal), FR935 HR discounted). See `apply_hr_intent`.
 
 Importable API (for a backend): `build(person)` -> fitness doc; `load_features`, `collect_evidence`,
-`score_session`, `smooth_series`, `forecast_errors`; physiology `vdot_from_race`, `race_time`, `speed_for`,
+`score_session`, `smooth_series`, `forecast_errors`, `smooth_curve`, `curve_predict`, `evidence_km`; physiology `vdot_from_race`, `race_time`, `speed_for`,
 `cs_dprime`; model pieces `gap_factor`, `wbal_vdot`, `continuous_vdot`, `ski_effort`, `hr_aerobic`,
 `session_series`, `session_features`. Back-tests: scripts/fitness_eval.py (`run(person)`).
 """
@@ -47,7 +50,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import session_groups as sg  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-MODEL_VERSION = 1
+MODEL_VERSION = 2       # fitness.json schema/model; 2: running from the coupled distance curve, `predictor` block
+FEATURE_VERSION = 1     # per-session feature cache key (bump only when session_features changes)
 NEW_WATCH_FROM = "2026-02-18"
 
 P = {
@@ -659,6 +663,195 @@ def forecast_errors(obs, q, kinds=("race", "hard")):
     return np.array(e[3:]), np.array(s[3:])  # first few: prior only
 
 
+# ------------------------------------------------------------------ coupled distance curve (race predictor)
+# One shared running fitness trend plus a personal distance curve: VDOT(km, t) = theta_t + slope_t * x,
+# x = log2(km / 5). theta (VDOT at 5 km) is a random walk with the interval q, slope (VDOT change per doubling of
+# distance) a slow random walk. Every running item (race / hard / bound) is an observation of the curve at its own
+# effective distance (`evidence_km`). Choice of q / x-mapping / reference: scripts/shape_split_eval.py (model D),
+# docs/fitness-model.md "Coupled distance curve".
+CURVE = {
+    "ref_km": 5.0,
+    "q_theta": P["q_per_day"]["interval"],   # VDOT² / day, as the interval shape
+    "q_slope": 0.001,                        # (VDOT / doubling)² / day: out-of-sample choice (eval table in docs)
+    "slope_prior_sd": 3.0,                   # prior slope ~ N(0, 3²) VDOT per doubling
+    "interval_km": 5.0,                      # interval session scores are calibrated (offset -2.5) to 5k races
+    "tempo_km": None,                        # None: the offset-calibration distance below; a number: fixed km
+    "tempo_cal_km": (10.0, 21.0975),         # tempo_offset +3.0 was fitted against the 10k / half long shape:
+                                             # tempo scores are 10k-half equivalents -> x = mean log2 of these
+    "long_ref_km": (10.0, 21.0975),          # `long` discipline = curve at the mean x of 10k and half (~14.5 km)
+    "race_sd": SIG["race"],                  # VDOT noise of a single race day (added for race predictions)
+    "extrap_sd_per_doubling": 1.0,           # extra sd per doubling outside the evidenced distance range (assumed)
+    "km_range": (0.8, 100.0),                # accepted prediction distances
+}
+DIST_LABEL = {3.0: "3k", 5.0: "5k", 10.0: "10k", 21.0975: "Half", 42.195: "Marathon"}
+
+
+def curve_x(km):
+    return math.log2(km / CURVE["ref_km"])
+
+
+def _mean_x(kms):
+    return float(np.mean([curve_x(k) for k in kms]))
+
+
+def evidence_km(e):
+    """Effective race distance (km) of a running evidence item for the distance curve; None = not on the curve.
+    race: its nominal distance. interval (hard): CURVE interval_km (the session scores are calibrated to 5k races).
+    tempo (hard long): the tempo offset's calibration distance (10k-half mean, ~14.5 km): the +3.0 lifts tempo scores
+    to the 10k/half level, so placing them at the window's own distance would count the slope twice.
+    long bound: the grade-adjusted distance covered in the scored window (= the race distance whose Daniels time is
+    the window at that score's VDOT). The 10k race's duplicate interval/hard item is skipped (counted once, as race)."""
+    c = e.get("components") or {}
+    if e["discipline"] == "interval":
+        if "race" in c:
+            return None if e["kind"] != "race" else {"5k": 5.0}.get(c["race"], 5.0)
+        return CURVE["interval_km"]
+    if e["discipline"] != "long" or e["kind"] == "implausible":
+        return None
+    if "race" in c:
+        return {"5k": 5.0, "10k": 10.0, "half": 21.0975, "marathon": 42.195}[c["race"]]
+    if c.get("hr_based"):
+        return None
+    if e.get("type") == "tempo":       # hard (or demoted to a bound by the HR-intent variant): offset applied
+        if CURVE["tempo_km"] == "window":   # evaluation only: distance at race pace (score VDOT) for the window
+            return float(speed_for(e["score"], c["window_s"]) * c["window_s"] / 1000)
+        if CURVE["tempo_km"]:
+            return float(CURVE["tempo_km"])
+        return CURVE["ref_km"] * 2 ** _mean_x(CURVE["tempo_cal_km"])
+    if c.get("window_s") and c.get("gap_speed"):
+        return float(c["window_s"] * c["gap_speed"] / 1000)
+    return None
+
+
+def smooth_curve(obs, day0, day1, q_theta=None, q_slope=None, slope0=0.0, slope_sd=None, prior_sd=None, iters=5):
+    """2-state (theta, slope) robust Kalman filter + RTS smoother on a daily grid; observation y = theta + x * slope.
+    obs: list of (ordinal day, score, sigma, kind, x). Same robust scheme as `smooth_series` (weights from the online
+    forecast on pass 1, then from the smoothed curve at each item's x). Returns (days, mean (n, 2), cov (n, 2, 2),
+    weights per obs (sorted by day), forecasts [(mean, sd) of the curve at the item's x before it])."""
+    q_t = CURVE["q_theta"] if q_theta is None else q_theta
+    q_s = CURVE["q_slope"] if q_slope is None else q_slope
+    s_sd = CURVE["slope_prior_sd"] if slope_sd is None else slope_sd
+    prior_sd = P["prior_sd"] if prior_sd is None else prior_sd
+    n = day1 - day0 + 1
+    obs = sorted(obs, key=lambda o: o[0])
+    if not obs:
+        return np.arange(day0, day1 + 1), np.full((n, 2), np.nan), np.full((n, 2, 2), np.nan), [], []
+    good = [o[1] - o[4] * slope0 for o in obs if o[3] != "bound"] or [o[1] for o in obs]
+    m0 = float(np.median(good[:5]))
+    byday = collections.defaultdict(list)
+    for j, o in enumerate(obs):
+        byday[o[0] - day0].append(j)
+    w = np.ones(len(obs))
+    fc0 = None
+    for it in range(iters):
+        mf = np.zeros((n, 2)); Pf = np.zeros((n, 3))   # filtered cov as (p11, p12, p22)
+        a, b = m0, slope0
+        p11, p12, p22 = prior_sd ** 2, 0.0, s_sd ** 2
+        fc = [None] * len(obs)
+        for k in range(n):
+            if k:
+                p11 += q_t; p22 += q_s
+            for j in byday.get(k, ()):
+                y, s, kind, x = obs[j][1], obs[j][2], obs[j][3], obs[j][4]
+                pred = a + x * b
+                vx = p11 + 2 * x * p12 + x * x * p22
+                fc[j] = (pred, math.sqrt(vx))
+                if it == 0:
+                    w[j] = _weight(y - pred, math.sqrt(s * s + vx), kind)
+                S = vx + s * s / max(w[j], 1e-6)
+                c1, c2 = p11 + x * p12, p12 + x * p22
+                k1, k2 = c1 / S, c2 / S
+                r = y - pred
+                a, b = a + k1 * r, b + k2 * r
+                p11, p12, p22 = p11 - k1 * c1, p12 - k1 * c2, p22 - k2 * c2
+            mf[k] = (a, b); Pf[k] = (p11, p12, p22)
+        # RTS (identity transition): predicted cov of k+1 = filtered cov of k + Q
+        ms = mf.copy(); Ps = Pf.copy()
+        for k in range(n - 2, -1, -1):
+            f11, f12, f22 = Pf[k]
+            q11, q12, q22 = f11 + q_t, f12, f22 + q_s
+            det = q11 * q22 - q12 * q12
+            i11, i12, i22 = q22 / det, -q12 / det, q11 / det
+            C11 = f11 * i11 + f12 * i12; C12 = f11 * i12 + f12 * i22
+            C21 = f12 * i11 + f22 * i12; C22 = f12 * i12 + f22 * i22
+            d0_, d1_ = ms[k + 1, 0] - mf[k, 0], ms[k + 1, 1] - mf[k, 1]
+            ms[k, 0] = mf[k, 0] + C11 * d0_ + C12 * d1_
+            ms[k, 1] = mf[k, 1] + C21 * d0_ + C22 * d1_
+            e11, e12, e22 = Ps[k + 1, 0] - q11, Ps[k + 1, 1] - q12, Ps[k + 1, 2] - q22
+            # C E Cᵀ
+            t11 = C11 * e11 + C12 * e12; t12 = C11 * e12 + C12 * e22
+            t21 = C21 * e11 + C22 * e12; t22 = C21 * e12 + C22 * e22
+            Ps[k] = (f11 + t11 * C11 + t12 * C12, f12 + t11 * C21 + t12 * C22, f22 + t21 * C21 + t22 * C22)
+        if it == 0:
+            fc0 = fc
+        neww = np.array([_weight(o[1] - (ms[o[0] - day0, 0] + o[4] * ms[o[0] - day0, 1]), o[2], o[3]) for o in obs])
+        if it and np.allclose(neww, w):
+            break
+        w = neww
+    cov = np.stack([np.stack([Ps[:, 0], Ps[:, 1]], 1), np.stack([Ps[:, 1], Ps[:, 2]], 1)], 1)
+    return np.arange(day0, day1 + 1), ms, cov, w.tolist(), fc0
+
+
+def curve_at(mean, cov, x):
+    """Curve value and state sd at x (arrays over days or one day)."""
+    mean = np.asarray(mean, float); cov = np.asarray(cov, float)
+    m = mean[..., 0] + x * mean[..., 1]
+    v = cov[..., 0, 0] + 2 * x * cov[..., 0, 1] + x * x * cov[..., 1, 1]
+    return m, np.sqrt(np.maximum(v, 0))
+
+
+def curve_predict(theta, slope, var_theta, var_slope, cov, km, evidence_km=None, race_sd=None, extrap_sd=None):
+    """Race prediction at `km` from one day's curve state: {km, x, vdot, sd_state, sd (state ⊕ race-day noise ⊕
+    extrapolation), doublings_outside, extrapolated}. Outside the evidenced range [min, max] km the sd grows by
+    `extrap_sd` per doubling. Beyond the longest evidence a positive slope stops (VDOT held, e.g. marathon =
+    half VDOT): carrying it further would predict a marathon VDOT above the half. A negative slope keeps applying."""
+    race_sd = CURVE["race_sd"] if race_sd is None else race_sd
+    extrap_sd = CURVE["extrap_sd_per_doubling"] if extrap_sd is None else extrap_sd
+    x = curve_x(km)
+    xm = x                                   # x the mean is read at
+    out = 0.0
+    if evidence_km:
+        lo, hi = curve_x(evidence_km[0]), curve_x(evidence_km[1])
+        out = max(lo - x, x - hi, 0.0)
+        if slope > 0:                        # beyond the longest evidence no further gain (a negative slope still applies)
+            xm = min(x, hi)
+    m = theta + xm * slope
+    vs = max(var_theta + 2 * xm * cov + xm * xm * var_slope, 0.0)
+    sd = math.sqrt(vs + race_sd ** 2 + (extrap_sd * out) ** 2)
+    return {"km": km, "x": x, "vdot": m, "sd_state": math.sqrt(vs), "sd": sd,
+            "doublings_outside": out, "extrapolated": out > 0.05}
+
+
+def dist_label(km):
+    for k, nm in DIST_LABEL.items():
+        if abs(km - k) < 1e-3:
+            return nm
+    return f"{km:g} km"
+
+
+def slope_text(slope):
+    a = abs(slope)
+    if a < 0.3:
+        return f"{slope:+.1f} VDOT per doubling of distance: about equally strong at short and long races"
+    side = "longer" if slope > 0 else "shorter"
+    return f"{slope:+.1f} VDOT per doubling of distance: relatively stronger at {side} races"
+
+
+def curve_obs(ev):
+    """(items, obs) of the running evidence that feeds the distance curve; obs = (day, score, sigma, kind, x)."""
+    items, obs = [], []
+    for e in ev:
+        if e["discipline"] not in ("interval", "long") or e["kind"] == "implausible":
+            continue
+        km = evidence_km(e)
+        if km is None or km <= 0:
+            continue
+        e["km"] = km
+        items.append(e)
+        obs.append((e["day"], e["score"], e["sigma"], e["kind"], curve_x(km)))
+    return items, obs
+
+
 # ------------------------------------------------------------------ pipeline
 def load_features(person, workers=8, progress=True):
     """(activities from groups.json, {id: features}) with a per-FIT cache."""
@@ -669,7 +862,7 @@ def load_features(person, workers=8, progress=True):
     cfile = D / "cache" / "fitness_model.pkl"
     cfile.parent.mkdir(exist_ok=True)
     cache = pickle.loads(cfile.read_bytes()) if cfile.exists() else {}
-    ck = (MODEL_VERSION, sg.READER_VERSION, json.dumps({k: v for k, v in P.items() if k != "hr_intent"}, sort_keys=True, default=str))
+    ck = (FEATURE_VERSION, sg.READER_VERSION, json.dumps({k: v for k, v in P.items() if k != "hr_intent"}, sort_keys=True, default=str))
     if cache.get("_v") != ck:
         cache = {"_v": ck}
     key = lambda p: (p.stat().st_mtime_ns, p.stat().st_size)
@@ -729,32 +922,72 @@ def cross_check(ev, interval_series):
             e["components"]["implausible"] = f"> interval shape {m[k]:.1f} + {lim - m[k]:.1f}"
 
 
+def is_10k_dup(e):
+    """The interval/hard copy of a 10k race (kept by collect_evidence for the per-discipline back-tests; the published
+    model counts a 10k once, as a long race on the distance curve)."""
+    return e["discipline"] == "interval" and e["type"] == "race?" and "race" in e["components"] and e["kind"] != "race"
+
+
 def _model(ev, today):
-    """Smoothed shape per discipline + overall from evidence items (sets weight / shape_at on them)."""
+    """Shape per discipline + overall + the distance-curve predictor from evidence items (sets weight / shape_at /
+    km on them). Running (interval, long) comes from one coupled distance curve (`smooth_curve`): interval = the curve
+    at 5 km (theta), long = the curve at the 10k-half reference. Ski: its own random-walk smoother.
+    Returns (disciplines, predictor block or None)."""
     t1 = today.toordinal()
-    series, best = {}, {}
-    for disc in DISCIPLINES:
-        if disc == "long" and "interval" in series:
-            cross_check(ev, series["interval"])
-        sub = [e for e in ev if e["discipline"] == disc and e["kind"] != "implausible"]
-        if not sub:
-            continue
-        obs = _obs(ev, disc)
+    series, best, curve_sub = {}, {}, None
+    # 1) separate interval smoother: only for the cross-check of long items (implausibly fast for this runner)
+    iobs = _obs(ev, "interval")
+    if iobs:
+        d0 = min(o[0] for o in iobs) - 7
+        days, m, s, _, _ = smooth_series(iobs, d0, t1, P["q_per_day"]["interval"])
+        cross_check(ev, (days, m, s, None))
+    # 2) coupled distance curve on every running item
+    items, cobs = curve_obs(ev)
+    pred_block = None
+    if cobs:
+        d0 = min(o[0] for o in cobs) - 7
+        days, M, C, w, _ = smooth_curve(cobs, d0, t1)
+        for e, wi, o in zip(items, w, sorted(cobs, key=lambda o: o[0])):
+            k = e["day"] - d0
+            e["weight"] = round(float(wi), 3)
+            e["shape_at"] = round(float(M[k, 0] + o[4] * M[k, 1]), 2)   # the curve at the item's own distance
+        x_long = _mean_x(CURVE["long_ref_km"])
+        for disc, x in (("interval", 0.0), ("long", x_long)):
+            m, s = curve_at(M, C, x)
+            sub = [e for e in items if e["discipline"] == disc]
+            series[disc] = (days, m, s, sub)
+            best[disc] = float(m[s <= np.median(s)].max())
+        curve_sub = items
+        pred_block = _predictor_block(days, M, C, items, t1)
+    # 3) ski
+    sub = [e for e in ev if e["discipline"] == "ski" and e["kind"] != "implausible"]
+    if sub:
+        obs = _obs(ev, "ski")
         d0 = min(o[0] for o in obs) - 7
-        days, m, s, w, _ = smooth_series(obs, d0, t1, P["q_per_day"][disc])
+        days, m, s, w, _ = smooth_series(obs, d0, t1, P["q_per_day"]["ski"])
         for e, wi in zip(sorted(sub, key=lambda e: e["day"]), w):
             e["weight"] = round(float(wi), 3)
             e["shape_at"] = round(float(m[e["day"] - d0]), 2)
-        series[disc] = (days, m, s, sub)
-        # personal best: highest smoothed value on well-observed days (sd <= the discipline's median sd)
-        best[disc] = float(m[s <= np.median(s)].max())
-    # overall: precision-weighted mean of % of personal best
+        series["ski"] = (days, m, s, sub)
+        best["ski"] = float(m[s <= np.median(s)].max())
+    if not series:
+        return {}, None
+    # overall: precision-weighted mean of % of personal best over disciplines with independent evidence. Interval
+    # and long are two readings of one curve (same theta), so running enters once: the mean of their % of best,
+    # with the sd of a fully correlated mean.
     start = min(v[0][0] for v in series.values())
     days_all = np.arange(start, t1 + 1)
     num = np.zeros(len(days_all)); den = np.zeros(len(days_all))
-    for disc, (days, m, s, _) in series.items():
+    parts = []
+    if "interval" in series:
+        days = series["interval"][0]
+        pi, si = [100 * series[d][1] / best[d] for d in ("interval", "long")], [100 * series[d][2] / best[d] for d in ("interval", "long")]
+        parts.append((days, (pi[0] + pi[1]) / 2, (si[0] + si[1]) / 2))
+    if "ski" in series:
+        days, m, s, _ = series["ski"]
+        parts.append((days, 100 * m / best["ski"], 100 * s / best["ski"]))
+    for days, pct, psd in parts:
         off = days[0] - start
-        pct = 100 * m / best[disc]; psd = 100 * s / best[disc]
         wgt = 1 / psd**2
         num[off:] += wgt * pct; den[off:] += wgt
     ov_m, ov_s = num / den, 1 / np.sqrt(den)
@@ -776,13 +1009,19 @@ def _model(ev, today):
     def conf(sd):
         return "high" if sd < 1.0 else "medium" if sd < 2.0 else "low"
 
+    def last_ev(sub):
+        return max((e["day"] for e in sub if e["kind"] in ("race", "hard") and (e.get("weight") or 0) > 0.5), default=None)
+
     disc_out = {}
-    for disc, (days, m, s, sub) in series.items():
+    for disc in DISCIPLINES:
+        if disc not in series:
+            continue
+        days, m, s, sub = series[disc]
         cur_m, cur_s = float(m[-1]), float(s[-1])
         eq = {}
-        if disc in ("interval", "long"):
-            for dist, nm in [(5000, "5k"), (10000, "10k"), (21097.5, "half"), (42195, "marathon")]:
-                eq[nm] = round(race_time(cur_m, dist))
+        if disc in ("interval", "long") and pred_block:
+            # race equivalents from the curve at each distance (the same numbers as the race prediction)
+            eq = {nm: pred_block["_now"][nm]["time_s"] for nm in ("5k", "10k", "half", "marathon")}
         yearly = {}
         for y in sorted({dt.date.fromordinal(int(d)).year for d in days}):
             mk = np.array([dt.date.fromordinal(int(d)).year == y for d in days])
@@ -792,68 +1031,114 @@ def _model(ev, today):
                               "sd_median": round(float(np.median(s[mk])), 2), "n_evidence": len(sub_y),
                               "mean_well_observed": round(float(m[obs_mk].mean()), 1) if obs_mk.sum() >= 14 else None,
                               "days_well_observed": int(obs_mk.sum())}
-        # staleness: the latest race / hard evidence that counted (weight > 0.5); the sd already grows by sqrt(q) per
-        # day without evidence (random walk), `stale` tells the UI to grey the value
-        last = max((e["day"] for e in sub if e["kind"] in ("race", "hard") and (e.get("weight") or 0) > 0.5), default=None)
+        # staleness: the latest race / hard evidence that counted (weight > 0.5). For interval / long that is any
+        # item on the distance curve (they share theta); long also reports its own latest item (10k+ race / tempo)
+        last = last_ev(curve_sub if disc in ("interval", "long") else sub)
         dse = int(t1 - last) if last is not None else None
+        cur = {"date": today.isoformat(), "mean": round(cur_m, 2), "sd": round(cur_s, 2),
+               "confidence": conf(cur_s), "pct_of_best": round(100 * cur_m / best[disc], 1),
+               "race_equivalents_s": eq or None,
+               "last_evidence_date": dt.date.fromordinal(last).isoformat() if last is not None else None,
+               "days_since_evidence": dse, "stale": dse is None or dse > STALE_DAYS}
+        if disc == "long":
+            own = last_ev(sub)
+            cur["last_distance_evidence_date"] = dt.date.fromordinal(own).isoformat() if own is not None else None
+            cur["ref_km"] = round(CURVE["ref_km"] * 2 ** _mean_x(CURVE["long_ref_km"]), 2)
         disc_out[disc] = {
             "label": LABEL[disc], "unit": "VDOT" if disc != "ski" else "VDOT-equivalent (ml/kg/min)",
-            "q_per_day": P["q_per_day"][disc], "personal_best": round(best[disc], 2),
-            "current": {"date": today.isoformat(), "mean": round(cur_m, 2), "sd": round(cur_s, 2),
-                        "confidence": conf(cur_s), "pct_of_best": round(100 * cur_m / best[disc], 1),
-                        "race_equivalents_s": eq or None,
-                        "last_evidence_date": dt.date.fromordinal(last).isoformat() if last is not None else None,
-                        "days_since_evidence": dse, "stale": dse is None or dse > STALE_DAYS},
+            "q_per_day": P["q_per_day"][disc] if disc == "ski" else CURVE["q_theta"],
+            "model": "distance_curve" if disc != "ski" else "random_walk",
+            "personal_best": round(best[disc], 2),
+            "current": cur,
             "yearly": yearly,
             "weekly": weekly(days, m, s, sub),
         }
-    pred = race_prediction(disc_out)
+    pred = race_prediction(pred_block)
     disc_out["overall"] = {
         "label": LABEL["overall"], "unit": "% of personal best (precision-weighted over disciplines)",
         "current": {"date": today.isoformat(), "mean": round(float(ov_m[-1]), 1), "sd": round(float(ov_s[-1]), 1),
-                    # the one running race prediction (race_prediction): blended interval + long shape
+                    # the running race prediction from the distance curve (race_prediction)
                     "race_prediction": pred, "race_equivalents_s": pred["race_equivalents_s"] if pred else None},
         "yearly": {str(y): round(float(ov_m[np.array([dt.date.fromordinal(int(d)).year == y for d in days_all])].mean()), 1)
                    for y in sorted({dt.date.fromordinal(int(d)).year for d in days_all})},
         "weekly": weekly(days_all, ov_m, ov_s),
     }
-    return disc_out
+    return disc_out, pred_block
 
 
-def race_prediction(discs):
-    """One running race prediction from the interval and long shapes (each discipline's current mean and sd):
-    precision-weighted mean (w = 1/sd²). Their sd grows without evidence (random walk), so a stale shape (adrian's
-    long: last race 363 days ago, sd 2.8 vs interval 1.0) fades out of the blend by itself instead of giving a second
-    prediction minutes apart. sd = sqrt(1/sum w + weighted spread of the two means): when the shapes disagree the
-    band widens. None without a running shape."""
-    parts = [(d, discs[d]["current"]) for d in ("interval", "long") if d in discs and discs[d]["current"].get("sd")]
-    if not parts:
+PRED_DIST = [(5000, "5k"), (10000, "10k"), (21097.5, "half"), (42195, "marathon")]
+
+
+def _predictor_block(days, M, C, items, t1):
+    """fitness.json `predictor`: daily RTS-smoothed curve state from the first evidence to today + the evidence."""
+    first = min(e["day"] for e in items)
+    k0 = int(first - days[0])
+    strong = [e for e in items if e["kind"] in ("race", "hard") and (e.get("weight") or 0) > 0.5]
+    ekm = [min(e["km"] for e in strong), max(e["km"] for e in strong)] if strong else [CURVE["ref_km"]] * 2
+    daily = [{"date": dt.date.fromordinal(int(days[k])).isoformat(), "theta": round(float(M[k, 0]), 3),
+              "slope": round(float(M[k, 1]), 3), "var_theta": round(float(C[k, 0, 0]), 4),
+              "var_slope": round(float(C[k, 1, 1]), 5), "cov": round(float(C[k, 0, 1]), 5)} for k in range(k0, len(days))]
+    evid = [{"date": e["date"], "id": int(e["id"]), "km": round(e["km"], 3), "vdot": round(e["score"], 2),
+             "kind": e["kind"], "weight": e.get("weight"), "discipline": e["discipline"], "sigma": e["sigma"]}
+            for e in items if e["kind"] != "bound" or (e.get("weight") or 0) >= 0.05]
+    last = max((e["day"] for e in strong), default=None)
+    t = daily[-1]
+    now = {}
+    for dist, nm in PRED_DIST:
+        p = curve_predict(t["theta"], t["slope"], t["var_theta"], t["var_slope"], t["cov"], dist / 1000, ekm)
+        now[nm] = {**p, "time_s": round(race_time(p["vdot"], dist)),
+                   "range_s": [round(race_time(p["vdot"] + p["sd"], dist)), round(race_time(p["vdot"] - p["sd"], dist))]}
+    return {"ref_km": CURVE["ref_km"], "x": "log2(km/5)", "q": {"theta": CURVE["q_theta"], "slope": CURVE["q_slope"]},
+            "slope_prior_sd": CURVE["slope_prior_sd"], "race_sd": CURVE["race_sd"],
+            "evidence_km": [round(ekm[0], 3), round(ekm[1], 3)],
+            "extrap_sd_per_doubling": CURVE["extrap_sd_per_doubling"],
+            "x_mapping": {"race": "nominal distance", "interval": f"{CURVE['interval_km']:g} km (scores calibrated to 5k races)",
+                          "tempo": f"{CURVE['ref_km'] * 2 ** _mean_x(CURVE['tempo_cal_km']):.2f} km (10k-half mean: the tempo offset's calibration)"
+                          if not CURVE["tempo_km"] else f"{CURVE['tempo_km']}",
+                          "bound": "grade-adjusted distance of the scored window"},
+            "long_ref_km": round(CURVE["ref_km"] * 2 ** _mean_x(CURVE["long_ref_km"]), 3),
+            "last_evidence_date": dt.date.fromordinal(last).isoformat() if last is not None else None,
+            "daily": daily, "evidence": evid, "_now": now}
+
+
+def race_prediction(block):
+    """The running race prediction from the distance curve today (None without running evidence):
+    {vdot (at 10k), sd (state ⊕ race-day noise, at 10k), vdot_by_distance, sd_by_distance, extrapolated (per
+    distance), race_equivalents_s per distance from the curve, range_10k_s [fast, slow] (±1 sd), weights {} (kept for
+    the old schema: the interval / long blend it described is gone), model "distance_curve"}."""
+    if not block:
         return None
-    w = np.array([1 / c["sd"] ** 2 for _, c in parts]); m = np.array([c["mean"] for _, c in parts])
-    W = float(w.sum()); mb = float((w * m).sum() / W)
-    sd = math.sqrt(1 / W + float((w * (m - mb) ** 2).sum()) / W)
-    return {"vdot": round(mb, 2), "sd": round(sd, 2),
-            "weights": {d: round(float(wi / W), 3) for (d, _), wi in zip(parts, w)},
-            "race_equivalents_s": {nm: round(race_time(mb, dist)) for dist, nm in
-                                   [(5000, "5k"), (10000, "10k"), (21097.5, "half"), (42195, "marathon")]},
-            "range_10k_s": [round(race_time(mb + sd, 10000)), round(race_time(mb - sd, 10000))]}
+    now = block["_now"]
+    t = block["daily"][-1]
+    p10 = now["10k"]
+    return {"vdot": round(p10["vdot"], 2), "sd": round(p10["sd"], 2), "weights": {}, "model": "distance_curve",
+            "theta": t["theta"], "slope": t["slope"],
+            "vdot_by_distance": {nm: round(p["vdot"], 2) for nm, p in now.items()},
+            "sd_by_distance": {nm: round(p["sd"], 2) for nm, p in now.items()},
+            "extrapolated": {nm: p["extrapolated"] for nm, p in now.items()},
+            "race_equivalents_s": {nm: p["time_s"] for nm, p in now.items()},
+            "ranges_s": {nm: p["range_s"] for nm, p in now.items()},
+            "range_10k_s": p10["range_s"]}
 
 
 def build(person, workers=8, today=None, progress=True):
     """The whole fitness doc (what fitness.json holds): variant "pace" in `disciplines` / `sessions`, variant "hr"
     in `variants.hr` and `sessions[].hr`."""
     acts, feats, rest = load_features(person, workers, progress)
-    ev = collect_evidence(acts, feats)
+    ev = [e for e in collect_evidence(acts, feats) if not is_10k_dup(e)]   # a 10k counts once (long race)
     ev_hr = apply_hr_intent(ev)          # copies, before cross_check marks the pace list
     today = today or dt.date.today()
-    disc_out = _model(ev, today)
-    disc_hr = _model(ev_hr, today)
+    disc_out, predictor = _model(ev, today)
+    disc_hr, _ = _model(ev_hr, today)
+    if predictor:
+        predictor.pop("_now", None)
     hr_by = {(e["id"], e["discipline"]): e for e in ev_hr}
     sessions = []
     for e in ev:
         sessions.append({"id": int(e["id"]), "date": e["date"], "discipline": e["discipline"], "type": e["type"],
                          "score": round(e["score"], 2), "kind": e["kind"], "sigma": e["sigma"],
                          "weight": e.get("weight"), "shape_at": e.get("shape_at"),
+                         **({"km": round(e["km"], 3)} if e.get("km") else {}),
                          "confidence": round(float(e.get("weight") or 0) * (SIG["race"] / e["sigma"]) ** 2, 3),
                          "components": _clean(e["components"])})
         h = hr_by.get((e["id"], e["discipline"]))
@@ -868,10 +1153,11 @@ def build(person, workers=8, today=None, progress=True):
         if ha.get("ef") or ha.get("vdot"):
             hr_diag[i] = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in ha.items()}
     return {"built": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), "model_version": MODEL_VERSION,
-            "params": P, "sigma": SIG, "scale": "Daniels VDOT; race_time(vdot, dist) gives equivalent race times",
+            "params": P, "curve": CURVE, "sigma": SIG, "scale": "Daniels VDOT; race_time(vdot, dist) gives equivalent race times",
             "hr_used_in_score": False, "disciplines": disc_out,
             "variants": {"pace": {"label": VARIANTS["pace"], "hr_used_in_score": False},
-                         "hr": {"label": VARIANTS["hr"], "hr_used_in_score": True, "disciplines": disc_hr}}, "sessions": sessions, "hr_diagnostics": hr_diag}
+                         "hr": {"label": VARIANTS["hr"], "hr_used_in_score": True, "disciplines": disc_hr}},
+            "predictor": predictor, "sessions": sessions, "hr_diagnostics": hr_diag}
 
 
 def _clean(d):

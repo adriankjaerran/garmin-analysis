@@ -59,14 +59,18 @@ def test_multisport_family():
     assert sg.multisport_family([]) is None and sg.multisport_family(None) is None
 
 
-def test_race_prediction_fades_a_stale_shape():
+def test_race_prediction_from_the_curve():
     import fitness_model as fm
-    cur = lambda m, s: {"current": {"mean": m, "sd": s}}
-    p = fm.race_prediction({"interval": cur(53.0, 1.0), "long": cur(58.4, 2.8)})
-    assert p["weights"]["interval"] > 0.85 and 53.0 < p["vdot"] < 54.0
-    assert p["sd"] > 1.0                                  # the two shapes disagree: the band widens
+    blk = fm._predictor_block(np.arange(10, 13), np.array([[50.0, 1.0]] * 3), np.array([[[1.0, 0.0], [0.0, 0.25]]] * 3),
+                              [{"day": 10, "date": "2000-01-01", "id": 1, "km": 5.0, "score": 50.0, "kind": "race", "weight": 1.0,
+                                "discipline": "interval", "sigma": 1.0},
+                               {"day": 11, "date": "2000-01-02", "id": 2, "km": 10.0, "score": 51.0, "kind": "race", "weight": 1.0,
+                                "discipline": "long", "sigma": 1.0}], 12)
+    p = fm.race_prediction(blk)
+    assert p["vdot"] == 51.0 and p["vdot_by_distance"]["5k"] == 50.0      # 10k = theta + 1 doubling * slope
     assert p["range_10k_s"][0] < p["race_equivalents_s"]["10k"] < p["range_10k_s"][1]
-    assert fm.race_prediction({"ski": cur(55, 1)}) is None
+    assert p["extrapolated"] == {"5k": False, "10k": False, "half": True, "marathon": True}
+    assert fm.race_prediction(None) is None
 
 
 def test_merged_rep_stops_at_the_recovery():
@@ -126,4 +130,6 @@ def test_shape_staleness_and_prediction(client):
     assert {"days_since_evidence", "stale", "last_evidence_date"} <= set(c)
     o = d["disciplines"]["overall"]["current"]
     p = o["race_prediction"]
-    assert p and abs(sum(p["weights"].values()) - 1) < 0.01 and o["race_equivalents_s"] == p["race_equivalents_s"]
+    assert p and p["model"] == "distance_curve" and o["race_equivalents_s"] == p["race_equivalents_s"]
+    # long's own race equivalents are the curve's (one prediction per distance)
+    assert c["race_equivalents_s"] == p["race_equivalents_s"] and c["ref_km"] > 10

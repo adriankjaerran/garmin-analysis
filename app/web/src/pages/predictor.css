@@ -1,0 +1,21 @@
+/* Race predictor page (pages/RacePredictorPage.tsx, components/PredictorChart.tsx) */
+:root {
+  --pred-5k: #7b3fc4;     /* violet */
+  --pred-10k: #e0761b;    /* orange */
+  --pred-half: #2f7f8f;   /* teal */
+}
+:root[data-theme="dark"] {
+  --pred-5k: #a77ae6;
+  --pred-10k: #f0924a;
+  --pred-half: #5fb3c2;
+}
+.pred-pick { margin-top: var(--space-3); }
+.pred-pick h2 { font-variant-numeric: tabular-nums; }
+/* legend markers: race = diamond (ink), hard session = dot (muted) */
+.pred-mk { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); margin-right: 5px; vertical-align: middle; }
+.pred-mk.race { border-radius: 0; background: var(--text); transform: rotate(45deg); }
+.pred-km { width: 72px; }
+.pred-km.bad { border-color: var(--state-duplicate); }
+.pred-err { padding-top: 0; }
+.pred-x { font-size: var(--fs-12); }
+.pred-basis { margin: var(--space-3) 0 0; max-width: 900px; line-height: 1.5; }

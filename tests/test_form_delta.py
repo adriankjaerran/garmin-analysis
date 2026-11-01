@@ -29,13 +29,22 @@ def test_obs_from_fitness_json_reproduce_the_model():
     """Rebuilding the evidence from fitness.json and smoothing it gives the stored shape_at (so the LOO refit is the
     same model minus one session)."""
     doc = json.loads(FA.read_text())
-    rows = sorted([s for s in doc["sessions"] if s["discipline"] == "interval" and s["kind"] != "implausible"],
+    # ski: its own random walk
+    rows = sorted([s for s in doc["sessions"] if s["discipline"] == "ski" and s["kind"] != "implausible"],
                   key=lambda s: s["date"])
     days = [dt.date.fromisoformat(s["date"]).toordinal() for s in rows]
     obs = [(d, s["score"], s["sigma"], s["kind"]) for d, s in zip(days, rows)]
     d0 = min(days) - 7
-    _, m, _, _, _ = fm.smooth_series(obs, d0, max(days), doc["params"]["q_per_day"]["interval"])
+    _, m, _, _, _ = fm.smooth_series(obs, d0, max(days), doc["params"]["q_per_day"]["ski"])
     err = [abs(m[d - d0] - s["shape_at"]) for d, s in zip(days, rows)]
+    assert max(err) < 0.1
+    # running: the distance curve, each item read at its own distance
+    rows = sorted([s for s in doc["sessions"] if s.get("km")], key=lambda s: s["date"])
+    days = [dt.date.fromisoformat(s["date"]).toordinal() for s in rows]
+    obs = [(d, s["score"], s["sigma"], s["kind"], fm.curve_x(s["km"])) for d, s in zip(days, rows)]
+    d0 = min(days) - 7
+    _, M, _, _, _ = fm.smooth_curve(obs, d0, max(days))
+    err = [abs(M[d - d0, 0] + o[4] * M[d - d0, 1] - s["shape_at"]) for d, s, o in zip(days, rows, obs)]
     assert max(err) < 0.1
 
 
