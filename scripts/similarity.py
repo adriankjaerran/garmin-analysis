@@ -289,8 +289,8 @@ def track_job(fit):
 def load_tracks(D, fits, workers=8):
     cfile = D / "cache" / "similarity_tracks.pkl"
     cache = pickle.loads(cfile.read_bytes()) if cfile.exists() else {}
-    if cache.get("_v") != TRACK_CACHE_VERSION:
-        cache = {"_v": TRACK_CACHE_VERSION}
+    if cache.get("_v") != (TRACK_CACHE_VERSION, sg.READER_VERSION):
+        cache = {"_v": (TRACK_CACHE_VERSION, sg.READER_VERSION)}
     key = lambda p: (p.stat().st_mtime_ns, p.stat().st_size)
     todo = [str(p) for p in fits.values() if cache.get(str(p), {}).get("key") != key(p)]
     if todo:
@@ -350,15 +350,16 @@ def workout_of(o, sport, ana, dist_km):
         ski_mode = str((ana or {}).get("mode") or "").startswith("ski")
         parts = rep_parts(reps, ski_mode)
         brk = o.get("breaks_s") or []
-        sbrk = [b for b in (ana or {}).get("breaks", [])] if ana else []
+        # Bislett indoor: reps come from laps (groups.json), the cached speed-detector breaks don't match them
+        sbrk = [b for b in (ana or {}).get("breaks", [])] if ana and not o.get("indoor_bislett") else []
         P = []
         for g in parts:
-            ts = [reps[j][0] for j in g]; ds = [reps[j][1] for j in g]
+            ts = [reps[j][0] for j in g]; ds = [reps[j][1] for j in g if reps[j][1]]   # None: no rep distance (indoor)
             sp = [reps[j][2] for j in g if reps[j][2]]; hr = [reps[j][3] for j in g if reps[j][3]]
             rests = [brk[j] for j in g[:-1] if j < len(brk) and j + 1 in g]
             stand = [min(1.0, sbrk[j][2] / sbrk[j][0]) for j in g[:-1] if j < len(sbrk) and j + 1 in g and sbrk[j][0] > 0]
             jog = [sbrk[j][1] for j in g[:-1] if j < len(sbrk) and j + 1 in g]
-            P.append({"n": len(g), "dist_m": round(float(np.median(ds))), "time_s": round(float(np.median(ts)), 1),
+            P.append({"n": len(g), "dist_m": round(float(np.median(ds))) if ds else None, "time_s": round(float(np.median(ts)), 1),
                       "speed_ms": round(float(np.median(sp)), 2) if sp else None,
                       "hr": round(float(np.mean(hr))) if hr else None,
                       "rest_s": round(float(np.median(rests))) if rests else None,

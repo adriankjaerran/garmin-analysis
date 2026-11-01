@@ -5,6 +5,8 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { useEffect, useRef } from "preact/hooks";
 import { cssVar } from "../lib/format";
+import { useTheme } from "../lib/theme";
+import { focusColor } from "../lib/compare";
 import { PACE_INCRS, TIME_INCRS, categoryAxis, paceRange, speedRange } from "../lib/chartAxes";
 
 type N = number | null;
@@ -27,6 +29,10 @@ export interface CPanel {
    *  "speed" = robust moving range. Without it, a "speed" panel counts as pace when reversed (dir -1), else as
    *  speed, and a fmt that prints m:ss as time. */
   axis?: "pace" | "speed" | "time" | "num";
+  /** fixed y range (e.g. shared across the small per-rep charts) */
+  yRange?: [number, number] | null;
+  /** y axis width (px) for long tick labels ("2:00 behind"); every panel gets the widest so the x axes line up */
+  axisSize?: number;
 }
 
 interface Props {
@@ -48,6 +54,10 @@ interface Props {
   onPick?: (id: string | null) => void;
   /** label per session for the panel titles */
   names?: Record<string, string>;
+  /** false: no drag zoom (small multiples: a click opens the rep instead) */
+  zoom?: boolean;
+  /** x axis tick space (px) */
+  xSpace?: number;
 }
 
 function range(vals: N[][], pad = 0.05): [number, number] {
@@ -60,12 +70,13 @@ function range(vals: N[][], pad = 0.05): [number, number] {
   return [lo - d * pad, hi + d * pad];
 }
 
-export function CompareCharts({ X, panels, order, colors, refId, focus, many, spans = [], ticks, xFmt, xIncrs, onCursor, onPick, names = {} }: Props) {
+export function CompareCharts({ X, panels, order, colors, refId, focus, many, spans = [], ticks, xFmt, xIncrs, onCursor, onPick, names = {}, zoom = true, xSpace = 70 }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const plots = useRef<uPlot[]>([]);
   const titleFns = useRef<((i: number | null) => void)[]>([]);
   const st = useRef({ focus, colors, onCursor, onPick, names });
   st.current = { focus, colors, onCursor, onPick, names };
+  const theme = useTheme();
 
   useEffect(() => {
     const root = box.current!;
@@ -77,6 +88,7 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
     const titles: ((i: number | null) => void)[] = [];
     const vals: HTMLElement[] = [];
     const muted = cssVar("--text-muted"), hair = cssVar("--hairline"), font = `12px ${cssVar("--font")}`;
+    const ySize = Math.max(58, ...panels.map((p) => p.axisSize ?? 0));
 
     panels.forEach((P, pi) => {
       const ids = P.single ? ["_single"] : order.filter((id) => P.ys[id]);
@@ -96,7 +108,7 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
       // pace / speed: robust range of the moving samples (stops, walks and dropouts would stretch it to 15:00 / 0)
       const mv = P.rangeMask ? { moveFrac: 0.5, hi: 0.98 } : {};
       const [lo, hi] = (kind === "pace" && paceRange(masked.flat(), mv)) || (kind === "speed" && speedRange(masked.flat(), mv)) || range(masked);
-      const yr: [number, number] = P.zero ? [Math.min(lo, 0), Math.max(hi, 0)] : [lo, hi];
+      const yr: [number, number] = P.yRange ? P.yRange : P.zero ? [Math.min(lo, 0), Math.max(hi, 0)] : [lo, hi];
       const isLast = pi === panels.length - 1;
       const setTitle = (i: number | null) => {
         if (i === null) { vals[pi].textContent = ""; return; }
@@ -107,12 +119,13 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
       titles.push(setTitle);
       const series: uPlot.Series[] = [{}];
       ids.forEach((id) => series.push({
-        stroke: P.single ? cssVar("--chart-3") : () => st.current.colors[id] ?? "#888",
-        width: P.single ? 1.5 : id === refId ? 2 : many ? 1 : 1.4,
+        stroke: P.single ? cssVar("--text-muted") : () => st.current.colors[id] ?? "#888",
+        // the reference: neutral colour, clearly thicker than the others
+        width: P.single ? 1.5 : id === refId ? 2.6 : many ? 1 : 1.4,
         alpha: !P.single && many && id !== refId ? 0.75 : 1,
         points: { show: false }, spanGaps: false,
       } as uPlot.Series));
-      if (P.median) series.push({ stroke: REF_MED, width: 1.5, dash: [5, 4], points: { show: false }, spanGaps: false });
+      if (P.median) series.push({ stroke: cssVar("--text"), width: 1.5, dash: [5, 4], points: { show: false }, spanGaps: false });
       const u = new uPlot({
         // non-last panels get 7 px below the plot so a y tick label at the bottom edge isn't cut in half
         width, height: P.height + (isLast ? 22 : 7),
@@ -120,17 +133,17 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
         legend: { show: false },
         cursor: {
           sync: { key: sync.key, setSeries: false },
-          drag: { x: true, y: false, setScale: true },
+          drag: { x: zoom, y: false, setScale: zoom },
           points: { show: false },
           y: false,
         },
         scales: { x: { time: false }, y: { range: () => yr, dir: P.dir ?? 1 } },
         axes: [
           {
-            show: isLast, stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, font, size: 22, space: 70,
+            show: isLast, stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, font, size: 22, space: xSpace,
             ...(ticks ? categoryAxis(ticks) : { values: (_u: uPlot, ts: number[]) => ts.map(xFmt), ...(xIncrs ? { incrs: xIncrs } : {}) }),
           },
-          { stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, values: (_u, ts) => ts.map((v) => P.fmt(v)), font, size: 58, space: 28,
+          { stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, values: (_u, ts) => ts.map((v) => P.fmt(v)), font, size: ySize, space: 28,
             ...(kind === "pace" ? { incrs: PACE_INCRS } : kind === "time" ? { incrs: TIME_INCRS } : {}) },
         ],
         series,
@@ -183,7 +196,7 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
             ctx.save();
             ctx.beginPath();
             ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height); ctx.clip();
-            ctx.setLineDash([]); ctx.strokeStyle = "#fff"; ctx.lineWidth = 5 * devicePixelRatio; ctx.lineJoin = "round";
+            ctx.setLineDash([]); ctx.strokeStyle = cssVar("--surface"); ctx.lineWidth = 5 * devicePixelRatio; ctx.lineJoin = "round";
             const path = () => {
               ctx.beginPath();
               let pen = false;
@@ -197,7 +210,7 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
             };
             path(); ctx.globalAlpha = 0.8; ctx.stroke();
             ctx.globalAlpha = 1;
-            ctx.strokeStyle = many && f !== refId ? FOCUS_RED : st.current.colors[f]; ctx.lineWidth = 2.4 * devicePixelRatio;
+            ctx.strokeStyle = many && f !== refId ? focusColor(theme) : st.current.colors[f]; ctx.lineWidth = 2.4 * devicePixelRatio;
             path(); ctx.stroke();
             ctx.restore();
           }],
@@ -225,7 +238,7 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
       });
       u.over.addEventListener("mouseleave", () => st.current.onPick?.(null));
       // double click resets a drag zoom on all charts
-      u.over.addEventListener("dblclick", () => list.forEach((p) => p.setScale("x", { min: X[0], max: X[X.length - 1] })));
+      if (zoom) u.over.addEventListener("dblclick", () => list.forEach((p) => p.setScale("x", { min: X[0], max: X[X.length - 1] })));
       list.push(u);
     });
     plots.current = list;
@@ -236,7 +249,7 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
     });
     ro.observe(root);
     return () => { ro.disconnect(); list.forEach((u) => u.destroy()); plots.current = []; };
-  }, [X, panels, order.join(","), spans, ticks]);
+  }, [X, panels, order.join(","), spans, ticks, theme]);
 
   // focus / colours change: redraw only
   useEffect(() => {
@@ -247,6 +260,3 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
 
   return <div class="charts cmp-charts" ref={box} />;
 }
-
-const REF_MED = "#1d2125";
-const FOCUS_RED = "#c43c3c";

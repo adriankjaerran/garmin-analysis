@@ -1,11 +1,41 @@
 // Tiny history router: path + query are the state; every view is URL-addressable.
+// URLs are /<person>/<path>: `Loc.path` is the person-less path (what ROUTES match) and `Loc.person` the prefix.
+// App code keeps writing person-less paths ("/activities/123"); navigate(), <a href> (via a preact vnode hook in
+// main.tsx) and API calls (lib/api.ts) add the current person.
 import { useEffect, useState } from "preact/hooks";
 
-type Loc = { path: string; query: URLSearchParams };
-const read = (): Loc => ({ path: location.pathname.replace(/\/+$/, "") || "/", query: new URLSearchParams(location.search) });
+type Loc = { path: string; query: URLSearchParams; person: string | null };
+let PEOPLE: string[] = [];
+let DEFAULT = "";
+export function setPeople(people: string[], def: string) { PEOPLE = people; DEFAULT = def; }
+export const people = () => PEOPLE;
+export const defaultPerson = () => DEFAULT;
+
+/** split "/patrik/activities/1" into ["patrik", "/activities/1"]; person is null if the first segment isn't one */
+export function splitPerson(pathname: string): [string | null, string] {
+  const m = /^\/([^/]+)(\/.*)?$/.exec(pathname);
+  if (m && PEOPLE.includes(decodeURIComponent(m[1]))) return [decodeURIComponent(m[1]), m[2] || "/"];
+  return [null, pathname];
+}
+/** person in the current URL (or the default while redirecting an unprefixed URL) */
+export const currentPerson = () => splitPerson(location.pathname)[0] ?? DEFAULT;
+
+/** "/activities?x" -> "/<person>/activities?x" (unchanged if already prefixed, not app-absolute, or /api) */
+export function withPerson(url: string, person = currentPerson()): string {
+  if (!url.startsWith("/") || url.startsWith("//") || url === "/api" || url.startsWith("/api/") || url.startsWith("/assets/")) return url;
+  const i = url.search(/[?#]/), path = i < 0 ? url : url.slice(0, i), rest = i < 0 ? "" : url.slice(i);
+  if (splitPerson(path)[0]) return url;
+  return "/" + encodeURIComponent(person) + (path === "/" ? "" : path) + rest;
+}
+
+const read = (): Loc => {
+  const [person, path] = splitPerson(location.pathname);
+  return { path: path.replace(/\/+$/, "") || "/", query: new URLSearchParams(location.search), person };
+};
 const EVT = "app:navigate";
 
 export function navigate(url: string, replace = false) {
+  url = withPerson(url);
   if (url === location.pathname + location.search) return;
   history[replace ? "replaceState" : "pushState"](null, "", url);
   window.dispatchEvent(new Event(EVT));
@@ -28,7 +58,7 @@ export function useLocation(): Loc {
     const on = () => set(read());
     window.addEventListener("popstate", on);
     window.addEventListener(EVT, on);
-    set((o) => (o.path === read().path && o.query.toString() === read().query.toString() ? o : read()));   // a child may have navigated before this effect subscribed (child effects run first, e.g. a redirect)
+    set((o) => { const n = read(); return o.path === n.path && o.person === n.person && o.query.toString() === n.query.toString() ? o : n; });   // a child may have navigated before this effect subscribed (child effects run first, e.g. a redirect)
     return () => { window.removeEventListener("popstate", on); window.removeEventListener(EVT, on); };
   }, []);
   return loc;

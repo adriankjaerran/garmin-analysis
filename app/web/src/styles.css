@@ -38,6 +38,31 @@
   --shadow-float: 0 8px 28px rgba(20, 24, 28, 0.14), 0 1px 3px rgba(20, 24, 28, 0.08);
 }
 @media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }
+/* dark theme: <html data-theme="dark"> is set by lib/theme.ts (OS preference or the sidebar toggle).
+   Basemap tiles stay light, so map layer colours (track lines, casings) are not themed. */
+:root { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #17191c;
+  --surface-tint: #1e2125;
+  --surface-hover: #262a2f;
+  --hairline: #33383e;
+  --text: #e3e6ea;
+  --text-muted: #9aa3ad;
+  --accent: #7ea2f0;
+  --accent-surface: #1f2a44;
+  --state-good: #5cbf7a;
+  --state-version: #d9ae2a;
+  --state-duplicate: #ec6d6d;
+  --state-failed: #8a9199;
+  --chart-1: #6f96ee;
+  --chart-2: #ec6d6d;
+  --chart-3: #5cbf7a;
+  --chart-4: #d9ae2a;
+  --chart-muted: #4a5058;
+  /* --sport-* are not overridden: they also colour track lines on the (always light) basemaps */
+  --shadow-float: 0 8px 28px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body { font-family: var(--font); font-size: var(--fs-13); color: var(--text); background: var(--surface); }
@@ -48,7 +73,21 @@ a:hover { text-decoration: underline; }
 
 /* sidebar */
 nav.side { width: var(--sidebar); flex: none; background: var(--surface-tint); border-right: 1px solid var(--hairline); padding: var(--space-4) 0; overflow-y: auto; display: flex; flex-direction: column; }
-nav.side .who { font-size: var(--fs-15); font-weight: var(--fw-semibold); padding: 0 var(--space-4) var(--space-4); }
+nav.side { border-top: 3px solid var(--person, transparent); }   /* person colour: whose data this is */
+nav.side .who { font-size: var(--fs-15); font-weight: var(--fw-semibold); padding: 0 var(--space-4) var(--space-4); display: flex; align-items: center; gap: 8px; }
+.avatar { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; flex: none;
+  color: #fff; font-size: 12px; font-weight: var(--fw-semibold); line-height: 1; }
+
+nav.side .who-list .who-hint { font-size: var(--fs-12); color: var(--text-muted); padding: 4px var(--space-3) 6px; font-weight: var(--fw-regular, 400); }
+nav.side .who.menu { position: relative; padding-left: calc(var(--space-4) - 6px); }
+nav.side .who-btn { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-control); padding: 3px 8px 3px 4px; height: auto; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+nav.side .who-btn:hover, nav.side .who-btn[aria-expanded="true"] { background: var(--surface-hover); }
+nav.side .who-btn .caret { font-size: var(--fs-12); color: var(--text-muted); }
+nav.side .who-list { position: absolute; z-index: 50; top: calc(100% - var(--space-4) + 4px); left: calc(var(--space-4) - 6px); min-width: 150px; max-width: 220px; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-float); box-shadow: var(--shadow-float); padding: 4px; display: flex; flex-direction: column; }
+nav.side .who-list a { display: flex; align-items: center; gap: 8px; padding: 5px var(--space-3); border-radius: var(--radius-control); color: var(--text); font-size: var(--fs-13); font-weight: var(--fw-regular, 400); text-decoration: none; }
+nav.side .who-list a:hover { background: var(--surface-hover); }
+nav.side .who-list a.on { font-weight: var(--fw-semibold); }
+nav.side .who-list a.on::after { content: "✓"; margin-left: auto; color: var(--text-muted); padding-left: var(--space-3); }
 nav.side .step { display: block; padding: 6px var(--space-4); color: var(--text); font-weight: var(--fw-semibold); }
 nav.side .tab { display: block; padding: 4px var(--space-4) 4px var(--space-5); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 nav.side .tab .soon { color: var(--text-muted); font-size: var(--fs-12); margin-left: var(--space-1); opacity: 0.7; }
@@ -56,6 +95,10 @@ nav.side .tab.sub { padding-left: calc(var(--space-5) + var(--space-3)); font-si
 nav.side a:hover { background: var(--surface-hover); text-decoration: none; }
 nav.side a.current { color: var(--accent); background: var(--accent-surface); }
 nav.side .built { margin-top: auto; padding: var(--space-4); color: var(--text-muted); font-size: var(--fs-12); line-height: 1.5; }
+nav.side .foot { margin-top: auto; }
+nav.side .foot .built { margin-top: 0; }
+nav.side .theme { padding: 0 var(--space-4) var(--space-4); }
+nav.side .theme .seg button { height: 22px; font-size: var(--fs-12); padding: 0 var(--space-2); }
 
 /* main */
 main { flex: 1; min-width: 0; overflow: auto; padding: var(--space-4) var(--space-5) var(--space-6); }
@@ -67,6 +110,17 @@ section.first { border-top: 0; margin-top: 0; padding-top: 0; }
 .head { display: flex; align-items: center; gap: var(--space-3); min-height: var(--control); margin-bottom: var(--space-2); flex-wrap: wrap; }
 .head .count, .head .sub { color: var(--text-muted); }
 .head .tools { margin-left: auto; display: flex; gap: var(--space-2); align-items: center; }
+/* PageHeader (components/PageHeader.tsx): title row + one-line "what is this page" + `?` tips */
+.pagehead { margin-bottom: var(--space-3); }
+.pagehead > .head { margin-bottom: 0; }
+.pagehead .about { margin: 2px 0 0; color: var(--text-muted); font-size: var(--fs-13); max-width: 90ch; }
+.pagehead .help { position: relative; }
+.pagehead .help-btn { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--hairline); background: var(--surface); color: var(--text-muted); font: inherit; font-size: var(--fs-12); line-height: 1; cursor: pointer; padding: 0; }
+.pagehead .help-btn:hover, .pagehead .help-btn[aria-expanded="true"] { color: var(--text); background: var(--surface-hover); }
+.pagehead .help-pop { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: min(360px, 80vw); background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-float); box-shadow: var(--shadow-float); padding: var(--space-3); font-size: var(--fs-13); }
+.pagehead .help-pop .help-about { margin: 0 0 var(--space-2); }
+.pagehead .help-pop ul { margin: 0; padding-left: 1.2em; color: var(--text-muted); }
+.pagehead .help-pop li + li { margin-top: 4px; }
 .toolbar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--hairline); flex-wrap: wrap; min-height: 45px; }
 .toolbar h1 { margin-right: var(--space-3); }
 .toolbar .count { color: var(--text-muted); }
@@ -136,6 +190,8 @@ dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow
 .maplibregl-ctrl-attrib { font-size: 11px; }
 .maplibregl-popup-content { font-family: var(--font); font-size: var(--fs-12); padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); box-shadow: var(--shadow-float); }
 .maplibregl-popup-tip { display: none; }
+.maplibregl-popup-content { background: var(--surface); color: var(--text); }
+:root[data-theme="dark"] .maplibregl-popup-close-button { color: var(--text); }
 .ramp { display: flex; align-items: center; gap: var(--space-2); font-variant-numeric: tabular-nums; }
 .ramp i { display: inline-block; width: 120px; height: 6px; border-radius: 3px; }
 
@@ -168,10 +224,29 @@ dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow
   .cols { grid-template-columns: 1fr !important; }
   .app { flex-direction: column; height: auto; min-height: 100vh; }
   nav.side { width: auto; flex-direction: row; flex-wrap: wrap; padding: var(--space-2); border-right: 0; border-bottom: 1px solid var(--hairline); }
-  nav.side .who, nav.side .built, nav.side .step { display: none; }
+  nav.side .who:not(.menu), nav.side .built, nav.side .step:not(.home) { display: none; }
+  nav.side .who.menu { padding: 0; }
+  nav.side .step.home { margin: 0; padding: 4px var(--space-2); font-weight: var(--fw-semibold); }
+  nav.side .foot { margin-top: 0; display: flex; align-items: center; }
+  nav.side .theme { padding: 0 var(--space-2); }
+  /* every table scrolls sideways inside its box; maps take the full width; button groups wrap */
+  .tablewrap { max-width: 100%; }
+  .map { max-width: 100%; }
+  .head .tools { margin-left: 0; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .head > * { min-width: 0; max-width: 100%; }
+  .split > .right { width: auto !important; min-width: 0 !important; }   /* pages set a desktop width inline */
+  .cal { overflow-x: auto; }
+  .cols > * { min-width: 0; }
+  .pagehead .about { font-size: var(--fs-12); }
+  nav.side .who-list { top: 100%; left: 0; }
   nav.side .tab { padding: 4px var(--space-2); }
   main { padding: var(--space-3); }
-  main.full { height: calc(100vh - 80px); }
+  /* full-height pages (Activities, Map, Places) stack: map ≥ half a screen, lists scroll inside 60 vh */
+  main.full { height: auto; min-height: calc(100vh - 90px); overflow: visible; }
+  main.full > .map, main.full > .map.fill { min-height: 70vh; }
+  .split > .left { min-height: 50vh; }
+  .split > .left .tablewrap, .split > .right .tablewrap { max-height: 60vh !important; }   /* beats the inline 100 % */
+  .places-legend { font-size: 11px; max-width: calc(100% - 16px); }
   .split { flex-direction: column; }
   .split > .right { width: auto; border-left: 0; border-top: 1px solid var(--hairline); }
   dl.kv { grid-template-columns: max-content 1fr; }
@@ -193,7 +268,7 @@ td .why .more { color: var(--text-faint, var(--text-muted)); }
 .cbars i { display: inline-block; height: 8px; background: var(--surface-hover); border-radius: 2px; overflow: hidden; }
 .cbars b { display: block; height: 100%; background: var(--accent); }
 /* place name labels on the Places map (HTML markers: the raster style has no glyphs) */
-.place-label { font-size: var(--fs-12); color: var(--text); background: rgba(255, 255, 255, 0.85); padding: 0 4px; border-radius: 3px;
+.place-label { font-size: var(--fs-12); color: #1d2125; background: rgba(255, 255, 255, 0.85); padding: 0 4px; border-radius: 3px;
   white-space: nowrap; pointer-events: none; box-shadow: 0 0 0 1px rgba(20, 24, 28, 0.08); }
 
 /* Activities page (ActivitiesPage.tsx): simple filters always visible, Advanced panel (.fbar) below when open */
@@ -208,3 +283,36 @@ button.link:hover { background: none; text-decoration: underline; }
 h2.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 nav.side .step.home { margin-bottom: var(--space-2); }
 nav.side span.step { color: var(--text-muted); font-size: var(--fs-12); text-transform: none; padding-top: var(--space-3); }
+:root[data-theme="dark"] .u-select { background: rgba(255, 255, 255, 0.08); }
+nav.side .tab .badge { display: inline-block; margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center;
+  background: var(--accent-surface); color: var(--accent); font-variant-numeric: tabular-nums; }
+nav.side a.current .badge { background: var(--surface); }
+/* Together links from activities (ActivityPage header, activity tables) */
+.tg-link { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 var(--space-2); border-radius: 12px; font-size: var(--fs-12);
+  background: var(--accent-surface); color: var(--accent); white-space: nowrap; }
+.tg-link:hover { text-decoration: none; filter: brightness(0.97); }
+/* 👥 marker (ActivityBits.TogetherMark): a link to the Together session, in front of the workout name */
+.tg-mark { margin-right: 4px; font-size: 11px; text-decoration: none; border-radius: 3px; }
+.tg-mark:hover { text-decoration: none; background: var(--accent-surface); }
+
+/* narrow phones: segmented button groups scroll sideways instead of overflowing the page */
+@media (max-width: 500px) {
+  .seg { max-width: 100%; overflow-x: auto; }
+  .seg button { flex: none; }
+  .act-top .map { height: 300px; }
+}
+/* PageHeader inside a full-height page's top bar (Activities, Map, Places): title row + the one-liner under it */
+.toolbar.pagehead { display: block; margin-bottom: 0; }
+.toolbar.pagehead > .head { min-height: var(--control); gap: var(--space-2) var(--space-3); }
+.toolbar.pagehead .about { margin: 0 0 2px; font-size: var(--fs-12); }
+/* friendly empty / error states: padded, plain words, the way out right there */
+.empty-state { padding: var(--space-5) var(--space-4); color: var(--text); }
+.empty-state p { margin: 0 0 var(--space-2); }
+.empty-state button, .empty-state .btn { margin-top: var(--space-1); }
+/* Day page: the day's Together sessions under the title */
+.day-together { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: 0 0 var(--space-3); }
+.places-legend { display: flex; gap: 4px var(--space-2); flex-wrap: wrap; align-items: center; max-width: calc(100% - 140px); }
+.places-legend .dot { margin-right: 3px; }
+/* Closest activities: component bars + ⓘ, the reasons in the tooltip (no clipped "Why" text column) */
+.why-cell { display: inline-flex; align-items: center; gap: 6px; cursor: help; }
+.why-i { color: var(--text-muted); font-size: var(--fs-12); }

@@ -47,6 +47,14 @@ def compare(ids: str = Query(..., description="comma-separated activity ids; the
             step_m: float | None = Query(None, ge=5, le=1000),
             smooth_s: int | None = Query(None, ge=1, le=120),
             max_points: int = Query(1500, ge=100, le=5000),
+            start: str | None = Query(None, pattern=r"^(ref|rep1|\d+|-?\d+(\.\d+)?,-?\d+(\.\d+)?)$",
+                                      description="common start (elapsed / moving / distance): ref = a start line at the "
+                                                  "first session's start, <id> = at that session's start, lat,lon = where "
+                                                  "the first session passes that point; rep1 = t = 0 at each session's rep 1"),
+            start_radius_m: float = Query(40, ge=10, le=150, description="start line half-width (m)"),
+            rep_series: bool = Query(False, description="intervals: also every rep on its own real-time axis (Rep N / Per rep)"),
+            rep_lead_s: float = Query(15, ge=0, le=60, description="rep_series: seconds before each rep start"),
+            rep_post_s: float = Query(30, ge=0, le=120, description="rep_series: seconds after each rep end"),
             tracks: bool = Query(True, description="include lat/lon per session for the map"),
             store: Store = Depends(get_store)):
     import compare as cmp
@@ -63,14 +71,15 @@ def compare(ids: str = Query(..., description="comma-separated activity ids; the
         raise HTTPException(422, f"at most {MAX_IDS} sessions")
     gp = store.dir / "groups.json"
     key = (tuple(id_list), mode, reference, axis, rep_axis, gap_s, rep_gap_s, match, step_m, smooth_s, max_points,
-           gp.stat().st_mtime_ns if gp.exists() else 0)
+           start, start_radius_m, rep_series, rep_lead_s, rep_post_s, gp.stat().st_mtime_ns if gp.exists() else 0)
     with _LOCK:
         r = _RESULTS.get(key)
         if r is None:
             try:
                 r = cmp.compare(id_list, mode, person=store.person, reference=reference, max_points=max_points,
                                 smooth_s=smooth_s, axis=axis, rep_axis=rep_axis, gap_s=gap_s, rep_gap_s=rep_gap_s,
-                                step_m=step_m, match=match, workers=4)
+                                step_m=step_m, match=match, workers=4, start=start, start_radius_m=start_radius_m,
+                                rep_series=rep_series and mode == "intervals", rep_lead_s=rep_lead_s, rep_post_s=rep_post_s)
             except (ValueError, KeyError) as e:
                 raise HTTPException(422, str(e).strip("'\""))
             _RESULTS[key] = r
@@ -85,7 +94,9 @@ def compare(ids: str = Query(..., description="comma-separated activity ids; the
     out["sessions"] = [s | {"hr_avg_moving": s.get("hr_avg"), "hr_avg_activity": (A.get(str(s["id"])) or {}).get("hr")}
                        for s in r["sessions"]]
     out["hr_avg_definition"] = "hr_avg = hr_avg_moving: mean HR over moving seconds (pauses excluded); hr_avg_activity: whole activity (Garmin)"
-    out["activities"] = {str(i): A.get(str(i)) for i in r["ids"]}
+    # + sessions the common start excluded (their chips / reasons)
+    excl = [e["id"] for e in (r.get("align") or {}).get("excluded", [])]
+    out["activities"] = {str(i): A.get(str(i)) for i in [*r["ids"], *excl]}
     if tracks:
         out["tracks"] = _tracks(store, r["ids"])
     return out

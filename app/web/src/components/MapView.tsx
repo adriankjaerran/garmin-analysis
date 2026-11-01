@@ -8,6 +8,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { BBox } from "../lib/geo";
+import { currentTheme, useTheme } from "../lib/theme";
 
 setWorkerUrl(workerUrl);
 
@@ -44,10 +45,20 @@ const isKV = (id: BasemapId) => id === "topo" || id === "grey";
 
 const KEY = "garmin.basemap";
 const EVT = "app:basemap";
+/** the stored choice, else the map's default — except that the bright Topo default becomes Grey in the dark theme
+ *  (a beige topo map next to the dark UI is glaring); a stored choice always wins */
 export const getBasemap = (fallback: BasemapId = "topo"): BasemapId => {
   const v = localStorage.getItem(KEY) as BasemapId | null;
-  return v && v in BASEMAPS ? v : fallback;
+  if (v && v in BASEMAPS) return v;
+  return fallback === "topo" && currentTheme() === "dark" ? "grey" : fallback;
 };
+/** dark theme: the raster tiles are dimmed a little so they don't glare (they stay light: track colours are for light maps) */
+const DIM = { dark: { "raster-brightness-max": 0.86, "raster-contrast": -0.05 }, light: { "raster-brightness-max": 1, "raster-contrast": 0 } };
+function dimBase(map: MLMap) {
+  if (!map.getLayer("base")) return;
+  const d = DIM[currentTheme()];
+  for (const [k, v] of Object.entries(d)) map.setPaintProperty("base", k as any, v);
+}
 function setBasemap(id: BasemapId) {
   localStorage.setItem(KEY, id);
   window.dispatchEvent(new CustomEvent(EVT, { detail: id }));
@@ -64,6 +75,7 @@ function applyBasemap(map: MLMap, id: BasemapId) {
   if (map.getSource("base")) map.removeSource("base");
   map.addSource("base", baseSource(id));
   map.addLayer({ id: "base", type: "raster", source: "base" }, layers[0]);
+  dimBase(map);
 }
 
 interface Props {
@@ -88,6 +100,15 @@ export function MapView({ class: cls = "", style, onReady, bbox, interactive = t
   const [auto, setAuto] = useState(false);
   const pinned = useRef(false);
   const mapRef = useRef<MLMap | null>(null);
+  const theme = useTheme();
+  const setWant = useRef<((id: BasemapId) => void) | null>(null);
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    if (m.isStyleLoaded()) dimBase(m); else m.once("load", () => dimBase(m));
+    // the default (not a stored choice) follows the theme: Topo in light, Grey in dark
+    if (!localStorage.getItem(KEY)) setWant.current?.(getBasemap(defaultBasemap));
+  }, [theme]);
 
   useEffect(() => {
     const map = new MLMap({
@@ -111,7 +132,7 @@ export function MapView({ class: cls = "", style, onReady, bbox, interactive = t
       const c = map.getCenter();
       show(isKV(want) && !pinned.current && !inNorway(c.lng, c.lat) ? "osm" : want);
     };
-    map.on("load", () => { loaded = true; onReady?.(map); check(); });
+    map.on("load", () => { loaded = true; dimBase(map); onReady?.(map); check(); });
     map.on("moveend", check);
     const ro = new ResizeObserver(() => map.resize());
     ro.observe(el.current!);
@@ -120,6 +141,7 @@ export function MapView({ class: cls = "", style, onReady, bbox, interactive = t
       setBm(want);
       check();
     };
+    setWant.current = (id) => { want = id; setBm(id); check(); };
     window.addEventListener(EVT, onBm);
     return () => { window.removeEventListener(EVT, onBm); ro.disconnect(); map.remove(); mapRef.current = null; };
   }, []);

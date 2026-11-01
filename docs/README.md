@@ -27,6 +27,7 @@
 | [similarity.md](similarity.md) | Similarity engine: named places / regions (Marka), workout hierarchy (6×1000 · rest), search, top-k nearest, map polylines |
 | [distance-calibration.md](distance-calibration.md) | Which distance to trust: Bislet track geometry and certified races |
 | [compare.md](compare.md) | Workout comparison: elapsed / moving / route-position ghost race, rep- and break-aligned intervals |
+| [together.md](together.md) | Together: workouts run with others — detection rules and labels, groups for N people, `together.json`, cross-person standings / replay engine and API |
 | [fitness-model.md](fitness-model.md) | Shape scores over time (interval / long / ski / overall, VDOT scale): model, back-tests, why HR isn't used |
 | [report.md](report.md) | The HTML report: pages, data sources, how to rebuild |
 | [app.md](app.md) | The web app (FastAPI + Vite): maps for every activity and day, how to run, endpoints, extension points |
@@ -36,3 +37,5 @@
 | File | What |
 |---|---|
 | [plans/timing-and-distance-accuracy.md](plans/timing-and-distance-accuracy.md) | Lags at rep start/end, pace dependence, carrying Bislet calibration to other runs |
+| [plans/compare-plan.md](plans/compare-plan.md) | Compare: common start line, interval alignment, bugs found, ranked next features |
+| [plans/together-plan.md](plans/together-plan.md) | Plan: Together — workouts run with others (detection, list, session page with standings and replay) |

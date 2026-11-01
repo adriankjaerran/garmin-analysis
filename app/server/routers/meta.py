@@ -6,7 +6,7 @@ import collections
 
 from fastapi import APIRouter, Depends
 
-from ..deps import get_store
+from ..deps import default_person, get_store, people
 from ..store import SPORT_LABEL, SPORTS, Store, type_label
 
 router = APIRouter(tags=["meta"])
@@ -29,6 +29,16 @@ def meta(store: Store = Depends(get_store)):
         "types": [{"id": t, "label": type_label(t), "n": n} for t, n in types.most_common()],
         "groups_built": g.get("built"),
     }
+
+
+@router.get("/people")
+def list_people():
+    """Everyone with data in data/ (the frontend's person menu; URLs are /<person>/...). `info`: display name,
+    initials and colours (light / dark theme) per person from data/people.json, automatic for anyone not in it."""
+    import together as tg
+    ps = people()
+    info = tg.people_info(ps)
+    return {"default": default_person(), "people": ps, "info": {p: info[p] for p in ps}}
 
 
 @router.post("/cache/refresh")

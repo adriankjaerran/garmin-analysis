@@ -1,15 +1,24 @@
-// Activity page "Shape" section: what this session is worth in the fitness model (score, explanation,
-// components, shape that day) plus HR diagnostics, which are shown but not used in the score.
+// Activity page "Shape" section: what this session says about fitness, in plain words — the one-liner, the score,
+// how it compares with your shape that day, and race equivalents. Model internals (evidence weight, σ, the
+// with-HR variant, components, HR diagnostics) are behind "Details".
 import { useApi } from "../lib/api";
-import { DISC_LABEL, KIND_HELP, KIND_LABEL, discColor, pm, raceT, signed, unitShort, type FitnessSession } from "../lib/fitness";
+import { DISC_LABEL, KIND_HELP, KIND_LABEL, discColor, pm, raceT, unitShort, type FitnessSession } from "../lib/fitness";
 import "../fitness.css";
 
 const HR_KEYS = ["work_hrr", "hrr"];
-const SHORT: Record<string, string> = { race: "counts fully", hard: "full weight unless far below the shape",
-  bound: "lower bound: only counts when above the shape", implausible: "ignored" };
+/** what the kind of evidence means for the shape, in plain words */
+const COUNTS: Record<string, string> = { race: "a race: counts fully", hard: "a hard session: counts fully unless far below your shape",
+  bound: "an easy or long session: only counts if it shows more than your shape", implausible: "ignored (faster than your shape allows: bad GPS or mislabelled)" };
 
 /** `not_scored` (WP-A): why the model skipped this activity */
 type SessionResp = FitnessSession & { not_scored?: { key: string; text: string } | null };
+
+/** "1.3 above your shape" / "0.4 below" / "at your shape" */
+function vsShape(d: number | null): string {
+  if (d === null) return "—";
+  const r = Math.abs(d).toFixed(1);
+  return r === "0.0" ? "right at your shape" : `${r} ${d > 0 ? "above" : "below"} your shape that day`;
+}
 
 export function ShapeSection({ id }: { id: string }) {
   const { data } = useApi<SessionResp>(`/api/fitness/session/${id}`);
@@ -19,79 +28,82 @@ export function ShapeSection({ id }: { id: string }) {
   // HR from the scored part (work bouts / best window) first, then the steady-chunk diagnostics
   const hrRows = [
     ...data.sessions.flatMap((s) => s.components_explained.filter((c) => HR_KEYS.includes(c.key)).map((c) => ({
-      ...c, label: c.key === "work_hrr" ? "Work effort (%HRR)" : "Window effort (%HRR)",
-      meaning: c.key === "work_hrr" ? "mean HR during the reps, % of heart-rate reserve" : `mean HR over the scored ${DISC_LABEL[s.discipline].toLowerCase()} window, % of HR reserve` }))).slice(0, 1),
+      ...c, label: c.key === "work_hrr" ? "Effort in the reps" : "Effort in the window",
+      meaning: c.key === "work_hrr" ? "mean heart rate during the reps, as % of your heart-rate reserve" : `mean heart rate over the scored ${DISC_LABEL[s.discipline].toLowerCase()} stretch, % of heart-rate reserve` }))).slice(0, 1),
     ...(hd?.explained.filter((c) => c.text !== "—") ?? []),
   ];
   return (
     <section>
       <div class="head">
         <h2>Shape</h2>
-        <span class="sub">what this session says about fitness (<a href="/fitness">Fitness</a> page)</span>
+        <span class="sub">what this workout says about your fitness (<a href="/fitness">Fitness</a> page)</span>
       </div>
-      <div class="cols" style={{ gridTemplateColumns: "3fr 2fr" }}>
-        <div>
-          {!data.scored && <div class="empty">Not scored by the fitness model: {data.not_scored?.text ?? "only interval, race, run and ski sessions with a watch file are."}</div>}
-          {data.sessions.map((s) => {
-            const eq = s.race_equivalents_s, sh = s.shape;
-            const delta = s.shape_at !== null && s.kind !== "implausible" ? s.score - s.shape_at : null;
-            return (
-              <div class="shape-block" key={s.discipline}>
-                <p class="shape-line">
-                  <span class="dot" style={{ background: discColor(s.discipline) }} />
-                  {s.explain}
-                </p>
-                <dl class="kv">
-                  <dt>Discipline</dt><dd>{s.label}</dd>
-                  <dt>Score</dt><dd><b>{s.score.toFixed(1)}</b> {unitShort(s.discipline)} <span class="muted">σ {s.sigma.toFixed(1)}</span></dd>
-                  <dt>Evidence</dt><dd title={KIND_HELP[s.kind]}>{KIND_LABEL[s.kind]} <span class="muted">{SHORT[s.kind]}</span></dd>
-                  <dt>Weight used</dt><dd>{s.weight === null ? "—" : s.weight.toFixed(2)} <span class="muted">{s.kind !== "implausible" ? `= ${(s.confidence * 100).toFixed(0)} % of a race's pull` : ""}</span></dd>
-                  <dt>Shape that day</dt><dd>{sh ? <>{pm(s.shape_at ?? sh.mean, sh.sd)}{s.shape_race_equivalents_s ? <span class="muted"> · 5k {raceT(s.shape_race_equivalents_s["5k"])}</span> : null}</> : "—"}</dd>
-                  <dt>Score − shape</dt><dd>{delta === null ? "—" : signed(delta)}</dd>
-                  <dt>Shape now</dt><dd>{s.current ? <>{pm(s.current.mean, s.current.sd)} <span class="muted">{s.current.pct_of_best !== undefined ? `${s.current.pct_of_best.toFixed(1)} % of best ${s.personal_best?.toFixed(1)}` : ""}</span></> : "—"}</dd>
-                  <dt>Race equivalents</dt><dd>{eq ? `5k ${raceT(eq["5k"])} · 10k ${raceT(eq["10k"])} · half ${raceT(eq.half)}` : <span class="muted">{s.discipline === "ski" ? "n/a (ski scale)" : "—"}</span>}</dd>
-                  {s.hr && <>
-                    <dt title={s.hr.label ?? "with-HR model variant"}>With HR</dt>
-                    <dd title={`${s.hr.label ?? ""}: ${KIND_HELP[s.hr.kind]}`}>{KIND_LABEL[s.hr.kind]}{s.hr.kind !== s.kind ? <span class="muted"> (was {KIND_LABEL[s.kind]})</span> : null}</dd>
-                    <dt title="weight and p(maximal) in the with-HR variant">HR weight</dt>
-                    <dd>{s.hr.weight === null ? "—" : s.hr.weight.toFixed(2)}
-                      <span class="muted">{s.hr.p_max !== null && s.hr.p_max !== undefined ? ` · p max ${s.hr.p_max.toFixed(2)}` : ""}
-                        {s.hr.shape ? ` · shape ${pm(s.hr.shape_at ?? s.hr.shape.mean, s.hr.shape.sd)}` : ""}</span></dd>
-                    {s.hr.note && <><dt>HR note</dt><dd class="muted" title={s.hr.note}>{s.hr.note}</dd></>}
-                  </>}
-                </dl>
-                <h3>Components</h3>
+      {!data.scored && <div class="empty">Not used for your fitness estimate: {data.not_scored?.text ?? "only interval, race, run and ski sessions with a watch file are."}</div>}
+      {data.sessions.map((s) => {
+        const eq = s.race_equivalents_s, sh = s.shape;
+        const delta = s.shape_at !== null && s.kind !== "implausible" ? s.score - s.shape_at : null;
+        return (
+          <div class="shape-block" key={s.discipline}>
+            <p class="shape-line">
+              <span class="dot" style={{ background: discColor(s.discipline) }} />
+              {s.explain}
+            </p>
+            <dl class="kv">
+              <dt>Fitness score</dt><dd><b>{s.score.toFixed(1)}</b> {unitShort(s.discipline)} <span class="muted">{s.label}</span></dd>
+              <dt>Compared with you</dt><dd>{vsShape(delta)}</dd>
+              <dt>Race equivalents</dt><dd>{eq ? `5k ${raceT(eq["5k"])} · 10k ${raceT(eq["10k"])} · half ${raceT(eq.half)}` : <span class="muted">{s.discipline === "ski" ? "none (ski has its own scale)" : "—"}</span>}</dd>
+              <dt>How it counts</dt><dd title={KIND_HELP[s.kind]}>{COUNTS[s.kind] ?? KIND_LABEL[s.kind]}</dd>
+              <dt>Your shape that day</dt><dd>{sh ? <>{pm(s.shape_at ?? sh.mean, sh.sd)}{s.shape_race_equivalents_s ? <span class="muted"> · 5k {raceT(s.shape_race_equivalents_s["5k"])}</span> : null}</> : "—"}</dd>
+              <dt>Your shape now</dt><dd>{s.current ? <>{pm(s.current.mean, s.current.sd)} <span class="muted">{s.current.pct_of_best !== undefined ? `${s.current.pct_of_best.toFixed(0)} % of your best` : ""}</span></> : "—"}</dd>
+            </dl>
+            <details class="howto shape-details">
+              <summary>Details: how the model scored it</summary>
+              <dl class="kv">
+                <dt title={KIND_HELP[s.kind]}>Evidence</dt><dd>{KIND_LABEL[s.kind]}</dd>
+                <dt>Weight used</dt><dd>{s.weight === null ? "—" : s.weight.toFixed(2)} <span class="muted">{s.kind !== "implausible" ? `= ${(s.confidence * 100).toFixed(0)} % of a race's pull` : ""} · σ {s.sigma.toFixed(1)}</span></dd>
+                {s.hr && <>
+                  <dt title={s.hr.label ?? "with-HR model variant"}>With heart rate</dt>
+                  <dd title={`${s.hr.label ?? ""}: ${KIND_HELP[s.hr.kind]}`}>{KIND_LABEL[s.hr.kind]}{s.hr.kind !== s.kind ? <span class="muted"> (was {KIND_LABEL[s.kind]})</span> : null}
+                    <span class="muted">{s.hr.weight === null ? "" : ` · weight ${s.hr.weight.toFixed(2)}`}{s.hr.p_max !== null && s.hr.p_max !== undefined ? ` · ${Math.round(s.hr.p_max * 100)} % likely all-out` : ""}</span></dd>
+                  {s.hr.note && <><dt>Heart-rate note</dt><dd class="muted" title={s.hr.note}>{s.hr.note}</dd></>}
+                </>}
+              </dl>
+              <h3>Components</h3>
+              <div class="tablewrap">
+                <table>
+                  <tbody>
+                    {s.components_explained.filter((c) => !HR_KEYS.includes(c.key)).map((c) => (
+                      <tr key={c.key}><td style={{ width: "150px" }}>{c.label}</td><td class="num" style={{ width: "110px" }}>{c.text}</td><td class="muted wrap">{c.meaning}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <h3>Heart rate (context only)</h3>
+              {hrRows.length ? (
                 <div class="tablewrap">
                   <table>
                     <tbody>
-                      {s.components_explained.filter((c) => !HR_KEYS.includes(c.key)).map((c) => (
-                        <tr key={c.key}><td style={{ width: "140px" }}>{c.label}</td><td class="num" style={{ width: "110px" }}>{c.text}</td><td class="muted wrap">{c.meaning}</td></tr>
+                      {hrRows.map((c, i) => (
+                        <tr key={`${i}-${c.key}`}><td style={{ width: "150px" }}>{c.label}</td><td class="num" style={{ width: "110px" }}>{c.text}</td><td class="muted wrap">{c.meaning}</td></tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-        <div>
-          <h3 class="muted" style={{ margin: "0 0 var(--space-1)", fontSize: "var(--fs-13)" }}>Heart-rate diagnostics</h3>
-          {hrRows.length ? (
-            <div class="tablewrap">
-              <table>
-                <tbody>
-                  {hrRows.map((c, i) => (
-                    <tr key={`${i}-${c.key}`}><td style={{ width: "150px" }}>{c.label}</td><td class="num" style={{ width: "90px" }}>{c.text}</td><td class="muted wrap" style={{ whiteSpace: "normal" }}>{c.meaning}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : <div class="empty">No usable HR in this session.</div>}
-          <p class="note"><span class="dot none" />HR is <b>not used in the performance-only score</b>{data.sessions.some((s) => s.hr) ? " (the “With HR” line shows how the HR variant treats this session)" : ""}{data.hr_used_in_score ? " (the model says it is: check fitness.json)" : ""}. Used as a direct score correction it made race
-            prediction worse (MAE 1.86 → 2.37 VDOT), so the HR variant only uses it to judge whether a hard session was maximal.
-            These numbers are for context only.</p>
-        </div>
-      </div>
+              ) : <div class="empty">No usable heart rate in this session.</div>}
+              <p class="note">Heart rate is not part of the performance score{data.hr_used_in_score ? " (the model file says it is: check fitness.json)" : ""}: as a direct correction it made race predictions worse,
+                so the with-HR variant only uses it to judge whether a hard session was all-out.</p>
+            </details>
+          </div>
+        );
+      })}
+      {!data.sessions.length && hrRows.length > 0 && (
+        <details class="howto shape-details">
+          <summary>Heart-rate details</summary>
+          <div class="tablewrap"><table><tbody>
+            {hrRows.map((c, i) => <tr key={i}><td style={{ width: "150px" }}>{c.label}</td><td class="num" style={{ width: "110px" }}>{c.text}</td><td class="muted wrap">{c.meaning}</td></tr>)}
+          </tbody></table></div>
+        </details>
+      )}
     </section>
   );
 }

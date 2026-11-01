@@ -1,30 +1,32 @@
 /* Home page (HomePage.tsx) */
 main.home { padding-top: var(--space-3); }
-.home-top { gap: var(--space-3); margin-bottom: var(--space-3); flex-wrap: nowrap; }
-.home-top h1 { margin-right: 0; }
+.home-top .head { flex-wrap: wrap; }
+.home-top .tools { min-width: 0; max-width: 100%; }
 /* current shape: one line, one link per discipline */
-.shape-line { font-size: var(--fs-13); margin-left: auto; display: flex; align-items: center; gap: 0; border: 1px solid var(--hairline); border-radius: var(--radius-control);
+.home-shape { font-size: var(--fs-13); margin-left: auto; display: flex; align-items: center; gap: 0; border: 1px solid var(--hairline); border-radius: var(--radius-control);
   height: var(--control); overflow: hidden; white-space: nowrap; }
-.shape-line > a { display: inline-flex; align-items: center; gap: 6px; padding: 0 var(--space-3); height: 100%; color: var(--text);
+.home-shape > a { display: inline-flex; align-items: center; gap: 6px; padding: 0 var(--space-3); height: 100%; color: var(--text);
   border-left: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
-.shape-line > a:first-child { border-left: 0; }
-.shape-line > a:hover { background: var(--surface-hover); text-decoration: none; }
-.shape-line .lbl { color: var(--text-muted); font-weight: var(--fw-semibold); background: var(--surface-tint); }
-.shape-line .disc .dot { margin-right: 0; }
-.shape-line .disc .nm { color: var(--text-muted); }
-.shape-line .more { color: var(--accent); }
+.home-shape > a:first-child { border-left: 0; }
+.home-shape > a:hover { background: var(--surface-hover); text-decoration: none; }
+.home-shape .lbl { color: var(--text-muted); font-weight: var(--fw-semibold); background: var(--surface-tint); }
+.home-shape .disc .dot { margin-right: 0; }
+.home-shape .disc .nm { color: var(--text-muted); }
+.home-shape .more { color: var(--accent); }
 .home .up { color: var(--state-good); }
 .home .down { color: var(--state-duplicate); }
 .spark { display: block; }
-.shape-line .spark { display: inline-block; }
+.home-shape .spark { display: inline-block; }
 
 /* latest day: map | activities + summary */
 .home-day { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: var(--space-4); align-items: start; }
 .home-day .day-sum { margin-top: var(--space-4); }
 .home-day .day-kv { grid-template-columns: max-content 1fr max-content 1fr max-content 1fr; }
 
-.home-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.home-two { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 .home-two.wide-left { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+/* below 1500 px the recent-workouts table needs the full width: the 30-day map goes under it */
+@media (max-width: 1500px) { .home-two.wide-left { grid-template-columns: minmax(0, 1fr); } .home-two.wide-left .home-map { position: relative; } }
 .home-map { position: sticky; top: 0; }
 
 /* training log: weeks x Mon..Sun + week total */
@@ -34,15 +36,18 @@ main.home { padding-top: var(--space-3); }
   border-bottom: 1px solid var(--hairline); }
 .tl-head span.num { text-align: right; }
 .tl-week { border-bottom: 1px solid var(--hairline); min-height: 62px; }
-.tl-day { padding: 4px 6px; border-right: 1px solid var(--hairline); cursor: pointer; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tl-day { padding: 4px 4px 4px 5px; border-right: 1px solid var(--hairline); cursor: pointer; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .tl-day:hover { background: var(--surface-hover); }
 .tl-day.future { cursor: default; background: repeating-linear-gradient(135deg, transparent 0 6px, var(--surface-tint) 6px 7px); }
 .tl-day.future:hover { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--surface-tint) 6px 7px); }
 .tl-day.old .dn { opacity: 0.6; }
 .tl-day .dn { font-size: var(--fs-12); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .tl-day.today .dn { color: var(--accent); font-weight: var(--fw-semibold); }
-.tl-act { display: flex; align-items: center; font-size: var(--fs-12); color: var(--text); white-space: nowrap; overflow: hidden; border-radius: 3px; padding: 0 2px; margin: 0 -2px; }
-.tl-act .t { overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.tl-act { display: flex; align-items: baseline; font-size: var(--fs-12); color: var(--text); overflow: hidden; border-radius: 3px; padding: 0 2px; margin: 0 -2px; line-height: 1.35; }
+.tl-act .dot { flex: none; }
+/* long workout names ("3×1800 + 2×900") wrap inside the day instead of being cut to "3…" */
+.tl-act .t { overflow-wrap: normal; word-break: keep-all; font-variant-numeric: tabular-nums; min-width: 0; }
+.tl-act .dot { margin-right: 4px; }
 .tl-act:hover, .tl-act.hl { background: var(--accent-surface); text-decoration: none; }
 .tl-sum { padding: 4px var(--space-2); display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .tl-sum b { font-size: var(--fs-13); }
@@ -52,6 +57,7 @@ main.home { padding-top: var(--space-3); }
 /* volume table */
 table.vol { border-top: 1px solid var(--hairline); }
 table.vol th { cursor: default; }
+table.vol th, table.vol td { padding: 0 var(--space-2); }
 table.vol tr.grp th { height: 24px; font-size: var(--fs-12); background: var(--surface); border-bottom: 0; }
 table.vol th.c { text-align: center; border-left: 1px solid var(--hairline); }
 table.vol tr.total td { font-weight: var(--fw-semibold); background: var(--surface-tint); }
@@ -59,7 +65,42 @@ table.vol .vs { display: inline-flex; align-items: center; gap: var(--space-2); 
 table.vol .vs > span { min-width: 40px; text-align: right; }
 .vsbar { display: block; }
 @media (max-width: 1250px) {
-  .home-two, .home-two.wide-left, .home-day { grid-template-columns: 1fr; }
-  .home-top { flex-wrap: wrap; }
-  .shape-line { margin-left: 0; }
+  .home-two, .home-two.wide-left, .home-day { grid-template-columns: minmax(0, 1fr); }
+  .home-shape { margin-left: 0; }
+}
+
+.vol-wrap { border-top: 0; }
+.tl-day .dn .wd { display: none; }
+.tl-day .dn .tl-tg { font-size: 10px; margin-left: 4px; text-decoration: none; }
+
+/* "Latest together" card (HomePage LatestTogether) */
+.home-together { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-4); padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--hairline); border-radius: var(--radius-float); background: var(--surface-tint); color: var(--text); }
+.home-together:hover { text-decoration: none; background: var(--surface-hover); }
+.home-together .lbl { font-weight: var(--fw-semibold); color: var(--text-muted); }
+.home-together .head-line { font-variant-numeric: tabular-nums; }
+.home-together .go { margin-left: auto; color: var(--accent); }
+
+/* first-run "Start here" strip (dismissible, localStorage) */
+.start-here { display: flex; align-items: center; gap: var(--space-2) var(--space-4); flex-wrap: wrap; padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4); border: 1px solid var(--accent); border-radius: var(--radius-float); background: var(--accent-surface); }
+.start-here b { color: var(--accent); }
+.start-here .x { margin-left: auto; height: 22px; width: 22px; padding: 0; justify-content: center; border: 0; background: none; color: var(--text-muted); }
+
+/* mobile: one column, maps full width, the log as 7 narrow day columns with the week total under each row */
+@media (max-width: 760px) {
+  .home .map { width: 100%; }
+  .home-day .day-kv { grid-template-columns: max-content 1fr max-content 1fr; }
+  .tl-head { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .tl-head span.num { display: none; }
+  .tl-week { grid-template-columns: repeat(7, minmax(0, 1fr)); min-height: 0; }
+  .tl-day { padding: 3px 2px; border-right: 1px solid var(--hairline); min-height: 44px; }
+  .tl-day:nth-child(7) { border-right: 0; }
+  .tl-act { margin: 0; padding: 0; font-size: 11px; }
+  .tl-act .t { font-size: 11px; }
+  .tl-sum { grid-column: 1 / -1; flex-direction: row; justify-content: flex-end; align-items: center; gap: var(--space-2); border-top: 1px dashed var(--hairline); padding: 2px var(--space-2); }
+  .tl-sum .mix { margin-top: 0; }
+  .home-together .go { margin-left: 0; }
+  .home-top .tools { margin-left: 0; width: 100%; }
+  .home-shape { overflow-x: auto; max-width: 100%; }
 }

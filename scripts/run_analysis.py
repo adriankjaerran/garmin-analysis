@@ -70,12 +70,35 @@ def _press_times(raw_laps, t0):
     return [st + 0.5 for _, st in out]
 
 
+def _unjump_clock(recs, laps, sessions):
+    """take watch clock jumps (gps_quality.clock_jumps, the same rule as session_groups.read_series) out of the
+    record and lap timestamps, in place"""
+    import calendar
+    import datetime as _dt
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import gps_quality as gq
+    sec = lambda d: calendar.timegm(d.utctimetuple()) + d.microsecond / 1e6   # naive UTC datetimes, no local DST
+    ts = [sec(r["timestamp"]) for r in recs if "timestamp" in r]
+    one = sessions[0] if len(sessions) == 1 else {}
+    st = one.get("start_time")
+    jumps = gq.clock_jumps(ts, one.get("total_elapsed_time"), sec(st) if st else None)
+    if not jumps:
+        return
+    for m in [*recs, *laps]:
+        for k in ("timestamp", "start_time"):
+            if k in m:
+                m[k] -= _dt.timedelta(seconds=sec(m[k]) - gq.unjump(sec(m[k]), jumps))
+
+
 def _read(fit_path: Path):
     ff = fitparse.FitFile(str(fit_path))
     msgs = lambda name: [{f.name: f.value for f in m if f.value is not None} for m in ff.get_messages(name)]
     recs = msgs("record")
-    t0 = recs[0]["timestamp"]
     raw = msgs("lap")
+    sess = (msgs("session") or [{}])[0]
+    _unjump_clock(recs, raw, msgs("session"))
+    t0 = recs[0]["timestamp"]
     t_starts = _press_times(raw, t0)
     laps = []
     for i, v in enumerate(raw):
@@ -91,7 +114,6 @@ def _read(fit_path: Path):
             "intensity": str(v.get("intensity") or ""),
             "trigger": str(v.get("lap_trigger") or ""),
         })
-    sess = (msgs("session") or [{}])[0]
     dev = msgs("device_info")
     device = next((str(d.get("garmin_product") or d.get("product")) for d in dev if d.get("garmin_product") or d.get("product")), "?")
     mode = "track" if str(sess.get("sub_sport")) == "track" else "gps"

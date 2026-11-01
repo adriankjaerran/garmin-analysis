@@ -6,6 +6,12 @@
   --disc-ski: #e0407f;        /* pink */
   --disc-overall: #3d4650;    /* slate */
 }
+:root[data-theme="dark"] {
+  --disc-interval: #a77ae6;
+  --disc-long: #f0924a;
+  --disc-ski: #f06ba0;
+  --disc-overall: #b4bcc6;
+}
 .shape-chart .readout { display: flex; gap: var(--space-4); flex-wrap: wrap; font-variant-numeric: tabular-nums; min-height: 20px; margin-bottom: var(--space-1); }
 .shape-chart .readout .dot { margin-right: 4px; }
 .shape-chart .plotwrap { position: relative; }
@@ -37,3 +43,13 @@ details.howto[open] summary::before { content: "▾"; }
 .hr-val { color: var(--text-muted); }
 .variant-eval th.grp { text-align: center; }
 .variant-eval td.better { color: var(--state-good); font-weight: var(--fw-semibold); }
+/* activity Shape section: model internals behind "Details" */
+details.shape-details { margin-top: var(--space-3); }
+details.shape-details summary { color: var(--accent); font-size: var(--fs-13); }
+details.shape-details[open] summary { margin-bottom: var(--space-2); }
+details.shape-details .kv { margin-bottom: var(--space-2); }
+/* long text cells wrap instead of clipping the table (Fitness sessions, demoted notes) */
+td:has(> .wrap-cell), td.wrap-cell { white-space: normal; max-width: 460px; min-width: 220px; }
+.fit-sessions td:nth-child(5) { max-width: 460px; }
+.variant-sec { margin-top: var(--space-4); }
+.variant-sec h3 { font-size: var(--fs-13); margin: 0; }

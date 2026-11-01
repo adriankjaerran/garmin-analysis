@@ -95,6 +95,21 @@ def row(a: dict, poly: bool = True) -> dict:
     return r
 
 
+APP_FIELDS = ("workout_label", "workout_detail", "rep_pace_ms", "together")
+
+
+def app_fields(store: Store, rows: list[dict]) -> list[dict]:
+    """add the app row's shared fields to search rows (in place): `workout_label` (the one workout name,
+    store.workout_name), `workout_detail`, `rep_pace_ms` (avg rep pace, store.rep_pace) and `together`
+    ({gid, label, kind, role, with, workout}: the 👥 marker, docs/together.md)"""
+    A = store.activity_map()
+    for r in rows:
+        a = A.get(str(r["id"])) or {}
+        for k in APP_FIELDS:
+            r[k] = a.get(k)
+    return rows
+
+
 def _filters(q) -> tuple[dict, dict]:
     """query params -> (similarity filters, app-side filters)"""
     f: dict = {}
@@ -183,6 +198,7 @@ def search(request: Request, sort: str = "-date", limit: int | None = None, poly
             res.sort(key=lambda a: a.get(key) is None)
     n = len(res)
     rows = [row(a, bool(poly)) for a in (res[:limit] if limit else res)]
+    app_fields(store, rows)
     return {"n": n, "truncated": bool(limit and n > limit), "filters": f,
             "km": round(sum(a.get("dist_km") or 0 for a in res), 1),
             "families": dict(Counter((a.get("workout") or {}).get("family") for a in res).most_common()),
@@ -242,9 +258,10 @@ def nearest(aid: str, request: Request, k: int = 10, preset: str | None = None, 
         out.append(row(a, bool(poly)) | {"score": r["score"], "components": r["components"], "reasons": reasons})
         if len(out) >= k:
             break
+    app_fields(store, out)
     used = dict(sim.PRESETS[W]) if isinstance(W, str) else (
         (dict(sim.PRESETS[W["preset"]]) if W.get("preset") else {}) | {c: v for c, v in W.items() if c != "preset"})
-    return {"query": row(ix.acts[qid], bool(poly)), "preset": preset or ("custom" if weights else "balanced"),
+    return {"query": app_fields(store, [row(ix.acts[qid], bool(poly))])[0], "preset": preset or ("custom" if weights else "balanced"),
             "weights": used, "components": sim.COMPONENTS, "presets": list(sim.PRESETS), "results": out}
 
 

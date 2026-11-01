@@ -4,10 +4,11 @@
 // maximal each hard session was), compared with fitness_eval.json (eval_variants).
 // ?d=interval,long,ski&ov=0&b=0&hr=0&from=2023-01-01&to=2026-10-31&sd=interval&sk=race&q=
 import { useMemo, useState } from "preact/hooks";
-import { useApi } from "../lib/api";
+import { apiUrl, useApi } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
 import { num } from "../lib/format";
 import { Table, type Col } from "../components/Table";
+import { PageHeader } from "../components/PageHeader";
 import { ShapeChart } from "../components/ShapeChart";
 import "../fitness.css";
 import {
@@ -31,11 +32,11 @@ export function KindMark({ kind, disc }: { kind: Kind; disc: string }) {
 async function rebuild(set: (s: string) => void) {
   set("Rebuilding…");
   try {
-    const r = await fetch("/api/fitness/rebuild", { method: "POST" }).then((r) => r.json());
+    const r = await fetch(apiUrl("/api/fitness/rebuild"), { method: "POST" }).then((r) => r.json());
     if (!r.accepted && !r.running) throw new Error(r.error || "not started");
     for (let i = 0; i < 300; i++) {
       await new Promise((ok) => setTimeout(ok, 1000));
-      const s = await fetch("/api/fitness/rebuild").then((r) => r.json());
+      const s = await fetch(apiUrl("/api/fitness/rebuild")).then((r) => r.json());
       if (!s.running) {
         if (s.error) { set("Rebuild failed: " + s.error); return; }
         set(`Rebuilt in ${s.seconds} s, reloading…`);
@@ -51,6 +52,7 @@ export function FitnessPage() {
   const { data: doc, error } = useApi<FitnessDoc>("/api/fitness");
   const [hover, setHover] = useState<string | null>(null);
   const [rb, setRb] = useState<string | null>(null);
+  const [allSess, setAllSess] = useState(false);   // the session list grows with the page: the newest 50 first
   const discs = (query.get("d") ?? "interval,long,ski").split(",").filter((d): d is Disc => (DISCS as string[]).includes(d));
   const overall = query.get("ov") !== "0";
   const bounds = query.get("b") !== "0";
@@ -94,7 +96,13 @@ export function FitnessPage() {
     (!sd || s.discipline === sd) && (!sk || s.kind === sk) && (!from || s.date >= from) && (!to || s.date <= to) &&
     (!q || `${s.name ?? ""} ${s.type} ${s.explain} ${s.date}`.toLowerCase().includes(q))), [doc, sd, sk, from, to, q]);
 
-  if (error) return <main><h1>Fitness</h1><div class="err">{error}</div></main>;
+  if (error) return (
+    <main><PageHeader title="Fitness" />
+      <div class="empty-state"><p><b>No fitness estimate yet.</b></p>
+        <p class="muted">{/fitness\.json/.test(error) ? "The model hasn't been built for this person. Build it once (≈ 10 s):" : `The server said: ${error}`}</p>
+        <button onClick={() => rebuild((m) => alert(m))}>Build the fitness model</button></div>
+    </main>
+  );
   if (!doc) return <main><div class="empty">Loading…</div></main>;
 
   const toggle = (k: Disc) => {
@@ -137,28 +145,27 @@ export function FitnessPage() {
     { key: "date", label: "Date" },
     { key: "discipline", label: "Discipline", render: (s) => <><span class="dot" style={{ background: discColor(s.discipline) }} />{DISC_LABEL[s.discipline]}</> },
     { key: "kind", label: "Kind", render: (s) => <><KindMark kind={s.kind} disc={s.discipline} />{KIND_LABEL[s.kind]}</> },
-    { key: "name", label: "Activity", render: (s) => s.name ?? s.type },
-    { key: "explain", label: "What it shows", render: (s) => <span title={s.explain}>{s.explain}</span> },
-    { key: "score", label: "Score", num: true, render: (s) => s.score.toFixed(1) },
-    { key: "shape_at", label: "Shape", num: true, render: (s) => (s.shape_at === null ? "—" : s.shape_at.toFixed(1)), title: "smoothed shape that day" },
-    { key: "delta", label: "Δ", num: true, sort: (s) => (s.shape_at === null ? null : s.score - s.shape_at),
-      render: (s) => (s.shape_at === null || s.kind === "implausible" ? "—" : signed(s.score - s.shape_at)), title: "score − shape" },
-    { key: "weight", label: "Weight", num: true, render: (s) => num(s.weight, 2), title: "robust weight the smoother gave it (0..1)" },
-    { key: "sigma", label: "σ", num: true, render: (s) => s.sigma.toFixed(1), title: "observation sd for this kind" },
+    { key: "name", label: "Activity", render: (s) => <span class="clip" style={{ maxWidth: "200px" }} title={s.name ?? s.type}>{s.name ?? s.type}</span> },
+    { key: "explain", label: "What it shows", render: (s) => <span class="wrap-cell">{s.explain}</span> },
+    { key: "score", label: "Score", num: true, render: (s) => <span title={`model weight ${num(s.weight, 2)} (0–1), σ ${s.sigma.toFixed(1)}`}>{s.score.toFixed(1)}</span>,
+      title: "fitness score of the session (VDOT; ski: VDOT-equivalent); hover for the model weight" },
+    { key: "shape_at", label: "Your shape", num: true, render: (s) => (s.shape_at === null ? "—" : s.shape_at.toFixed(1)), title: "your smoothed shape that day" },
+    { key: "delta", label: "vs shape", num: true, sort: (s) => (s.shape_at === null ? null : s.score - s.shape_at),
+      render: (s) => { if (s.shape_at === null || s.kind === "implausible") return "—"; const d = s.score - s.shape_at, r = Math.abs(d).toFixed(1);
+        return r === "0.0" ? "level" : `${r} ${d > 0 ? "above" : "below"}`; }, title: "score compared with your shape that day" },
   ];
 
   const yFrom = from?.slice(0, 4) ?? "", yTo = to?.slice(0, 4) ?? "";
   return (
     <main>
       <section class="first">
-        <div class="head">
-          <h1>Fitness</h1>
-          <span class="sub">Shape per discipline on the Daniels VDOT scale · model built {doc.built.slice(0, 16).replace("T", " ")} · {hasHr ? "two variants: performance only and with HR" : "HR not used in the score"}</span>
-          <div class="tools">
-            {rb && <span class="muted">{rb}</span>}
-            <button onClick={() => rebuild(setRb)} title="Re-run scripts/fitness_model.py (≈0.1 s with cached features)">Rebuild</button>
-          </div>
-        </div>
+        <PageHeader title="Fitness" sub={`updated ${doc.built.slice(0, 10)}`}
+          about="Your estimated running and ski shape over time (VDOT: one number ↔ equivalent race times), from your races and hard sessions."
+          tips={["Hover a marker in the chart for the session; click it to open the activity", "Drag across the chart to zoom, double-click to reset",
+            "Toggle disciplines with the chips above the chart", "“How this is computed” at the bottom explains the model"]}>
+          {rb && <span class="muted">{rb}</span>}
+          <button onClick={() => rebuild(setRb)} title="Re-run the fitness model with the latest activities (≈ 0.1 s)">Rebuild</button>
+        </PageHeader>
         <Table rows={curRows} rowKey={(r) => r.key} cols={curCols} />
       </section>
 
@@ -208,8 +215,6 @@ export function FitnessPage() {
         </div>
       </section>
 
-      {hasHr && <VariantSection doc={doc} demoted={demoted} />}
-
       <section>
         <div class="head"><h2>By year</h2><span class="sub">mean and max of the daily shape; n = races + hard sessions; * = 0–2 pieces of evidence (interpolated)</span></div>
         <Table rows={yearRows} rowKey={(r) => r.y} cols={yearCols} defaultSort={["y", -1]} />
@@ -218,7 +223,7 @@ export function FitnessPage() {
       <section>
         <div class="head">
           <h2>Sessions</h2><span class="count">{sessions.length}</span>
-          <span class="sub">every scored session; hover to find it in the chart, click to open</span>
+          <span class="sub">every session that counts; hover to find it in the chart, click to open</span>
           <div class="tools">
             <input type="search" placeholder="Filter…" value={query.get("q") ?? ""} onInput={(e) => setQuery({ q: (e.target as HTMLInputElement).value })} />
             <div class="seg">
@@ -229,8 +234,9 @@ export function FitnessPage() {
             </div>
           </div>
         </div>
-        <div class="fit-sessions"><Table rows={sessions} rowKey={(s) => s.id + s.discipline} cols={sessCols} defaultSort={["date", -1]} maxHeight="560px"
-          onRow={(s) => navigate(`/activities/${s.id}`)} onHover={(s) => setHover(s ? s.id : null)} /></div>
+        <div class="fit-sessions"><Table rows={allSess ? sessions : [...sessions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 50)} rowKey={(s) => s.id + s.discipline} cols={sessCols} defaultSort={["date", -1]}
+          onRow={(s) => navigate(`/activities/${s.id}`)} onHover={(s) => setHover(s ? s.id : null)} empty="No sessions match these filters." /></div>
+        {!allSess && sessions.length > 50 && <p class="note">Showing the newest 50 · <button class="link" onClick={() => setAllSess(true)}>show all {sessions.length}</button></p>}
       </section>
 
       <section>
@@ -252,7 +258,7 @@ export function FitnessPage() {
               <li><b>Overall</b>: % of personal best per discipline, precision-weighted across disciplines (ski and run VDOT are never averaged).</li>
               <li><b>With HR</b> (dashed line): the same model, but a hard session whose heart rate shows a sub-maximal effort
                 becomes a lower bound, and the other hard sessions are weighted by the probability that they were maximal (p_max).
-                The table under the chart compares both variants on held-out data.</li>
+                The tables below compare both variants on held-out data.</li>
               <li><b>Heart rate as a direct score correction</b> was tested and made race prediction worse (MAE 1.86 → 2.37 VDOT): the
                 FR935 wrist sensor under-reads hard intervals erratically and the watch change shifted HR by ~0.17 HRR. So HR only judges
                 intent in the With HR variant, and FR935 HR alone can never demote a session. Settings are tuned on few cases (in-sample).</li>
@@ -260,6 +266,7 @@ export function FitnessPage() {
             <p class="muted">Full model, evaluation and limitations: <span class="mono">docs/fitness-model.md</span>. Engine:
               <span class="mono"> scripts/fitness_model.py</span> → <span class="mono">data/&lt;person&gt;/fitness.json</span>.</p>
           </div>
+          {hasHr && <VariantSection doc={doc} demoted={demoted} />}
         </details>
       </section>
     </main>
@@ -286,12 +293,12 @@ function VariantSection({ doc, demoted }: { doc: FitnessDoc; demoted: FitSession
     return <td key={key} class={"num" + (win ? " better" : "")}>{mine.toFixed(k.d)}</td>;
   };
   return (
-    <section>
+    <div class="variant-sec">
       <div class="head">
-        <h2>Performance vs with HR</h2>
-        <span class="sub">held-out evaluation of both variants (scripts/fitness_eval.py); better value in green</span>
+        <h3>Performance only vs with heart rate</h3>
+        <span class="sub">held-out evaluation of both model variants (scripts/fitness_eval.py); the better value is green</span>
       </div>
-      <div class="cols" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div class="cols" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
         <div>
           {ev ? (
             <div class="tablewrap">
@@ -334,7 +341,7 @@ function VariantSection({ doc, demoted }: { doc: FitnessDoc; demoted: FitSession
                       <td><span class="dot" style={{ background: discColor(s.discipline) }} />{s.type.replace(/_/g, " ")}</td>
                       <td class="num">{s.score.toFixed(1)}</td>
                       <td class="num">{s.hr?.p_max === null || s.hr?.p_max === undefined ? "—" : s.hr.p_max.toFixed(2)}</td>
-                      <td class="muted">{s.hr?.note}</td>
+                      <td class="muted wrap-cell">{s.hr?.note}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -343,6 +350,6 @@ function VariantSection({ doc, demoted }: { doc: FitnessDoc; demoted: FitSession
           ) : <div class="empty">No session demoted.</div>}
         </div>
       </div>
-    </section>
+    </div>
   );
 }

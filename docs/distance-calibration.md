@@ -127,16 +127,24 @@ All 492 runs downloaded (backfill 2026-10-30, 393 calls at 3 s, no 429).
 - Caveats: the environment guess is a jitter threshold and doesn't really find cities (Copenhagen and Rome count as
   "open"). Satellites and accuracy can't be decoded from `gps_metadata`. A third device (product 3077, 6 runs in 2021) exists.
 
-### Bislett indoor lap, winter (7 sessions; `session_groups.bislett_indoor`, 2026-10-31)
+### Bislett indoor lap, winter (27 sessions; `session_groups.bislett_indoor`, 2026-10-31)
 In winter the reps are run on the indoor lap under the Bislett stands: **546.5 m per lap** (Adrian), and each rep
 stops 7–8 m before the line, so **rep = n laps × 546.5 m − 7.5 m** (1 lap 539.0 m, 2 laps 1,085.5 m, 3 laps 1,632.0 m).
-- **Detection:** main place Bislet and GPS track length < 30 % of the watch distance. The 7 sessions are at
-  0.3–6 %, every other Bislet run is > 80 %. The few GPS fixes sit 40–60 m outside lane 1 (the stands).
+- **Detection, two ways:** (a) main place Bislet and GPS track length < 30 % of the watch distance (7 sessions at
+  0.3–6 %; every other Bislet run is > 80 %; the few fixes sit 40–60 m outside lane 1, under the stands). (b) No GPS
+  position at all, Oct–Mar, running or "Indoor Running" mode (not treadmill), with ≥ 3 reps of a clear lap count
+  (20 sessions, 2023-11 to 2026-03, mostly Tuesdays). These get their start set to Bislet (place / area Bislet).
 - **The watch distance is made up there.** Rest laps at 10–70 steps/min (standing / walking: 7–75 strides) still
   log 200–1,100 m; on 2026-01-20 the 1-lap reps read 464–556 m. Session distance: `dist_trusted: false`.
-- **Reps = manual laps at ≥ 160 steps/min** (FIT lap `total_cycles`). n laps per block of similar-time reps (±15 %)
-  = median watch distance / 546.5 rounded; sessions of steady ~100 s reps (≥ 6, CV ≤ 8 %) use n = 1. A rep whose
-  implied pace is outside 2:40–4:30 /km gets no distance (none did).
+- **Reps = laps at ≥ 160 steps/min** (FIT lap `total_cycles`) that end on a manual press (at the line); warm-up /
+  cool-down laps of a watch workout are skipped; an auto lap (1 km) plus the press a few s later is one rep. Reps on
+  timer laps (e.g. 2019 Trondheim, 2023-03: 4:00 / 1:30 timer workouts) are not whole laps and don't count.
+- **n laps from time:** per block of similar-time reps (±15 %), the only n in 1, 2, 3 whose pace is 4:15–2:45 /km
+  (100 s → 1, 220 s → 2, 345 s → 3); no unique n → time-only. Per rep, 2:40–4:30 /km or no distance.
+- **Override** `data/adrian/indoor_bislett.json` `time_only`: 2025-01-21 (5 × 5:00, jogged rests: 3 laps = 3:03 /km,
+  2 laps = 4:36 /km, neither fits) has no rep distance.
+- No-GPS sessions in the fitness model: 19 new interval items (47.5–56.2), 2026 interval evidence 28 → 37, 2025
+  40 → 47. The first 7 (GPS lost at Bislet):
 
 | Date | Reps | n laps | Pace /km | Old sig (speed detector) | Fitness interval item, old → new |
 |---|---|---|---|---|---|

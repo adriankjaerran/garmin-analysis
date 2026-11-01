@@ -13,6 +13,8 @@ export interface Col<T> {
   sort?: (r: T) => number | string | null | undefined;
   title?: string;
   width?: number;
+  /** extra class on the column's header and cells (e.g. a highlighted column) */
+  cls?: string;
 }
 
 interface Props<T> {
@@ -94,7 +96,7 @@ export function Table<T>({ cols, rows, rowKey, onRow, onHover, selected, highlig
         <thead>
           <tr>
             {cols.map((c, ci) => (
-              <th key={c.key} class={cellCls(ci, c.num) + (sort?.[0] === c.key ? " sorted" : "")} title={c.title}
+              <th key={c.key} class={cellCls(ci, c.num) + (sort?.[0] === c.key ? " sorted" : "") + (c.cls ? " " + c.cls : "")} title={c.title}
                 style={{ ...(c.width ? { width: c.width + "px" } : {}), ...cellStyle(ci) }}
                 onClick={() => setSort(sort?.[0] === c.key ? [c.key, (sort[1] * -1) as 1 | -1] : [c.key, c.num ? -1 : 1])}>
                 {c.label}{sort?.[0] === c.key ? (sort[1] === 1 ? " ▲" : " ▼") : ""}
@@ -109,7 +111,7 @@ export function Table<T>({ cols, rows, rowKey, onRow, onHover, selected, highlig
               <tr key={k} data-k={k} class={(onRow ? "clickable " : "") + (k === selected ? "selected " : "") + (k === highlight ? "hl" : "")}
                 onClick={onRow ? () => onRow(r) : undefined} onMouseEnter={onHover ? () => onHover(r) : undefined}>
                 {cols.map((c, ci) => (
-                  <td key={c.key} class={cellCls(ci, c.num)} style={cellStyle(ci)}>{c.render ? c.render(r, i) : fmtCell((r as any)[c.key])}</td>
+                  <td key={c.key} class={cellCls(ci, c.num) + (c.cls ? " " + c.cls : "")} style={cellStyle(ci)}>{c.render ? c.render(r, i) : fmtCell((r as any)[c.key])}</td>
                 ))}
               </tr>
             );

@@ -9,7 +9,8 @@ import { SPORT_LABEL, dur, km, num, sportColor, typeLabel } from "../lib/format"
 import { decodePolyline, type BBox } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
 import { Table, type Col } from "../components/Table";
-import { SportDot, placeHref, speedSort, speedText, whatShort } from "../components/ActivityBits";
+import { SportDot, TogetherMark, placeHref, speedSort, speedText, whatShort } from "../components/ActivityBits";
+import { PageHeader } from "../components/PageHeader";
 
 const SHAPE: Record<string, string> = { laps: "laps", out_and_back: "out & back", point_to_point: "point to point", loop_cw: "loop ↻", loop_ccw: "loop ↺" };
 const famOf = (types: Record<string, number>) => {
@@ -23,12 +24,12 @@ const COUNT_HELP = "Activities with this as their main place (≥ 40 % of the ti
 
 const routeCols: Col<RouteRow>[] = [
   { key: "id", label: "Route", sort: (r) => Number(r.id.slice(1)) },
-  { key: "name", label: "Name", render: (r) => <span title={r.name}><SportDot sport={r.sport} />{r.name}</span> },
+  { key: "name", label: "Name", render: (r) => <span class="clip" style={{ maxWidth: "255px" }} title={[r.name, r.via_names?.length ? `via ${r.via_names.join(", ")}` : ""].filter(Boolean).join(" · ")}><SportDot sport={r.sport} />{r.name}</span> },
   { key: "n", label: "Activities", num: true },
   { key: "last", label: "Last", render: (r) => r.last ?? "—" },
 ];
 const placeCols: Col<Place & { fam: string }>[] = [
-  { key: "name", label: "Place", render: (p) => <span><SportDot sport={p.fam} />{p.name}</span> },
+  { key: "name", label: "Place", render: (p) => <span class="clip" style={{ maxWidth: "255px" }} title={p.name}><SportDot sport={p.fam} />{p.name}</span> },
   { key: "n", label: "Activities", num: true, render: countText, title: COUNT_HELP },
   { key: "routes", label: "Routes", num: true },
   { key: "last", label: "Last", render: (p) => p.last ?? "—" },
@@ -53,7 +54,7 @@ export function PlacesPage() {
   const placeActs = useApi<{ n: number; activities: Activity[] }>(place && tab === "activities" ? `/api/activities?place=${encodeURIComponent(place)}` : null).data;
   const actCols = useMemo<Col<Activity>[]>(() => [
     { key: "start", label: "Date", render: (a) => a.date },
-    { key: "type", label: "Workout", render: (a) => <span title={a.route_name ?? a.name ?? ""}><SportDot sport={a.sport} />{whatShort(a)}</span>, sort: (a) => whatShort(a) },
+    { key: "type", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "220px" }} title={[whatShort(a), a.route_name, a.name].filter(Boolean).join(" · ")}><SportDot sport={a.sport} /><TogetherMark a={a} />{whatShort(a)}</span>, sort: (a) => whatShort(a) },
     { key: "dist_km", label: "km", num: true, render: (a) => km(a.dist_km) },
     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s ?? a.dur_s) },
     { key: "speed", label: "Pace / speed", num: true, render: speedText, sort: speedSort },
@@ -97,18 +98,45 @@ export function PlacesPage() {
       geometry: { type: "Point", coordinates: [p.lon, p.lat] } })) });
   }, [map, places, place, route, rd.data]);
 
-  // name labels for the busiest places (the raster style has no glyphs, so these are HTML markers)
+  // name labels for the busiest places (the raster style has no glyphs, so these are HTML markers). Placed
+  // greedily, busiest first: right of the circle, else left / above / below; a label that would overlap a placed
+  // label or another busy circle is left out (its name is in the hover popup). Re-placed after every move / zoom.
   useEffect(() => {
     if (!map) return;
-    pinRef.current.forEach((m) => m.remove());
-    pinRef.current = [...places].sort((a, b) => b.n - a.n).slice(0, 14).filter((p) => p.n >= 5).map((p) => {
-      const el = document.createElement("div");
-      el.className = "place-label";
-      el.textContent = p.name;
-      const r = 4 + ((Math.min(16, Math.sqrt(p.n)) - 1) / 15) * 12;   // = the circle radius expression
-      return new Marker({ element: el, anchor: "left", offset: [r + 4, 0] }).setLngLat([p.lon, p.lat]).addTo(map);
-    });
-    return () => pinRef.current.forEach((m) => m.remove());
+    const top = [...places].sort((a, b) => b.n - a.n).slice(0, 14).filter((p) => p.n >= 5);
+    const rad = (n: number) => 4 + ((Math.min(16, Math.sqrt(n)) - 1) / 15) * 12;   // = the circle radius expression
+    const place = () => {
+      pinRef.current.forEach((m) => m.remove());
+      pinRef.current = [];
+      const boxes: [number, number, number, number][] = [];
+      const circles = [...places].sort((a, b) => b.n - a.n).slice(0, 60).map((p) => { const q = map.project([p.lon, p.lat]); return [q.x, q.y, rad(p.n) + 2] as const; });
+      const hit = (b: [number, number, number, number]) => boxes.some((o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) ||
+        circles.some(([cx, cy, r]) => cx + r > b[0] && cx - r < b[2] && cy + r > b[1] && cy - r < b[3]);
+      for (const p of top) {
+        const q = map.project([p.lon, p.lat]), r = rad(p.n) + 4, w = p.name.length * 6.6 + 10, h = 18;
+        const opts: [string, [number, number], [number, number, number, number]][] = [
+          ["left", [r, 0], [q.x + r, q.y - h / 2, q.x + r + w, q.y + h / 2]],
+          ["right", [-r, 0], [q.x - r - w, q.y - h / 2, q.x - r, q.y + h / 2]],
+          ["bottom", [0, -r], [q.x - w / 2, q.y - r - h, q.x + w / 2, q.y - r]],
+          ["top", [0, r], [q.x - w / 2, q.y + r, q.x + w / 2, q.y + r + h]],
+        ];
+        // its own circle doesn't count as a collision
+        const own = circles.findIndex(([cx, cy]) => Math.abs(cx - q.x) < 0.5 && Math.abs(cy - q.y) < 0.5);
+        const saved = own >= 0 ? circles.splice(own, 1) : [];
+        const ok = opts.find((o) => !hit(o[2]));
+        circles.push(...saved);
+        if (!ok) continue;
+        boxes.push(ok[2]);
+        const el = document.createElement("div");
+        el.className = "place-label";
+        el.textContent = p.name;
+        el.title = `${p.name}: ${p.n} activities`;
+        pinRef.current.push(new Marker({ element: el, anchor: ok[0] as any, offset: ok[1] }).setLngLat([p.lon, p.lat]).addTo(map));
+      }
+    };
+    place();
+    map.on("moveend", place);
+    return () => { map.off("moveend", place); pinRef.current.forEach((m) => m.remove()); };
   }, [map, places]);
 
   // route on the map
@@ -147,21 +175,26 @@ export function PlacesPage() {
   }, [map, hlMember, rd.data]);
 
   const r = route ? rd.data : null;
+  const legendSports = [...new Set(places.map((p) => p.fam))].sort();
   return (
     <main class="full">
-      <div class="toolbar">
-        <h1>Places & routes</h1>
+      <PageHeader class="toolbar" title="Places & routes" sub={`${places.length} places, ${rs?.routes.length ?? 0} routes you have done at least twice`}
+        about="Where you train and the routes you repeat. Pick a place for its routes and activities, or a route to see every time you ran it."
+        tips={["Click a circle on the map (or a row) to select that place", "A route shows its reference line (dashed), common stops and every session", "“Compare all” lines the sessions of a route up in Compare"]}>
         <select value={sport} onChange={(e) => setQuery({ sport: (e.target as HTMLSelectElement).value })}>
           <option value="">All sports</option>
           {["run", "ski", "hike", "bike"].map((s) => <option key={s} value={s}>{SPORT_LABEL[s]}</option>)}
         </select>
-        <span class="count">{places.length} places, {rs?.routes.length ?? 0} routes with ≥ 2 activities</span>
-        <div class="tools">
-          {(place || route) && <button onClick={() => setQuery({ place: null, route: null })}>Show all</button>}
-        </div>
-      </div>
+        {(place || route) && <button onClick={() => setQuery({ place: null, route: null })}>Show all</button>}
+      </PageHeader>
       <div class="split">
-        <div class="left"><MapView style={{ flex: 1 }} onReady={onReady} defaultBasemap="grey" /></div>
+        <div class="left"><MapView style={{ flex: 1 }} onReady={onReady} defaultBasemap="grey">
+          {!r && <div class="overlay bl places-legend">
+            <span><b>Places</b> by main sport:</span>
+            {legendSports.map((k) => <span key={k}><SportDot sport={k} />{SPORT_LABEL[k]}</span>)}
+            <span class="muted">· size = activities there</span>
+          </div>}
+        </MapView></div>
         <div class="right" style={{ width: "560px" }}>
           {r ? (
             <>
@@ -193,13 +226,13 @@ export function PlacesPage() {
                 <Table rows={r.members} rowKey={(a) => a.id} highlight={hlMember} onHover={(a) => setHlMember(a?.id ?? null)}
                   onRow={(a) => navigate(`/activities/${a.id}`)} defaultSort={["date", -1]} cols={[
                     { key: "date", label: "Date" },
-                    { key: "stype", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "84px" }} title={`${whatShort(a)} · ${a.name ?? ""}`}>{whatShort(a)}</span>, sort: (a) => whatShort(a) },
+                    { key: "stype", label: "Workout", render: (a) => <span class="clip" style={{ maxWidth: "110px" }} title={`${whatShort(a)} · ${a.name ?? ""}`}><TogetherMark a={a} />{whatShort(a)}</span>, sort: (a) => whatShort(a) },
                     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s) },
                     { key: "pause_s", label: "Paused", num: true, render: (a) => dur(a.pause_s) },
                     // one sport per route: "Pace" or "Speed" (the long "Pace / speed" header pushed Dir out of the pane)
-                    { key: "speed", label: r.sport === "run" ? "Pace" : "Speed", num: true, render: speedText, sort: speedSort },
+                    { key: "speed", label: r.sport === "run" || r.sport === "hike" ? "Pace" : "Speed", num: true, render: speedText, sort: speedSort },
                     { key: "hr", label: "HR", num: true, render: (a) => a.hr ?? "—" },
-                    { key: "route_dir", label: "Dir", title: "direction along the route (fwd / rev)", render: (a) => a.route_dir ?? "—" },
+                    { key: "route_dir", label: "Dir", title: "direction along the route: → as the reference, ← reversed", render: (a) => (a.route_dir === "rev" ? <span title="reversed">←</span> : a.route_dir ? <span title="same direction as the reference">→</span> : "—") },
                   ]} />
               </div>
             </>

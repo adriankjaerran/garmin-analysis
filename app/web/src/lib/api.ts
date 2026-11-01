@@ -1,6 +1,7 @@
 // Typed fetch helpers. GET responses are memoised per URL for the session (data changes rarely;
 // reload the page to refetch).
 import { useEffect, useState } from "preact/hooks";
+import { currentPerson, splitPerson } from "./router";
 
 export type Sport = "run" | "ski" | "hike" | "bike" | "swim" | "other";
 
@@ -13,7 +14,14 @@ export interface Activity {
   // WP-A additions (display names / labels; `place` stays the id for links and filters)
   type_label?: string | null; place_name?: string | null; start_place?: string | null; start_place_name?: string | null;
   region?: string | null; route_name?: string | null; workout_label?: string | null; swim?: SwimSummary | null;
+  /** the workout was done with others (data/together.json; /together/<gid>); `workout` = the group's workout */
+  together?: TogetherLink | null;
+  /** `workout_label` is the one workout name (store.workout_name); detail = same-workout label with rest / route */
+  workout_detail?: string | null;
+  /** average rep pace of the main reps (total rep distance / total rep time), m/s */
+  rep_pace_ms?: number | null;
 }
+export interface TogetherLink { gid: string; label: string; kind: string; role: string; with: string[]; workout?: string | null }
 export interface SwimSummary { pool_m: number | null; lengths?: number; n_lengths?: number; dist_m: number | null; active_s: number | null;
   rest_s: number | null; timer_s?: number | null; elapsed_s?: number | null; pace_100m_s: number | null; strokes_per_length: number | null;
   bad_lengths?: number; n_rests: number | null; longest_rest_s: number | null }
@@ -66,7 +74,14 @@ export interface RouteDetail extends RouteRow {
 
 const memo = new Map<string, Promise<any>>();
 
+/** "/api/x" -> "/api/<person>/x" for the person in the current URL (the server strips it again, deps.get_store) */
+export function apiUrl(url: string, person = currentPerson()): string {
+  if (!url.startsWith("/api/") || !person || splitPerson(url.slice(4))[0]) return url;   // not API, or already prefixed
+  return `/api/${encodeURIComponent(person)}/${url.slice(5)}`;
+}
+
 export function get<T>(url: string): Promise<T> {
+  url = apiUrl(url);
   let p = memo.get(url);
   if (!p) {
     p = fetch(url).then(async (r) => {
@@ -91,6 +106,7 @@ export function qs(params: Record<string, string | number | null | undefined>): 
 }
 
 export function useApi<T>(url: string | null): { data: T | null; error: string | null; loading: boolean } {
+  url = url && apiUrl(url);   // key on the person too, so a person switch refetches
   const [st, set] = useState<{ data: T | null; error: string | null; loading: boolean; url: string | null }>(
     { data: null, error: null, loading: !!url, url });
   useEffect(() => {

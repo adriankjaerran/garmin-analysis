@@ -488,7 +488,7 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
             return out
         if not ind and (not act.get("dist_trusted") or act.get("atype") in ("treadmill_running", "indoor_running")):
             return out
-        track = act.get("atype") == "track_running" or act.get("place") == "Bislet"
+        track = act.get("atype") == "track_running" or act.get("place") == "Bislet" or bool(ind)
         fw = f.get("wbal_flat")
         comp = {"score_without_grade": fw + P["interval_offset"] if fw is not None and t.startswith("intervals") else None,
                 "work_hrr": f.get("work_hrr")}
@@ -512,7 +512,7 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
                 rest_s = float(np.median(br)) if br else None
                 c = {"sig": act.get("sig"), "n_reps": len(reps), "rep_s": rep_s, "rest_s": rest_s,
                      "work_rest": round(rep_s / rest_s, 2) if rep_s and rest_s else None,
-                     "rep_speed": float(np.median([r[2] for r in reps])) if reps else None, "tau_scale": tau, **comp}
+                     "rep_speed": float(np.median(rv)) if (rv := [r[2] for r in reps if r[2]]) else None, "tau_scale": tau, **comp}
                 w = w + P["interval_offset"]
                 if hr_b and f.get("work_hrr") is not None:
                     w = w + hr_b * (hr_ref - f["work_hrr"])
@@ -668,7 +668,7 @@ def load_features(person, workers=8, progress=True):
     cfile = D / "cache" / "fitness_model.pkl"
     cfile.parent.mkdir(exist_ok=True)
     cache = pickle.loads(cfile.read_bytes()) if cfile.exists() else {}
-    ck = (MODEL_VERSION, json.dumps({k: v for k, v in P.items() if k != "hr_intent"}, sort_keys=True, default=str))
+    ck = (MODEL_VERSION, sg.READER_VERSION, json.dumps({k: v for k, v in P.items() if k != "hr_intent"}, sort_keys=True, default=str))
     if cache.get("_v") != ck:
         cache = {"_v": ck}
     key = lambda p: (p.stat().st_mtime_ns, p.stat().st_size)

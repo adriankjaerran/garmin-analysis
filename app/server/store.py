@@ -51,6 +51,48 @@ def _r(v, n=2):
     return round(f, n) if n else int(round(f))
 
 
+def _clean_sig(sig: str | None) -> bool:
+    """a rep signature that names the structure ("6×1000", "1×1300 + 2×3000"), not "8 reps (mixed …)" """
+    return bool(sig) and "×" in sig and "mixed" not in sig and " reps" not in sig
+
+
+def workout_name(type_key: str | None, w: dict, together: dict | None) -> str | None:
+    """The one workout label of an activity (docs/app.md#workout-label):
+    1. its own rep signature when it names the structure ("15×400", "3×1800 + 2×900");
+    2. else, done with others as intervals: the shared structure of that Together group ("1×1300 + 2×3000" for a
+       multisport recording of the same session, or "3×1800 + 2×900" where this watch saw "8 reps (mixed …)");
+    3. else its own signature ("8 reps (mixed 1:17–7:40)");
+    4. else the workout family ("Easy run", "Hike", "Ski easy") or the Garmin type."""
+    sig = w.get("signature") if w.get("rep_count") else None
+    if _clean_sig(sig):
+        return sig
+    if together and together.get("kind") == "intervals" and _clean_sig(together.get("workout")):
+        return together["workout"]
+    if sig:
+        return sig
+    return w.get("family_label") or type_label(type_key)
+
+
+def rep_pace(reps: list | None, w: dict, sport: str) -> float | None:
+    """average speed of the main reps (m/s) = total rep distance / total rep time — the one "avg rep pace" of the
+    app (Home, Activities, Closest, activity page). groups.json reps are [time_s, dist_m, speed, hr]; the main part
+    is the similarity index's (`main_part` of `rep_parts`). Reps without a distance (Bislett indoor laps): the
+    index's median rep speed."""
+    if not reps or not w.get("rep_count"):
+        return None
+    try:
+        import similarity as sim
+        parts = sim.rep_parts(reps, sport == "ski")
+        g = parts[w.get("main_part") or 0] if len(parts) == len(w.get("parts") or parts) else max(parts, key=len)
+    except Exception:  # noqa: BLE001 — a label helper must not take the list down
+        return w.get("rep_speed_ms")
+    ts = [reps[j][0] for j in g if reps[j][0] and reps[j][1]]
+    ds = [reps[j][1] for j in g if reps[j][0] and reps[j][1]]
+    if not ts or sum(ts) <= 0:
+        return w.get("rep_speed_ms")
+    return round(sum(ds) / sum(ts), 3)
+
+
 def _json(p: Path):
     return json.loads(p.read_text())
 
@@ -109,7 +151,23 @@ class Store:
         gp = self.dir / "groups.json"
         tp = self.cache_dir / "tracks.json"
         sx = self.dir / "similarity_index.json"
-        return self._memoize("activities", lambda: [idx, gp, tp, sx, self.dir / "activities"], self._build_activities)
+        tj = ROOT / "data" / "together.json"   # cross-person groups (scripts/together.py): the `together` link
+        return self._memoize("activities", lambda: [idx, gp, tp, sx, tj, self.dir / "activities"], self._build_activities)
+
+    def together_links(self) -> dict[str, dict]:
+        """{activity id: {gid, label, kind, role, with: [person, ...]}} for this person's activities in a visible
+        together group (data/together.json; role "other" = did a different workout alongside: no link)"""
+        import together as tg
+        try:
+            L = tg.links()
+        except Exception:  # noqa: BLE001 — a broken / half-written together.json must not take the activity list down
+            return {}
+        try:
+            doc = tg.load(missing_ok=True) or {}
+        except Exception:  # noqa: BLE001
+            doc = {}
+        gw = {g["gid"]: g.get("workout") for g in doc.get("groups", [])}
+        return {aid: {**v, "workout": gw.get(v["gid"])} for (p, aid), v in L.items() if p == self.person}
 
     def _build_activities(self) -> list[dict]:
         g = self.groups()["activities"]
@@ -120,6 +178,7 @@ class Store:
         R = ix.routes if ix else {}
         gpl = self.groups().get("places", {})
         pname = (lambda p: ix.place_name(p)) if ix else (lambda p: (gpl.get(p) or {}).get("name", p))
+        tog = self.together_links()
         out = []
         for a in _json(self.dir / "activities_index.json"):
             aid = str(a["activityId"])
@@ -157,11 +216,17 @@ class Store:
                 "region": x.get("region"), "area": ga.get("area"),
                 "route": rt, "route_name": (R.get(rt) or {}).get("name") or (self.groups()["routes"].get(rt) or {}).get("name") if rt else None,
                 "stype": ga.get("type"), "type_detail": ga.get("type_detail"), "sig": ga.get("sig"),
-                "workout_label": ((x.get("workout") or {}).get("exact_label") or (x.get("workout") or {}).get("signature")),
+                # the one workout name for every page (Home, Activities, Day, activity page, Together rows):
+                # see workout_name(); workout_detail = the same-workout label with rest / route ("15×400 · rest ~1:00")
+                "workout_label": workout_name(tk, x.get("workout") or {}, tog.get(aid)),
+                "workout_detail": ((x.get("workout") or {}).get("exact_label") or (x.get("workout") or {}).get("signature")),
+                # average rep pace of the main reps = total rep distance / total rep time (m/s), see rep_pace()
+                "rep_pace_ms": rep_pace(ga.get("reps"), x.get("workout") or {}, family(tk)),
                 "swim": {k: sw.get(k) for k in ("pool_m", "lengths", "dist_m", "active_s", "rest_s", "pace_100m_s",
                                                 "strokes_per_length", "bad_lengths", "n_rests", "longest_rest_s")} if sw else None,
                 "fit": bool(folder and any(folder.glob("*.fit"))),
                 "track": aid in tracks,
+                "together": tog.get(aid),   # {gid, label, kind, role, with} when run with others (null otherwise)
             })
         out.sort(key=lambda x: x["start"], reverse=True)
         return out

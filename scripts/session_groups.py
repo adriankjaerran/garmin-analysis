@@ -29,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gps_quality as gq  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-CACHE_VERSION = 1
+CACHE_VERSION = 2   # 2: FIT clock jumps taken out (read_series, run_analysis)
+READER_VERSION = 2   # read_series time base; 2: clock jumps fixed. Part of the caches built on it
 
 # the fast reader decodes only listed fields: add altitude, heart rate and timer events
 gq._WANT[20].update({2: "altitude", 3: "heart_rate", 78: "enhanced_altitude"})
@@ -348,11 +349,24 @@ def pool_swim(raw, t0=None) -> dict | None:
                                 x.get("swim_stroke")] for x in act]}
 
 
+def fit_clock_jumps(raw: dict, recs: list) -> list:
+    """clock jumps of a fast-read FIT file (gps_quality.clock_jumps): record timestamps vs the session's elapsed
+    time. Apply with gq.unjump to record, lap and event timestamps."""
+    ss = raw.get("session") or []
+    el = ss[0].get("total_elapsed_time") if len(ss) == 1 else None   # ms; multisport files: no elapsed check
+    return gq.clock_jumps([r["timestamp"] for r in recs], el / 1000 if el else None,
+                          ss[0].get("start_time") if len(ss) == 1 else None)
+
+
 def read_series(fit: Path) -> dict:
+    """Records of a FIT file, t = s since the first record. Watch clock jumps (gps_quality.clock_jumps: the clock
+    set by the first GPS fix, days to months forward) are taken out of all timestamps (`clock_jumps`)."""
     raw = gq._read_fast(fit)
     recs = sorted((r for r in raw["record"] if "timestamp" in r), key=lambda r: r["timestamp"])
     if len(recs) < 2:
         raise ValueError("no records")
+    jumps = fit_clock_jumps(raw, recs)
+    fx = (lambda ts: gq.unjump(ts, jumps)) if jumps else (lambda ts: ts)
     t0 = recs[0]["timestamp"]
     swim = pool_swim(raw)
     if swim and raw["session"][0].get("start_time"):   # pool swim records start late (bursts): session start
@@ -363,7 +377,7 @@ def read_series(fit: Path) -> dict:
         if r["timestamp"] == last:
             continue
         last = r["timestamp"]
-        t.append(r["timestamp"] - t0)
+        t.append(fx(r["timestamp"]) - t0)
         la, lo = r.get("lat"), r.get("lon")
         ok = la is not None and lo is not None and (la or lo)
         lat.append(la * gq.SEMI if ok else np.nan); lon.append(lo * gq.SEMI if ok else np.nan)
@@ -374,7 +388,7 @@ def read_series(fit: Path) -> dict:
     # timer stop intervals (event 0 = timer; type 1/4 = stop/stop_all, 0 = start)
     stops, cur = [], None
     for e in sorted((e for e in raw["event"] if "timestamp" in e and e.get("event") == 0), key=lambda e: e["timestamp"]):
-        te = e["timestamp"] - t0
+        te = fx(e["timestamp"]) - t0
         if e.get("event_type") in (1, 4) and cur is None:
             cur = te
         elif e.get("event_type") == 0 and cur is not None:
@@ -383,10 +397,11 @@ def read_series(fit: Path) -> dict:
             cur = None
     s["timer_stops"] = stops
     s["sport"] = (raw["session"][0].get("sport") if raw["session"] else None)
-    s["laps"] = sorted(({"t": l["start_time"] - t0, "dur": (l.get("total_elapsed_time") or 0) / 1000,
+    s["laps"] = sorted(({"t": fx(l["start_time"]) - t0, "dur": (l.get("total_elapsed_time") or 0) / 1000,
                          "dist": (l.get("total_distance") or 0) / 100, "trigger": l.get("lap_trigger"),
                          "intensity": l.get("intensity"), "cycles": l.get("total_cycles")} for l in raw["lap"] if "start_time" in l), key=lambda l: l["t"])
     s["swim"] = swim
+    s["clock_jumps"] = [(round(fx(a) - t0, 1), c) for a, c in jumps]   # [(t after the fix, s taken out)]
     return s
 
 
@@ -549,14 +564,14 @@ def worker(job):
         out["legs"], out["pauses"], out["summ"], _ = legs_and_pauses(G)
     out["elapsed"] = G["T"]
     hrg = G.get("hr")
-    out["laps_c"] = []   # [start s, dur s, watch dist m, steps/min, mean HR] per lap
+    out["laps_c"] = []   # [start s, dur s, watch dist m, steps/min, mean HR, lap trigger (0 = manual), intensity] per lap
     for l in s["laps"]:
         a_, b_ = int(max(0, l["t"])), int(min(G["T"], l["t"] + l["dur"]))
         hs = hrg[a_:b_] if hrg is not None and b_ > a_ else np.array([])
         hs = hs[~np.isnan(hs)] if len(hs) else hs
         out["laps_c"].append([round(float(l["t"]), 1), round(l["dur"], 1), round(l["dist"]),
                               round(120 * l["cycles"] / l["dur"]) if l.get("cycles") is not None and l["dur"] > 0 else None,
-                              round(float(hs.mean())) if len(hs) > 5 else None])
+                              round(float(hs.mean())) if len(hs) > 5 else None, l.get("trigger"), l.get("intensity")])
     if FAM.get(typ) == "ski":   # ski interval detector (ski_intervals.py, ~10 ms on the grid)
         import ski_intervals as si
         try:
@@ -626,56 +641,103 @@ def features(a, ZF):
 BISLETT_INDOOR_M = 546.5       # m: one lap of the indoor track under the Bislett stands (Adrian)
 INDOOR_STOP_SHORT_M = 7.5      # m: reps end 7-8 m before the lap line (the stop line), so a rep = n laps - 7.5 m
 INDOOR_GPS_COVER = 0.3         # GPS track / watch distance below this at Bislet: GPS lost, run was indoors
-INDOOR_WORK_SPM = 160          # steps/min: a manual lap at or above this is a rep, below it a rest (standing / walking)
-INDOOR_PACE_MS = (1000 / 270, 1000 / 160)   # a rep's implied speed must be 4:30-2:40 /km, else no distance
-INDOOR_SINGLE = {"min_reps": 6, "t": (80, 150), "share": 0.8, "max_t_cv": 0.08}
+INDOOR_MONTHS = (10, 11, 12, 1, 2, 3)   # runs without any GPS count as Bislett indoor only in these months
+INDOOR_WORK_SPM = 160          # steps/min: a lap at or above this is (part of) a rep, below it a rest
+INDOOR_MIN_REPS = 3            # no-GPS runs: at least this many reps with a clear lap count
+INDOOR_LAPS = (1, 2, 3)        # a rep is 1, 2 or 3 whole laps ...
+INDOOR_N_PACE = (1000 / 255, 1000 / 165)   # ... if exactly one of them gives a pace of 4:15-2:45 /km
 
 
-def bislett_indoor(a):
-    """Runs at Bislet whose GPS track covers < 30 % of the watch distance were on the indoor lap under the stands.
-    The session distance is untrusted (rest laps at ~10-70 steps/min still log 200-1100 m). Reps = manual laps at
-    >= 160 steps/min; each rep is whole laps: n x 546.5 m - 7.5 m. n per block of similar-time reps (+-15 %) =
-    median of watch distance / 546.5, rounded (>= 1); sessions of steady single-lap reps (>= 6, >= 80 % of 80-150 s,
-    time CV <= 8 %) use n = 1 (the watch is too noisy on short reps). Reps whose implied pace is outside
-    2:40-4:30 /km get no distance. Returns None (not indoor) or {gps_cover, n_reps, single_lap, rep_laps:
-    [[start s, dur s, n laps or None]], rep_m: [m or None]}."""
+def _indoor_reps(laps):
+    """Reps from the laps: laps at >= 160 steps/min (not warm-up / cool-down laps of a watch workout); consecutive
+    ones merge when the earlier one ended on an automatic trigger (auto lap 1 km / time splits a rep), manual presses
+    keep laps apart; a < 20 s lap right after an auto lap is the rest of that rep. A rep must end on a manual press (at the line): reps ending on a timer / distance trigger are
+    not whole laps. The session-end lap (cool-down) is left out. Returns [(start s, dur s, mean HR)] of reps >= 30 s."""
+    reps, cur = [], None
+    body = laps[:-1] if len(laps) > 1 else laps
+    for l in body:
+        work = (l[3] or 0) >= INDOOR_WORK_SPM and l[1] >= 5 and (len(l) < 7 or l[6] not in (2, 3))
+        stub = cur is not None and cur["auto"] and l[1] < 20   # press a few s after an auto lap: same rep
+        if (work or stub) and cur is not None and cur["auto"]:
+            cur["dur"] = l[0] + l[1] - cur["t"]
+            cur["hr"].append((l[4], l[1]))
+        elif work:
+            if cur is not None:
+                reps.append(cur)
+            cur = {"t": l[0], "dur": l[1], "hr": [(l[4], l[1])]}
+        else:
+            if cur is not None:
+                reps.append(cur)
+            cur = None
+            continue
+        cur["auto"] = len(l) > 5 and l[5] not in (0, None)
+    if cur is not None:
+        reps.append(cur)
+    out = []
+    for r in reps:
+        if r["dur"] >= 30 and not r["auto"]:
+            hw = [(h, d) for h, d in r["hr"] if h]
+            out.append((r["t"], r["dur"], round(sum(h * d for h, d in hw) / sum(d for _, d in hw)) if hw else None))
+    return out
+
+
+def _clear_n(dur):
+    """Whole laps of a rep from its time: the only n in 1..3 whose pace (n x 546.5 - 7.5 m) is 4:15-2:45 /km."""
+    ok = [n for n in INDOOR_LAPS
+          if INDOOR_N_PACE[0] <= (n * BISLETT_INDOOR_M - INDOOR_STOP_SHORT_M) / dur <= INDOOR_N_PACE[1]]
+    return ok[0] if len(ok) == 1 else None
+
+
+def bislett_indoor(a, time_only=()):
+    """Bislett indoor lap (546.5 m, under the stands) sessions: runs at Bislet whose GPS track covers < 30 % of the
+    watch distance, and runs (incl. "Indoor Running" mode) without any GPS in Oct-Mar with >= 3 reps of a clear lap
+    count. The session distance is untrusted (rest laps at ~10-70 steps/min still log 200-1100 m). Reps = laps at
+    >= 160 steps/min (see _indoor_reps). Each rep is n whole laps - 7.5 m (stop line): n per block of similar-time
+    reps (+-15 %) from the block's median time, only if exactly one n in 1..3 gives 4:15-2:45 /km; else the rep is
+    time-only; ids in `time_only` (data/<person>/indoor_bislett.json) are time-only. Returns None (not indoor) or {source, gps_cover, n_reps, rep_laps: [[start s, dur s, n or None]],
+    rep_m: [m or None]}."""
     F, f = a["F"], a["f"] or {}
-    if a["fam"] != "run" or not F["at_bislet"] or a["type"] in ("treadmill_running", "indoor_running") or F["dist_km"] < 1:
-        return None
-    cover = f.get("gps_m", 0.0) / (F["dist_km"] * 1000)
-    if cover >= INDOOR_GPS_COVER:
+    if a["fam"] != "run" or a["type"] == "treadmill_running" or F["dist_km"] < 1:
         return None
     laps = f.get("laps_c") or []
-    work = [i for i, l in enumerate(laps[:-1] if len(laps) > 1 else laps)   # last lap: session end (cool-down)
-            if l[1] >= 30 and (l[3] or 0) >= INDOOR_WORK_SPM]
-    C, L = INDOOR_SINGLE, BISLETT_INDOOR_M
-    tw = [laps[i][1] for i in work]
-    single = (len(tw) >= C["min_reps"] and np.mean([C["t"][0] <= t <= C["t"][1] for t in tw]) >= C["share"]
-              and float(np.std(tw) / np.mean(tw)) <= C["max_t_cv"])
-    n = [1] * len(work)
-    if not single:
-        for g in rep_groups(tw, [None] * len(tw)):
-            k = max(1, round(float(np.median([laps[work[j]][2] / L for j in g]))))
-            for j in g:
-                n[j] = k
+    if F["at_bislet"] and a["type"] != "indoor_running":
+        cover = f.get("gps_m", 0.0) / (F["dist_km"] * 1000)
+        if cover >= INDOOR_GPS_COVER:
+            return None
+        src = "bislet_gps_lost"
+    elif not f.get("gps_m") and int(a["date"][5:7]) in INDOOR_MONTHS:
+        cover, src = 0.0, "no_gps"
+    else:
+        return None
+    reps = _indoor_reps(laps)
+    tw = [r[1] for r in reps]
+    n = [None] * len(reps)
+    for g in rep_groups(tw, [None] * len(tw)) if str(a["id"]) not in time_only else []:
+        k = _clear_n(float(np.median([tw[j] for j in g])))
+        for j in g:
+            n[j] = k
     rep_m = []
-    for j, i in enumerate(work):
-        m = n[j] * L - INDOOR_STOP_SHORT_M
-        rep_m.append(round(m, 1) if INDOOR_PACE_MS[0] <= m / laps[i][1] <= INDOOR_PACE_MS[1] else None)
-    return {"gps_cover": round(cover, 3), "n_reps": len(work), "single_lap": bool(single),
-            "rep_t_cv": round(float(np.std(tw) / np.mean(tw)), 3) if tw else None,
-            "rep_laps": [[laps[i][0], laps[i][1], n[j] if rep_m[j] else None] for j, i in enumerate(work)],
-            "rep_m": rep_m, "_work": work}
+    for j, (_, dur, _) in enumerate(reps):
+        m = n[j] * BISLETT_INDOOR_M - INDOOR_STOP_SHORT_M if n[j] else None
+        rep_m.append(round(m, 1) if m and INDOOR_PACE_MS[0] <= m / dur <= INDOOR_PACE_MS[1] else None)
+    if src == "no_gps" and sum(1 for k in n if k) < INDOOR_MIN_REPS and str(a["id"]) not in time_only:
+        return None
+    return {"source": src, "gps_cover": round(cover, 3), "n_reps": len(reps),
+            "rep_laps": [[round(t, 1), round(d, 1), n[j] if rep_m[j] else None] for j, (t, d, _) in enumerate(reps)],
+            "rep_m": rep_m, "_reps": reps}
 
 
 def indoor_ana(a, ind):
-    """Rep analysis of an indoor session from its manual laps (the speed-based detector sees made-up distance)."""
-    laps, work = a["f"]["laps_c"], ind["_work"]
-    breaks = [(sum(laps[j][1] for j in range(i + 1, k)), None, True) for i, k in zip(work, work[1:]) if k > i + 1]
-    return {"mode": "indoor", "threshold": None, "rep_times": [laps[i][1] for i in work],
-            "rep_dists": ind["rep_m"], "rep_speeds": [m / laps[i][1] if m else None for m, i in zip(ind["rep_m"], work)],
-            "rep_hr": [laps[i][4] for i in work], "breaks": breaks,
-            "laps": [(l[1], l[2], None, "manual") for l in laps]}
+    """Rep analysis of an indoor session from its laps (the speed-based detector sees made-up distance)."""
+    reps = ind["_reps"]
+    breaks = [(round(t2 - (t + d), 1), None, True) for (t, d, _), (t2, _, _) in zip(reps, reps[1:]) if t2 - (t + d) >= 5]
+    return {"mode": "indoor", "threshold": None, "rep_times": [d for _, d, _ in reps],
+            "rep_dists": ind["rep_m"], "rep_speeds": [m / d if m else None for m, (_, d, _) in zip(ind["rep_m"], reps)],
+            "rep_hr": [h for _, _, h in reps], "breaks": breaks,
+            "laps": [(l[1], l[2], None, "manual" if len(l) > 5 and l[5] == 0 else "auto") for l in a["f"]["laps_c"]]}
+
+
+INDOOR_PACE_MS = (1000 / 270, 1000 / 160)   # per rep: implied pace must be 4:30-2:40 /km, else no distance
 
 
 def indoor_grid(G, act):
@@ -747,7 +809,8 @@ def classify(a, ZF, easy_ref):
     if a["fam"] != "run":
         return (a["fam"] if a["fam"] != "other" else a["type"]), " ".join(other_tags(a)), None
     if a.get("indoor"):   # Bislett indoor lap: reps from manual laps (whole laps), session distance untrusted
-        tag = "indoor " + ("laps (546.5 m)" if any(a["indoor"]["rep_m"]) else "distance untrusted")
+        tag = "indoor " + ("laps (546.5 m)" if any(a["indoor"]["rep_m"]) else "distance untrusted") + (
+            ", no GPS" if a["indoor"]["source"] == "no_gps" else "")
         if F.get("n_reps", 0) >= 3:
             L = F["rep_med_s"]; length = "short" if L < 100 else ("medium" if L < 300 else "long")
             return "intervals_track", f"{length} reps {tag}", None
@@ -877,6 +940,9 @@ def ref_polyline(G):
     return {"lat": np.interp(km, cum, la), "lon": np.interp(km, cum, lo), "m": km, "alt": alt, "L": float(cum[-1])}
 
 
+PROJ_JUMP_M, PROJ_JUMP_K = 200.0, 2.0   # project: max progress jump after an off-route spell = 200 m + 2 x own distance
+
+
 def project(G, ref, laps=False):
     """progress along the reference (m, physical direction) per grid second, on-route mask, direction"""
     T = G["T"]; L = ref["L"]
@@ -903,9 +969,15 @@ def project(G, ref, laps=False):
         prog = np.zeros(T + 1); on = np.zeros(T + 1, bool); best = rm[cur]; last_on = -1
         for i in range(T + 1):
             if G["gps"][i]:
-                # search 200 m back .. as far ahead as plausible since the last on-route fix (40 m + 15 m/s):
-                # keeps hairpins / switchbacks from jumping ahead along the reference
-                ahead = 40 + 15 * (i - last_on if last_on >= 0 else 60)
+                # search 200 m back .. as far ahead as plausible since the last on-route fix: 40 m + 15 m/s, but
+                # at most 200 m + 2x the distance moved since then (own distance field). Keeps hairpins /
+                # switchbacks, a long stop next to a later part of a loop and a detour from snapping km ahead;
+                # after a real shortcut the window catches up and the session re-acquires with a jump that
+                # compare._distance_mode marks as uncovered
+                if last_on >= 0:
+                    ahead = 40 + min(15 * (i - last_on), PROJ_JUMP_M + PROJ_JUMP_K * (G["d"][i] - G["d"][last_on]))
+                else:
+                    ahead = 40 + 15 * 60
                 lo_ = max(0, cur - 10); hi_ = max(lo_ + 1, min(n, int(np.searchsorted(rm, rm[cur] + ahead, side="right"))))
                 dd = np.hypot(x_[lo_:hi_] - mx[i], y_[lo_:hi_] - my[i])
                 j = int(np.argmin(dd))
@@ -1158,13 +1230,18 @@ def main():
         a["summ"] = f.get("summ") if f else None
         acts.append(a)
     A = {a["id"]: a for a in acts}
+    ij = D / "indoor_bislett.json"
+    indoor_time_only = json.loads(ij.read_text()).get("time_only", {}) if ij.exists() else {}
     for a in acts:
         a["F"] = features(a, ZF)
         a["gps"] = bool(a["f"] and a["f"]["pts"])
         a["F"]["dist_ok"] = a["F"]["dist_km"] >= 0.3 and (a["gps"] or a["type"] in ("treadmill_running", "indoor_running")
                                                           or bool((a["f"] or {}).get("swim")))   # pool: lengths x pool length
-        a["indoor"] = bislett_indoor(a)
-        if a["indoor"]:   # indoor lap: watch distance untrusted, reps from the manual laps
+        a["indoor"] = bislett_indoor(a, indoor_time_only)
+        if a["indoor"]:   # indoor lap: watch distance untrusted, reps from the laps
+            if a["indoor"]["source"] == "no_gps":   # no position at all: place it at Bislet
+                a["start"] = BISLET
+                a["F"]["at_bislet"] = True
             if a["indoor"]["n_reps"]:
                 a["f"] = {**a["f"], "ana": indoor_ana(a, a["indoor"])}
                 a["F"] = features(a, ZF)

@@ -32,10 +32,12 @@ uv run scripts/fetch_daily.py adrian --days 14 --min-interval 1   #    sleep, in
 uv run scripts/session_groups.py adrian                           # 2. places, routes, legs, reps -> groups.json
 uv run scripts/similarity.py adrian build                         # 3. similarity index (names, search, nearest)
 uv run scripts/fitness_model.py adrian                            # 4. fitness.json (shape per discipline)
+uv run scripts/together.py build                                 #    together.json: workouts run with others (all people)
 uv run garmin-app-cache adrian && uv run garmin-app               # 5. app cache (series, tracks, rep times) + app
 ```
-The app also refreshes its FIT cache in the background at startup, reloads `groups.json`, the similarity index and
-`fitness.json` when they change, and the Fitness page has a **Rebuild** button (re-runs step 4).
+Steps 1–4 run per person; `together.py build` runs once after them (it reads every person's data; incremental).
+The app also refreshes its FIT cache in the background at startup, reloads `groups.json`, the similarity index,
+`fitness.json` and `together.json` when they change, and the Fitness page has a **Rebuild** button (re-runs step 4).
 API keys, tokens and pacing: [docs/garmin-api-guide.md](docs/garmin-api-guide.md).
 
 ## Docs
@@ -43,6 +45,7 @@ API keys, tokens and pacing: [docs/garmin-api-guide.md](docs/garmin-api-guide.md
 |---|---|
 | [docs/app.md](docs/app.md) | The web app: pages and URLs, endpoints, architecture, place model, tests, known gaps |
 | [docs/compare.md](docs/compare.md) | Compare engine (`scripts/compare.py`) |
+| [docs/together.md](docs/together.md) | Together: workouts run with others (`scripts/together.py`, `/api/together`) |
 | [docs/similarity.md](docs/similarity.md) | Similarity index: search, nearest, groups, names |
 | [docs/session-groups.md](docs/session-groups.md) | Places, routes, legs and reps (`groups.json`) |
 | [docs/fitness-model.md](docs/fitness-model.md) | The fitness / shape model |
@@ -51,3 +54,5 @@ API keys, tokens and pacing: [docs/garmin-api-guide.md](docs/garmin-api-guide.md
 | [docs/data-layout.md](docs/data-layout.md) | Scripts and the `data/` folder layout |
 | [docs/README.md](docs/README.md) | Index of everything else (Garmin API, data findings, FIT files, calibration) |
 | [docs/plans/polish-audit.md](docs/plans/polish-audit.md) | UI audit, fixes and the desktop browser recipe for screenshots |
+| [docs/plans/compare-plan.md](docs/plans/compare-plan.md) | Plan: common start line, interval alignment, compare fixes and next features |
+| [docs/plans/together-plan.md](docs/plans/together-plan.md) | Plan: Together — workouts run with others (detection, list, session page with standings and replay) |

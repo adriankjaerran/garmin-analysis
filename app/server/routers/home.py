@@ -14,6 +14,7 @@ from ..deps import get_store
 from ..store import SPORTS, Store
 from . import days as days_router
 from . import fitness as fitness_router
+from .search import app_fields
 from .search import row as search_row
 
 router = APIRouter(tags=["home"])
@@ -115,6 +116,7 @@ def build(store: Store, anchor: dt.date) -> dict:
         r.update({"dur_s": a["dur_s"], "type_label": a.get("type_label"), "fit": a["fit"], "track": a["track"],
                   "load": a.get("load"), "te": a.get("te"), "swim": a.get("swim")})
         rows.append(r)
+    app_fields(store, rows)
 
     # ---- last 30 days' tracks (20 m polylines)
     map_tracks = [{"id": a["id"], "date": a["date"], "sport": a["sport"], "bbox": tracks[a["id"]]["bbox"],

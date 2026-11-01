@@ -6,6 +6,20 @@
 the same cache, keyed by FIT mtime+size+detector version). `--show` prints the leg table of a
 route (default: the largest ski route, i.e. the Holmenkollen rollerski climb).
 
+## FIT time base (`read_series`)
+t = seconds since the first record. **Watch clock jumps are taken out**: some files start recording before
+the clock is set (no GPS yet, an old clock), and when the first GPS fix sets it the timestamps jump forward
+by days to months between two records that are really a few seconds apart (patrik: 10 files, up to 9.4 M s;
+adrian: 2). The session's `total_elapsed_time` isn't affected, so `gps_quality.clock_jumps` takes the excess
+(record span − session elapsed, if > 60 s) out of the longest record gaps ≥ 600 s, leaving each at the
+median record interval; real long pauses with the watch running (elapsed = span: a 14 h hike) stay. Without
+a session elapsed time, gaps > 6 h are taken out. The same rule shifts lap and timer-event times, and is used by
+`run_analysis._read` (rep detector) and the app's FIT cache (`app/server/fitcache.read_fit`), so all of them
+share one time base. Timestamps after the jump are shifted back: the date stays Garmin's (from the pre-jump
+clock, which may itself be off). `read_series(...)["clock_jumps"]` = `[(t, s taken out)]`. Backwards jumps
+aren't seen in the data (records are sorted by time). `READER_VERSION` (2) is part of the caches built on
+the reader (similarity tracks, fitness features, compare) and the rep cache version is 2.
+
 ## Grouping
 - **Places**: first GPS fix of each session, greedy density clustering (densest point + everything
   within 400 m, repeat). Name = known spot within 600 m (`KNOWN`: Bislet, Sognsvann, Frognerseteren,
@@ -65,10 +79,12 @@ route (default: the largest ski route, i.e. the Holmenkollen rollerski climb).
   isn't in the files (all sport 12). Other sports keep their sport / activity type as type (hike,
   cycling, lap_swimming, rowing_v2, …) with `type_detail` tags: `no GPS`, `over 24 h (multi-day or timer left running)`, and for hikes `hilly` (≥ 25 m/km) / `steep` (≥ 60 m/km), `long` (≥ 20 km or ≥ 5 h),
   `fast: part by vehicle / bike?` (moving ≥ 7.5 km/h for ≥ 30 min: 5 hikes, e.g. a 112 km "hike").
-  No-GPS distances are `dist_trusted: false`. **Bislett indoor** (winter, GPS track < 30 % of the watch distance at
-  Bislet): `dist_trusted: false`, type `intervals_track` with detail `indoor laps (546.5 m)`, reps from the manual
-  laps (≥ 160 steps/min) as whole laps n × 546.5 m − 7.5 m; `indoor_bislett` {gps_cover, n_reps, single_lap,
-  rep_t_cv, rep_laps [[start_s, dur_s, n]], rep_m}. `indoor_grid()` gives consumers the matching 1 Hz speed
+  No-GPS distances are `dist_trusted: false`. **Bislett indoor** (GPS track < 30 % of the watch distance at Bislet, or
+  no GPS at all in Oct–Mar with ≥ 3 whole-lap reps; the latter are placed at Bislet): `dist_trusted: false`, type
+  `intervals_track` with detail `indoor laps (546.5 m)` (`, no GPS`), reps from the laps (≥ 160 steps/min, ending on
+  a manual press) as whole laps n × 546.5 m − 7.5 m (n = 1–3 from the rep time); `indoor_bislett` {source
+  (bislet_gps_lost / no_gps), gps_cover, n_reps, rep_laps [[start_s, dur_s, n]], rep_m}. Overrides:
+  `data/<person>/indoor_bislett.json` `time_only` {id: reason}. `indoor_grid()` gives consumers the matching 1 Hz speed
   (rep distance / rep time in reps, 0 between, no altitude). See [distance-calibration.md](distance-calibration.md). Intervals (runs and ski) get `sig` ("6×1000", "10×4:00",
   "3×1800 + 2×900"; ski: durations only, "4×4:00"), `reps` [time_s, dist_m, speed_ms, hr] and `breaks_s`.
 - **Pool swims** (`pool_swim()`, FIT sport 5 with length messages and a pool length): the records of a pool swim
@@ -128,8 +144,12 @@ Moving blips < 5 s inside a stop are stop; pauses split by < 20 s and < 30 m are
 ## Route comparison (routes with ≥ 3 sessions)
 - Reference = medoid session, thinned to 20 m (`ref` ≤ 300 points: lat, lon, km, alt).
 - Each member is projected onto it per second: nearest reference point within 80 m, searching
-  200 m back and at most 40 m + 15 m/s × time since the last good fix ahead (no jumps across
-  hairpins); progress = running max; direction = the one covering more of the reference.
+  200 m back and ahead at most 40 m + min(15 m/s × time since the last on-route fix, 200 m + 2 × own
+  distance moved since then) (`PROJ_JUMP_M`, `PROJ_JUMP_K`). The own-distance cap keeps hairpins, a long
+  stop next to a later part of a loop (R30 2026-05-22: stood 19 min at km 2 and snapped to km 12.4) and
+  detours from jumping kilometres ahead; after a real shortcut the window catches up and the session
+  re-acquires with a jump that compare marks as not covered ([compare.md](compare.md)). Progress = running
+  max; direction = the one covering more of the reference.
   Laps routes use the session's own distance scaled to the reference length.
 - **Waypoints** (ski routes): pause positions clustered along the route (≤ 150 m gaps); kept when
   ≥ 30 % of sessions (and ≥ 2) stop there, ≥ 250 m from start/end and 300 m from each other;

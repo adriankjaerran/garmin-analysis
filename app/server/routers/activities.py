@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..deps import get_store
@@ -32,7 +33,7 @@ def filter_activities(acts: list[dict], sport: str | None = None, type: str | No
             continue
         if ql:
             hay = " ".join(str(a.get(k) or "") for k in ("name", "type", "type_label", "stype", "type_detail", "sig",
-                                                         "workout_label", "place", "place_name", "start_place_name",
+                                                         "workout_label", "workout_detail", "place", "place_name", "start_place_name",
                                                          "region", "route", "route_name", "location", "date", "id")).lower()
             if not all(w in hay for w in ql.split()):
                 continue
@@ -48,7 +49,8 @@ def list_activities(sport: str | None = Query(None, description="family: run,ski
                     place: str | None = Query(None, description="main place (id or display name)"), route: str | None = None,
                     store: Store = Depends(get_store)):
     """Row: Garmin summary (dist_km, dur_s, hr = whole-activity average HR, ...) + place (main place id),
-    place_name, start_place(_name), region, route, route_name, type_label, workout_label, swim (pool swims)."""
+    place_name, start_place(_name), region, route, route_name, type_label, workout_label (the one workout name),
+    workout_detail, rep_pace_ms (avg rep pace, m/s), together, swim (pool swims)."""
     if place:
         ix = store.index()
         place = ix.place_id(place) if ix else place
@@ -58,6 +60,38 @@ def list_activities(sport: str | None = Query(None, description="family: run,ski
 
 def _rows(fields: list[str], rows: list | None) -> list[dict]:
     return [dict(zip(fields, r)) for r in rows or []]
+
+
+def _indoor_reps(ind: dict, arr: dict) -> tuple[list[dict], list[dict]]:
+    """Bislett indoor (groups.json `indoor_bislett`): reps = manual run laps, whole laps n x 546.5 m - 7.5 m;
+    breaks between them (standing rests, no distance: the watch distance is made up indoors)."""
+    t, hr = arr["t"].astype(float), arr.get("hr")
+    def hr_in(a, b):
+        if hr is None:
+            return None, None
+        h = hr[(t >= a) & (t < b)].astype(float)
+        h = h[np.isfinite(h) & (h > 0)]
+        return (int(round(h.mean())), int(h.max())) if len(h) > 5 else (None, None)
+    def hr_at(x):
+        if hr is None or not len(t):
+            return None
+        i = int(np.clip(np.searchsorted(t, x), 0, len(t) - 1))
+        return int(hr[i]) if np.isfinite(hr[i]) and hr[i] > 0 else None
+    reps, breaks = [], []
+    rl = [(t0, dur, m) for (t0, dur, _), m in zip(ind.get("rep_laps") or [], ind.get("rep_m") or [])]
+    for j, (t0, dur, m) in enumerate(rl):
+        h, hm = hr_in(t0, t0 + dur)
+        reps.append({"start": round(t0, 2), "end": round(t0 + dur, 2), "time": round(dur, 2), "dist": m,
+                     "speed": round(m / dur, 3) if m else None, "hr": h, "maxhr": hm})
+        if j + 1 < len(rl):
+            a, b = t0 + dur, rl[j + 1][0]
+            h, hm = hr_in(a, b)
+            peak = max((x for x in (hr_at(a + k) for k in range(-5, 6)) if x), default=None)
+            end_hr = hr_at(min(a + 60, b))
+            breaks.append({"start": round(a, 2), "end": round(b, 2), "time": round(b - a, 2), "dist": None, "speed": None,
+                           "hr": h, "maxhr": hm, "hr_peak": peak,
+                           "hr_drop": peak - end_hr if peak and end_hr else None, "standing": 1})
+    return reps, breaks
 
 
 def _neighbours(store: Store, aid: str) -> dict:
@@ -92,6 +126,8 @@ def get_activity(aid: str, max_points: int = Query(3600, ge=100, le=20000), stor
         out["laps"] = meta.get("laps") or []
         out["reps"] = meta.get("reps") or []
         out["breaks"] = meta.get("breaks") or []
+        if ga.get("indoor_bislett"):   # watch distance is made up indoors: reps from the whole-lap manual laps
+            out["reps"], out["breaks"] = _indoor_reps(ga["indoor_bislett"], arr)
         if meta.get("swim"):   # pool swim: lengths (start s, time s, strokes), pace per 100 m, swimming vs rest time
             out["swim"] = meta["swim"]
     elif ga.get("reps"):  # no FIT: durations only

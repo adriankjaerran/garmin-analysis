@@ -7,6 +7,7 @@ import "uplot/dist/uPlot.min.css";
 import { useEffect, useRef } from "preact/hooks";
 import { navigate } from "../lib/router";
 import { cssVar } from "../lib/format";
+import { useTheme } from "../lib/theme";
 import { dateAxis } from "../lib/chartAxes";
 import { DISC_LABEL, KIND_LABEL, discColor, pm, unitShort, type Disc, type FitSession, type FitnessDoc } from "../lib/fitness";
 
@@ -42,6 +43,7 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, w
   const hl = useRef(highlight);
   const zoomRef = useRef(onZoom);
   zoomRef.current = onZoom;
+  const theme = useTheme();
 
   useEffect(() => {
     hl.current = highlight;
@@ -135,10 +137,10 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, w
         if (p.kind === "race") {
           const r = 5.5 * dpr;
           ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy); ctx.closePath();
-          ctx.fillStyle = c; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.stroke();
+          ctx.fillStyle = c; ctx.fill(); ctx.strokeStyle = cssVar("--surface"); ctx.stroke();
         } else if (p.kind === "hard") {
           ctx.beginPath(); ctx.arc(cx, cy, 3.5 * dpr, 0, 2 * Math.PI);
-          ctx.fillStyle = rgba(c, 0.3 + 0.7 * w); ctx.fill(); ctx.strokeStyle = "#fff"; ctx.stroke();
+          ctx.fillStyle = rgba(c, 0.3 + 0.7 * w); ctx.fill(); ctx.strokeStyle = cssVar("--surface"); ctx.stroke();
         } else if (p.kind === "bound") {
           ctx.beginPath(); ctx.arc(cx, cy, 2.5 * dpr, 0, 2 * Math.PI);
           ctx.strokeStyle = rgba(c, w > 0 ? 0.9 : 0.35); ctx.stroke();
@@ -262,7 +264,7 @@ export function ShapeChart({ doc, discs, overall, bounds, from, to, highlight, w
       over.removeEventListener("click", onClick); over.removeEventListener("dblclick", onDbl);
       u.destroy(); u2?.destroy(); plot.current = null;
     };
-  }, [doc, discs.join(","), overall, bounds, withHr, from, to, height]);
+  }, [doc, discs.join(","), overall, bounds, withHr, from, to, height, theme]);
 
   return (
     <div class="shape-chart">

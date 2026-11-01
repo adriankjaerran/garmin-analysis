@@ -12,6 +12,10 @@ export interface SearchRow {
   sport_label?: string | null; place_name?: string | null; start_place?: string | null; start_place_name?: string | null;
   place_names?: string[]; exact_label?: string | null; rest_group_s?: number | null;
   bbox: [number, number, number, number] | null; poly?: string | null;
+  /** done with others (data/together.json) */
+  together?: { gid: string; label: string; kind: string; role: string; with: string[]; workout?: string | null } | null;
+  /** app-row fields (routers/search.app_fields): the one workout name, its detail, avg rep pace (m/s) */
+  workout_label?: string | null; workout_detail?: string | null; rep_pace_ms?: number | null;
 }
 export interface SearchResult { n: number; truncated: boolean; km: number; filters: Record<string, any>; families: Record<string, number>; rows: SearchRow[] }
 export interface Reason { c: string | null; s: number | null; text: string }

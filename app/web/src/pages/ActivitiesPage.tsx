@@ -7,12 +7,13 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi, type Activity, type Meta } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
-import { SPORTS, SPORT_LABEL, addDays, dur, isoLocal, km, num, pace, pace100, kmh, sportColor } from "../lib/format";
-import { FILTER_KEYS, compareUrl, coreBBox, filterQuery, placeCount, repLen, mmss, type Group, type SearchOptions, type SearchResult, type SearchRow, type TreeNode } from "../lib/search";
+import { SPORTS, SPORT_LABEL, addDays, dur, isoLocal, km, num, secs, sportColor, speedUnit, speedVal } from "../lib/format";
+import { FILTER_KEYS, compareUrl, coreBBox, filterQuery, placeCount, repLen, type Group, type SearchOptions, type SearchResult, type SearchRow, type TreeNode } from "../lib/search";
 import { Table, type Col } from "../components/Table";
 import { TracksMap } from "../components/TracksMap";
 import { GroupsMap, type GLine } from "../components/GroupsMap";
-import { ActivityKV, SportDot } from "../components/ActivityBits";
+import { ActivityKV, SportDot, TogetherMark, workoutTip as appWorkoutTip } from "../components/ActivityBits";
+import { PageHeader } from "../components/PageHeader";
 
 // ------------------------------------------------------------------ small controls
 /** text input that commits to the URL after a pause (or Enter / blur) */
@@ -145,7 +146,7 @@ function SimpleBar({ query, opts, meta, advOpen }: { query: URLSearchParams; opt
       {!advOpen && shown.map((k) => (
         <button key={k} class="chip on" onClick={() => drop(k)} title="Remove this filter">{advLabel(k, query.get(k)!, opts, query)} ×</button>
       ))}
-      {anyFilter && <button class="link" onClick={() => { const p: Record<string, null> = {}; for (const k of FILTER_KEYS) p[k] = null; setQuery(p); }}>Clear all</button>}
+      {anyFilter && <button class="link" onClick={clearFilters}>Clear all</button>}
     </div>
   );
 }
@@ -207,20 +208,20 @@ function AdvancedPanel({ query, opts }: { query: URLSearchParams; opts: SearchOp
 }
 
 // ------------------------------------------------------------------ results
-const usesPace = (s: string) => s === "run" || s === "hike";
-/** session or rep speed in the unit of the sport: run / hike min/km, swim /100 m, else km/h */
+/** session or rep speed in the unit of the sport (lib/format): on foot min/km, swim /100 m, else km/h */
 function speedCell(sport: string, ms: number | null | undefined) {
-  if (!ms) return "—";
-  if (usesPace(sport)) return pace(ms);
-  if (sport === "swim") return <>{pace100(ms)}<span class="muted"> /100</span></>;
-  return <>{kmh(ms)}<span class="muted"> km/h</span></>;
+  const v = speedVal(sport, ms);
+  if (v === "—") return v;
+  return <>{v}<span class="muted"> {speedUnit(sport)}</span></>;
 }
-const speedTitle = "Moving pace (min/km) for runs and hikes, /100 m for swims, else km/h";
-/** the signature ("6×1000", "3×1800 + 2×900", "Easy run 8–12 km"); same-workout label, reps and name in the tooltip */
-const workoutText = (r: SearchRow) => r.signature ?? r.family_label;
-const workoutTip = (r: SearchRow) => [r.exact_label ?? r.exact_key, r.rep_count ? `main reps ${r.rep_count} × ${repLen(r)} (measured median)` : "",
-  r.name, r.sport_label].filter(Boolean).join(" · ");
+const speedTitle = "Moving pace: min/km on foot (run, walk, hike), /100 m for swims, km/h for ski, bike and other";
+/** the one workout name ("6×1000", "1×1300 + 2×3000", "Easy run"; store.workout_name); detail, reps and name in the tooltip */
+const workoutText = (r: SearchRow) => r.workout_label ?? r.signature ?? r.family_label;
+const workoutTip = (r: SearchRow) => [appWorkoutTip(r), r.rep_count ? `main reps ${r.rep_count} × ${repLen(r)} (measured median)` : "",
+  r.sport_label].filter(Boolean).join(" · ");
 const placeText = (r: SearchRow) => r.place_name ?? r.place;
+/** sort key: faster first for pace and speed alike */
+const fastKey = (ms: number | null | undefined) => (ms ? -ms : null);
 
 function resultCols(picked: Set<string>, togglePick: (id: string) => void): Col<SearchRow>[] {
   return [
@@ -229,22 +230,34 @@ function resultCols(picked: Set<string>, togglePick: (id: string) => void): Col<
         onClick={(e) => { e.stopPropagation(); togglePick(r.id); }} /> },
     { key: "date", label: "Date", render: (r) => <span>{r.date} <span class="muted">{r.start?.slice(11, 16)}</span></span> },
     { key: "workout", label: "Workout", sort: (r) => workoutText(r) ?? "",
-      render: (r) => <span class="clip" style={{ maxWidth: "200px" }} title={workoutTip(r)}><SportDot sport={r.sport} />{workoutText(r)}</span> },
-    { key: "rep_speed_ms", label: "Rep pace", num: true, title: "Mean pace (runs) / speed of the main reps; hover for the mean rep time",
-      sort: (r) => (r.rep_speed_ms ? (usesPace(r.sport) ? 1000 / r.rep_speed_ms : -r.rep_speed_ms) : null),
-      render: (r) => (r.rep_count ? <span title={r.rep_time_s ? `mean rep time ${mmss(r.rep_time_s)}` : ""}>{speedCell(r.sport, r.rep_speed_ms)}</span> : "") },
+      render: (r) => <span class="clip" style={{ maxWidth: "200px" }} title={workoutTip(r)}><SportDot sport={r.sport} /><TogetherMark a={r} />{workoutText(r)}</span> },
+    { key: "rep_pace_ms", label: "Avg rep pace", num: true, title: "Average pace (on foot) / speed of the main reps = total rep distance / total rep time; hover for the median rep time",
+      sort: (r) => fastKey(r.rep_pace_ms),
+      render: (r) => (r.rep_count ? <span title={r.rep_time_s ? `median rep time ${secs(r.rep_time_s)}` : ""}>{speedCell(r.sport, r.rep_pace_ms ?? r.rep_speed_ms)}</span> : "") },
     { key: "rest_s", label: "Rest", num: true, title: "This activity's median rest between reps (the same-workout group's median in the tooltip; “rest ~2:30” in the workout name is that group's bin)",
-      render: (r) => (r.rest_s ? <span title={r.rest_group_s ? `this activity ${mmss(r.rest_s)} · its same-workout group ${mmss(r.rest_group_s)}` : ""}>{mmss(r.rest_s)}</span> : "") },
+      render: (r) => (r.rest_s ? <span title={r.rest_group_s ? `this activity ${secs(r.rest_s)} · its same-workout group ${secs(r.rest_group_s)}` : ""}>{secs(r.rest_s)}</span> : "") },
     { key: "dist_km", label: "km", num: true, render: (r) => km(r.dist_km) },
     { key: "moving_s", label: "Time", num: true, title: "Moving time", render: (r) => dur(r.moving_s) },
     { key: "speed_ms", label: "Pace", num: true, title: speedTitle,
-      sort: (r) => (r.speed_ms ? (usesPace(r.sport) ? 1000 / r.speed_ms : -r.speed_ms) : null), render: (r) => speedCell(r.sport, r.speed_ms) },
-    { key: "avg_hr", label: "HR", num: true, title: "Average HR of the whole activity", render: (r) => num(r.avg_hr) },
-    { key: "climb_m", label: "Climb", num: true, render: (r) => num(r.climb_m) },
+      sort: (r) => fastKey(r.speed_ms), render: (r) => speedCell(r.sport, r.speed_ms) },
+    { key: "avg_hr", label: "HR", num: true, title: "Average heart rate of the whole activity (bpm)", render: (r) => num(r.avg_hr) },
+    { key: "climb_m", label: "Climb", num: true, title: "Climb (m)", render: (r) => (r.climb_m ? `${num(r.climb_m)} m` : "—") },
     { key: "place", label: "Place", sort: (r) => placeText(r) ?? "",
       render: (r) => <span class="clip" style={{ maxWidth: "120px" }} title={[(r.place_names ?? r.places).length ? "touches " + (r.place_names ?? r.places).join(", ") : "", r.region ? "region " + r.region : ""].filter(Boolean).join(" · ")}>{placeText(r) ?? "—"}</span> },
     { key: "route", label: "Route", sort: (r) => (r.route ? +r.route.slice(1) : null), render: (r) => <span title={r.route_name ?? ""}>{r.route ?? "—"}</span> },
   ];
+}
+
+const clearFilters = () => { const p: Record<string, null> = {}; for (const k of FILTER_KEYS) p[k] = null; setQuery({ ...p, sel: null }); };
+/** empty result: say so in plain words, with the way out right there */
+function NoResults() {
+  return (
+    <div class="empty-state">
+      <p><b>No activities match these filters.</b></p>
+      <p class="muted">Try fewer words, another sport or a longer period.</p>
+      <button onClick={clearFilters}>Clear all filters</button>
+    </div>
+  );
 }
 
 /** selected row: summary + actions under the map (the map zooms to its track) */
@@ -272,7 +285,7 @@ function Results({ data, error, picked, togglePick, sel }: { data: SearchResult 
   const [hover, setHover] = useState<string | null>(null);
   const rows = data?.rows ?? [];
   const anyReps = rows.some((r) => r.rep_count);
-  const cols = useMemo(() => resultCols(picked, togglePick).filter((c) => anyReps || !["rep_speed_ms", "rest_s"].includes(c.key)), [picked, anyReps]);
+  const cols = useMemo(() => resultCols(picked, togglePick).filter((c) => anyReps || !["rep_pace_ms", "rest_s"].includes(c.key)), [picked, anyReps]);
   const selRow = sel ? rows.find((r) => r.id === sel) : undefined;
   const tracks = useMemo(() => rows.filter((r) => r.poly).map((r) => ({ id: r.id, sport: r.sport, poly: r.poly,
     width: r.id === sel ? 4.5 : picked.has(r.id) ? 4 : 2.5,
@@ -289,7 +302,7 @@ function Results({ data, error, picked, togglePick, sel }: { data: SearchResult 
   return (
     <div class="split">
       <div class="left">
-        {error ? <div class="err pane">{error}</div> :
+        {error ? <div class="err pane">Could not search the activities: {error}</div> : data && !rows.length ? <NoResults /> :
           <Table cols={cols} rows={rows} rowKey={(r) => r.id} highlight={hover} selected={sel} follow maxHeight="100%" defaultSort={["date", -1]} stickyCols={2}
             onRow={(r) => (r.id === sel ? navigate(`/activities/${r.id}`) : setQuery({ sel: r.id }))} onHover={(r) => setHover(r?.id ?? null)}
             empty={data ? "No activities match these filters." : "Loading…"} />}
@@ -506,22 +519,21 @@ export function ActivitiesPage() {
 
   return (
     <main class="full">
-      <div class="toolbar">
-        <h1>Activities</h1>
+      <PageHeader class="toolbar" title="Activities" sub={res.error ? "" : d ? `${d.n} activities, ${Math.round(d.km).toLocaleString("en-GB")} km` : "…"}
+        about="Every workout you recorded: filter by words, sport, period, place or workout, then preview, open or compare."
+        tips={["Click a row to preview it on the map; click it again to open the activity", "Tick rows, then “Compare ticked”",
+          "Search words match name, date, place, route and workout (e.g. 6×1000)", "Groups: the places, routes and workouts left by the filters", "👥 = done with others"]}>
         <div class="seg">
           <button class={view === "results" ? "on" : ""} onClick={() => setQuery({ view: null })}>List</button>
           <button class={view === "groups" ? "on" : ""} onClick={() => setQuery({ view: "groups", sel: null })}
             title="Places, regions, routes and the workout tree left by the current filters">Groups</button>
         </div>
-        <span class="count">{res.error ?? (d ? `${d.n} activities, ${Math.round(d.km).toLocaleString("en-GB")} km` : "…")}</span>
-        <div class="tools">
           {picked.size > 0 && <button onClick={() => setQuery({ pick: null })} title="Clear the ticked rows">Clear {picked.size} ticked</button>}
           {d && picked.size === 0 && d.n >= 2 && d.n <= 12 && view === "results" &&
             <a class="btn" href={compareUrl(d.rows.map((r) => r.id))} title="Compare every activity in the result">Compare all {d.n}</a>}
           <a class={"btn" + (picked.size < 2 ? " disabled" : "")} href={picked.size >= 2 ? compareUrl([...picked]) : undefined}
             title={picked.size < 2 ? "Tick at least two rows" : "Open the ticked activities in Compare"}>Compare ticked{picked.size ? ` (${picked.size})` : ""}</a>
-        </div>
-      </div>
+      </PageHeader>
       <SimpleBar query={query} opts={opts} meta={meta} advOpen={advOpen} />
       {advOpen && <AdvancedPanel query={query} opts={opts} />}
       {view === "results" ? <Results data={d} error={res.error} picked={picked} togglePick={togglePick} sel={sel} />

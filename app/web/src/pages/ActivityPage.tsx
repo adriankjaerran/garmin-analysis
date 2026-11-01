@@ -5,13 +5,14 @@ import type { Map as MLMap, MapMouseEvent } from "maplibre-gl";
 import { Popup } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useApi, type ActivityDetail, type Lap, type Leg, type Series, type SwimLength } from "../lib/api";
-import { setQuery, useLocation } from "../lib/router";
-import { dur, num, pace, pace100, kmh, time, dayLabel } from "../lib/format";
+import { currentPerson, setQuery, useLocation } from "../lib/router";
+import { dur, num, pace, pace100, kmh, time, longDate, onFoot, repLabel, secs, speedText as speedOf } from "../lib/format";
 import { RAMP, quantile } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
 import { SeriesCharts, drawablePanels, type Band, type PanelKey } from "../components/SeriesCharts";
 import { Table, type Col } from "../components/Table";
-import { SportDot, placeHref, speedText, typeText, what } from "../components/ActivityBits";
+import { SportDot, placeHref, speedText, typeText, workoutTip, togetherWith } from "../components/ActivityBits";
+import { PageHeader } from "../components/PageHeader";
 import { NearestPanel } from "../components/NearestPanel";
 import { ShapeSection } from "../components/ShapeSection";
 
@@ -129,7 +130,7 @@ function ActivityMap({ track, colorBy, sport, pauses, cursor, span, onHover }: {
     setData(map, "span", c.length > 1 ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: c } } : EMPTY);
   }, [map, span, track]);
 
-  const fmt = (v: number) => colorBy === "speed" ? (sport === "run" ? pace(v) + " /km" : kmh(v) + " km/h") : colorBy === "hr" ? `${Math.round(v)} bpm` : `${Math.round(v)} m`;
+  const fmt = (v: number) => colorBy === "speed" ? speedOf(sport, v) : colorBy === "hr" ? `${Math.round(v)} bpm` : `${Math.round(v)} m`;
   return (
     <MapView onReady={onReady} class="bordered">
       <div class="overlay bl ramp">
@@ -141,8 +142,8 @@ function ActivityMap({ track, colorBy, sport, pauses, cursor, span, onHover }: {
 
 
 const STROKE: Record<string, string> = { 0: "free", 1: "back", 2: "breast", 3: "fly", 4: "drill", 5: "mixed", 6: "IM" };
-const speedCell = (sport: string, ms: number | null | undefined) => (sport === "run" ? pace(ms) : sport === "swim" ? pace100(ms) : kmh(ms));
-const speedHead = (sport: string) => (sport === "run" ? "Pace" : sport === "swim" ? "/100 m" : "km/h");
+const speedCell = (sport: string, ms: number | null | undefined) => (onFoot(sport) ? pace(ms) : sport === "swim" ? pace100(ms) : kmh(ms));
+const speedHead = (sport: string) => (onFoot(sport) ? "Pace /km" : sport === "swim" ? "/100 m" : "km/h");
 /** drop columns whose cells are all empty in these rows (e.g. HR on a swim, intensity on old files) */
 const nonEmpty = <T,>(cols: Col<T>[], rows: T[], keys: Record<string, (r: T) => unknown>) =>
   cols.filter((c) => !keys[c.key] || rows.some((r) => { const v = keys[c.key](r); return v !== null && v !== undefined && v !== ""; }));
@@ -229,14 +230,14 @@ function Segments({ data, sport, setSpan, setCursor }: { data: ActivityDetail; s
       </div>
       {tab === "reps" && (
         <Table rows={reps} rowKey={(_r, i) => String(i)} onHover={(r) => setSpan(r ? [r.start!, r.end!] : null)} cols={nonEmpty([
-          { key: "n", label: "Rep", num: true, render: (r) => reps.indexOf(r) + 1, sort: (r) => r.start },
+          { key: "n", label: "Rep", render: (r) => repLabel(reps.indexOf(r) + 1), sort: (r) => r.start },
           { key: "start", label: "Start", num: true, render: (r) => dur(r.start) },
-          { key: "time", label: "Time", num: true, render: (r) => dur(r.time) },
+          { key: "time", label: "Time", num: true, render: (r) => secs(r.time) },
           { key: "dist", label: "Dist (m)", num: true, render: (r) => num(r.dist) },
           { key: "speed", label: speedHead(sport), num: true, render: (r) => speedCell(sport, r.speed) },
           { key: "hr", label: "Avg HR", num: true, render: (r) => num(r.hr) },
           { key: "maxhr", label: "Max HR", num: true, render: (r) => num(r.maxhr) },
-          { key: "brk", label: "Break after", num: true, render: (r) => dur(data.breaks[reps.indexOf(r)]?.time), sort: (r) => data.breaks[reps.indexOf(r)]?.time ?? null },
+          { key: "brk", label: "Break after", num: true, render: (r) => { const b = data.breaks[reps.indexOf(r)]?.time; return b === undefined || b === null ? "" : secs(b); }, sort: (r) => data.breaks[reps.indexOf(r)]?.time ?? null },
         ], reps, { hr: (r) => r.hr, maxhr: (r) => r.maxhr })} />
       )}
       {tab === "lengths" && (
@@ -299,7 +300,8 @@ export function ActivityPage({ id }: { id: string }) {
   const s: Series | null = data?.series ?? null;
   const a = data?.activity;
   const swim = data?.swim ?? null;
-  const panels: PanelKey[] = swim ? ["pace100", "hr", "cad"] : a?.sport === "run" ? ["pace", "hr", "alt", "cad", "power"] : ["speed", "hr", "alt"];
+  // pace on foot (run, walk, hike), speed for ski / bike / other (lib/format onFoot)
+  const panels: PanelKey[] = swim ? ["pace100", "hr", "cad"] : a?.sport === "run" ? ["pace", "hr", "alt", "cad", "power"] : onFoot(a?.sport) ? ["paceSlow", "hr", "alt"] : ["speed", "hr", "alt"];
   const drawable = useMemo(() => (s ? drawablePanels(s, panels) : []), [s, panels.join(",")]);
   const bands = useMemo<Band[]>(() => {
     if (!data) return [];
@@ -324,7 +326,16 @@ export function ActivityPage({ id }: { id: string }) {
     if (s.lat?.[i] != null) setCursor([s.lon![i]!, s.lat[i]!]);
   };
 
-  if (error) return <main><h1>Activity {id}</h1><div class="err">{error}</div></main>;
+  if (error) return (
+    <main>
+      <PageHeader title="Activity not found" />
+      <div class="empty-state">
+        <p><b>{/no such activity|404/i.test(error) ? `There is no activity ${id} for ${currentPerson()[0].toUpperCase() + currentPerson().slice(1)}.` : "This activity could not be loaded."}</b></p>
+        <p class="muted">{/no such activity|404/i.test(error) ? "It may belong to someone else (switch person at the top left), or the link is old." : `The server said: ${error}`}</p>
+        <a class="btn" href="/activities">All activities</a> <a class="btn" href="/">Home</a>
+      </div>
+    </main>
+  );
   if (!data || !a) return <main><div class="empty">Loading…</div></main>;
   const g = data.group;
   const sport = a.sport;
@@ -337,33 +348,36 @@ export function ActivityPage({ id }: { id: string }) {
   return (
     <main>
       <section class="first">
-        <div class="head">
-          <h1><SportDot sport={sport} />{a.name ?? a.type}</h1>
-          <span class="sub">{dayLabel(a.date)} {time(a.start)}</span>
-          <div class="tools">
-            <a class="btn" href={`/day/${a.date}`}>Day view</a>
-            {a.fit && <a class="btn" href={`/compare?suggest=${a.id}`} title="Compare with similar sessions (same workout / route)">Compare</a>}
-            <a class="btn" href={data.older ? `/activities/${data.older}` : undefined} aria-disabled={!data.older} title="Older activity">← Older</a>
-            <a class="btn" href={data.newer ? `/activities/${data.newer}` : undefined} title="Newer activity">Newer →</a>
-          </div>
-        </div>
+        <PageHeader title={<><SportDot sport={sport} />{a.name ?? a.type}</>} sub={`${longDate(a.date)} ${time(a.start)}`}
+          about="One workout: the track coloured by pace, heart rate or elevation, the charts, the reps or laps, what it says about your shape, and the most similar workouts."
+          tips={["Hover the chart to move a marker on the map, or hover the track to move the chart cursor", "Hover a rep / leg / lap row to see that stretch on the map",
+            "Compare lines this workout up with similar ones", "← Older / Newer → step through your activities"]}>
+          {a.together && (
+            <a class="tg-link" href={`/together/${a.together.gid}`} title="Who did it with you, and who was faster">
+              👥 {togetherWith(a.together)}{a.together.kind === "intervals" ? " · see results" : ""} ›</a>
+          )}
+          <a class="btn" href={`/day/${a.date}`}>Day view</a>
+          {a.fit && <a class="btn" href={`/compare?suggest=${a.id}`} title="Compare with similar sessions (same workout / route)">Compare</a>}
+          <a class="btn" href={data.older ? `/activities/${data.older}` : undefined} aria-disabled={!data.older} title="Older activity">← Older</a>
+          <a class="btn" href={data.newer ? `/activities/${data.newer}` : undefined} title="Newer activity">Newer →</a>
+        </PageHeader>
         <dl class="kv">
           <dt>Type</dt><dd>{typeText(a)}{a.type_detail ? <span class="muted"> · {a.type_detail}</span> : null}</dd>
           <dt>Place</dt><dd>{a.place ? <a href={placeHref(a.place)}>{a.place_name ?? a.place}</a> : a.location ?? "—"}
             {startDiffers ? <span class="muted"> · start <a href={placeHref(a.start_place!)}>{a.start_place_name ?? a.start_place}</a></span> : a.region && a.region !== a.place_name ? <span class="muted"> · {a.region}</span> : null}</dd>
           <dt>Distance</dt><dd>{a.dist_km ? `${a.dist_km.toFixed(2)} km` : "—"}{g.dist_trusted === false ? <span class="muted"> (no GPS, not trusted)</span> : null}</dd>
-          <dt>Route</dt><dd title={data.route?.name}>{data.route ? <><a href={`/places?route=${data.route.id}`}>{data.route.id} {data.route.name}</a> <span class="muted">{g.route_dir ? `${g.route_dir}, ` : ""}{data.route.n} sessions</span></> : "—"}</dd>
+          <dt>Route</dt><dd title={data.route?.name}>{data.route ? <><a href={`/places?route=${data.route.id}`}>{data.route.id} {data.route.name}</a> <span class="muted">{g.route_dir === "rev" ? "reverse direction, " : ""}{data.route.n} sessions</span></> : "—"}</dd>
           {swim ? <><dt>Swimming / rest</dt><dd>{dur(swim.active_s)} / {dur(swim.rest_s)} <span class="muted">{swim.n_rests ?? 0} rests{swim.longest_rest_s ? `, longest ${dur(swim.longest_rest_s)}` : ""}; pace from swimming time</span></dd></>
             : <><dt>Moving / paused</dt><dd>{dur(g.moving_s ?? a.moving_s)} / {dur(g.pause_s)} <span class="muted">{g.n_pauses ?? 0} pauses{g.longest_pause_s ? `, longest ${dur(g.longest_pause_s)}` : ""}</span></dd></>}
-          <dt>Workout</dt><dd>{what(a)}</dd>
-          <dt>{sport === "run" || swim ? "Pace" : "Speed"}</dt><dd>{speedText(a)}{swim ? null : <span class="muted"> moving</span>}</dd>
-          <dt>Heart rate</dt><dd>{a.hr === null ? "—" : <>{num(a.hr)} avg, {num(a.maxhr)} max <span class="muted">whole activity</span></>}</dd>
+          <dt>Workout</dt><dd title={workoutTip(a)}>{a.workout_label ?? typeText(a)}{a.rep_pace_ms ? <span class="muted" title="average rep pace = total rep distance / total rep time of the main reps"> · avg rep pace {speedOf(sport, a.rep_pace_ms)}</span> : null}</dd>
+          <dt>{onFoot(sport) || swim ? "Pace" : "Speed"}</dt><dd>{speedText(a)}{swim ? null : <span class="muted"> moving</span>}</dd>
+          <dt>Heart rate</dt><dd>{a.hr === null ? "—" : <>{num(a.hr)} bpm avg, {num(a.maxhr)} max <span class="muted">whole activity</span></>}</dd>
           {swim ? <>
             <dt>Pool</dt><dd>{swim.pool_m ? `${num(swim.pool_m)} m` : "—"} <span class="muted">{swim.n_lengths ?? swim.lengths?.length} lengths{swim.bad_lengths ? `, ${swim.bad_lengths} glitch lengths dropped` : ""}</span></dd>
             <dt>Strokes</dt><dd>{swim.strokes_per_length ? `${num(swim.strokes_per_length, 1)} per length` : "—"} <span class="muted">timer {dur(swim.timer_s)}, elapsed {dur(swim.elapsed_s)}</span></dd>
           </> : <>
             <dt>Climb</dt><dd>{a.elev !== null ? `${a.elev} m` : "—"}</dd>
-            <dt>Load / TE</dt><dd>{num(a.load)} / {a.te ?? "—"}</dd>
+            <dt title="Garmin training load / aerobic training effect (0–5)">Training load / effect</dt><dd>{num(a.load)} / {a.te ?? "—"}</dd>
           </>}
         </dl>
       </section>
@@ -379,7 +393,7 @@ export function ActivityPage({ id }: { id: string }) {
                 <div class="seg">
                   {(["speed", "hr", "alt"] as ColorBy[]).map((c) => (
                     <button key={c} class={colorBy === c ? "on" : ""} onClick={() => setQuery({ color: c === "speed" ? null : c })}>
-                      {c === "speed" ? (sport === "run" ? "Pace" : "Speed") : c === "hr" ? "Heart rate" : "Elevation"}
+                      {c === "speed" ? (onFoot(sport) ? "Pace" : "Speed") : c === "hr" ? "Heart rate" : "Elevation"}
                     </button>
                   ))}
                 </div>

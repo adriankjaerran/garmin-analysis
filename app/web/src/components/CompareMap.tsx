@@ -1,5 +1,7 @@
 // Map for the Compare page: every session's track (reference dark, others coloured or grey), the route
-// reference (dashed) and common stops, and one marker per session at the chart cursor (ghost race).
+// reference (dashed) and common stops, and one marker per session at the chart cursor (ghost race). With a common
+// start line, each track's lead-in (before its start on the line, `cut` = file elapsed s) is drawn thin and dashed;
+// with one rep selected (`win`) only that rep's stretch is drawn fully and the map is fitted to it.
 import type { Map as MLMap, MapLayerMouseEvent } from "maplibre-gl";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { MapView, setData, fitBBox, EMPTY } from "./MapView";
@@ -17,29 +19,50 @@ interface Props {
   routeRef?: { lat: number[]; lon: number[]; waypoints?: { lat: number; lon: number; name: string }[] } | null;
   onPick?: (id: string | null) => void;
   onClick?: (id: string) => void;
+  /** common start: per session the file elapsed second where it starts on the line (lead-in before it dimmed) */
+  cut?: Record<string, number>;
+  /** one rep / break selected: per session the [from, to] file elapsed seconds drawn (the rest dimmed), map fitted to them */
+  win?: Record<string, [number, number]> | null;
 }
 
-export function CompareMap({ tracks, order, colors, refId, focus, many, positions, routeRef, onPick, onClick }: Props) {
+export function CompareMap({ tracks, order, colors, refId, focus, many, positions, routeRef, onPick, onClick, cut, win }: Props) {
   const [map, setMap] = useState<MLMap | null>(null);
   const cb = useMemo(() => ({ onPick, onClick }), []);
   cb.onPick = onPick; cb.onClick = onClick;
 
-  const coords = useMemo(() => {
-    const o: Record<string, [number, number][]> = {};
+  // coords = the compared part of each track (from its start on the line with a common start, or the selected rep's
+  // window); lead = the parts outside it (drawn dimmed)
+  const { coords, lead } = useMemo(() => {
+    const o: Record<string, [number, number][]> = {}, l: Record<string, [number, number][][]> = {};
     for (const id of order) {
       const t = tracks[id];
       if (!t) continue;
-      const c: [number, number][] = [];
-      for (let i = 0; i < t.t.length; i++) if (t.lat[i] !== null) c.push([t.lon[i], t.lat[i]]);
+      const [t0, t1] = win ? win[id] ?? [Infinity, Infinity] : [cut?.[id] ?? -Infinity, Infinity];
+      const c: [number, number][] = [], parts: [number, number][][] = [[]];
+      for (let i = 0; i < t.t.length; i++) {
+        if (t.lat[i] === null) continue;
+        const pt: [number, number] = [t.lon[i], t.lat[i]];
+        if (t.t[i] < t0 || t.t[i] > t1) {
+          if (c.length && !parts[parts.length - 1].length) parts[parts.length - 1].push(c[c.length - 1]);   // joins the drawn part
+          parts[parts.length - 1].push(pt);
+        } else {
+          if (parts[parts.length - 1].length) { parts[parts.length - 1].push(pt); parts.push([]); }
+          c.push(pt);
+        }
+      }
       o[id] = c;
+      const lp = parts.filter((p) => p.length > 1);
+      if (lp.length) l[id] = lp;
     }
-    return o;
-  }, [tracks, order]);
+    return { coords: o, lead: l };
+  }, [tracks, order, cut, win]);
 
   const onReady = (m: MLMap) => {
-    for (const s of ["c-tracks", "c-ref", "c-wp", "c-focus", "c-pos"]) setData(m, s, EMPTY);
+    for (const s of ["c-tracks", "c-lead", "c-ref", "c-wp", "c-focus", "c-pos"]) setData(m, s, EMPTY);
     m.addLayer({ id: "c-ref", type: "line", source: "c-ref", layout: { "line-join": "round", "line-cap": "round" },
       paint: { "line-color": "#1d2125", "line-width": 2, "line-dasharray": [2, 2], "line-opacity": 0.6 } });
+    m.addLayer({ id: "c-lead", type: "line", source: "c-lead", layout: { "line-join": "round", "line-cap": "butt" },
+      paint: { "line-color": ["get", "color"], "line-width": 1.5, "line-dasharray": [1.5, 2], "line-opacity": 0.45 } });
     m.addLayer({ id: "c-tracks", type: "line", source: "c-tracks", layout: { "line-join": "round", "line-cap": "round" },
       paint: { "line-color": ["get", "color"], "line-width": ["get", "width"], "line-opacity": ["get", "op"] } });
     m.addLayer({ id: "c-focus-casing", type: "line", source: "c-focus", layout: { "line-join": "round", "line-cap": "round" },
@@ -68,9 +91,11 @@ export function CompareMap({ tracks, order, colors, refId, focus, many, position
     setData(map, "c-tracks", { type: "FeatureCollection", features: ids.filter((id) => coords[id]?.length > 1).map((id) => ({
       type: "Feature", properties: { id, color: colors[id], width: id === refId ? 3.5 : many ? 2 : 3, op: id === refId ? 0.95 : many ? 0.6 : 0.85 },
       geometry: { type: "LineString", coordinates: coords[id] } })) });
+    setData(map, "c-lead", { type: "FeatureCollection", features: ids.filter((id) => lead[id]).map((id) => ({
+      type: "Feature", properties: { id, color: colors[id] }, geometry: { type: "MultiLineString", coordinates: lead[id] } })) });
     const b = unionBBox(Object.values(coords).map((c) => bboxOfCoords(c)).filter((x): x is BBox => !!x));
     fitBBox(map, b, { padding: 30 });
-  }, [map, coords, colors, refId, many]);
+  }, [map, coords, lead, colors, refId, many]);
 
   useEffect(() => {
     if (!map) return;

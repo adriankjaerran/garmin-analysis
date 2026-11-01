@@ -3,21 +3,22 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useApi } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
-import { dur, km, kmh, pace, pace100 } from "../lib/format";
+import { dur, km, secs, speedUnit, speedVal } from "../lib/format";
 import { decodePolyline, unionBBox, type BBox } from "../lib/geo";
 import { compareUrl, coreBBox, type NearestResult, type NearRow } from "../lib/search";
 import { Table } from "./Table";
 import { TracksMap } from "./TracksMap";
-import { SportDot } from "./ActivityBits";
+import { SportDot, TogetherMark, workoutText as appWorkoutText, workoutTip } from "./ActivityBits";
 
 const PRESETS = [["balanced", "Balanced"], ["workout", "Same workout"], ["route", "Same route"], ["place", "Same place"]] as const;
 const KS = [5, 10, 20];
 
 type Row = NearRow & { place_name?: string | null; sport_label?: string | null; exact_label?: string | null; rest_group_s?: number | null };
-const workoutText = (r: Row) => (r.rep_count ? (r.signature ?? r.exact_key) : (r.signature ?? r.family_label));
-/** rep pace in the sport's unit: /km for runs, /100 m for swims, km/h otherwise */
-const repPace = (r: Row) => (!r.rep_speed_ms ? "—" : r.sport === "run" ? pace(r.rep_speed_ms) : r.sport === "swim" ? pace100(r.rep_speed_ms) : kmh(r.rep_speed_ms));
-const restText = (r: Row) => (r.rest_s ? dur(r.rest_s) : "—");
+/** the one workout name (store.workout_name) */
+const workoutText = (r: Row) => r.workout_label ?? r.signature ?? r.family_label;
+/** avg rep pace (total rep distance / total rep time) in the sport's unit, without the unit (it is in the header) */
+const repPace = (r: Row) => speedVal(r.sport, r.rep_pace_ms ?? r.rep_speed_ms);
+const restText = (r: Row) => (r.rest_s ? secs(r.rest_s) : "—");
 
 function Components({ r, weights }: { r: Row; weights: Record<string, number> }) {
   const cs = Object.entries(weights).filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]);
@@ -61,9 +62,8 @@ export function NearestPanel({ id }: { id: string }) {
   const ids = [id, ...rows.map((r) => r.id)];
   const comps = data ? Object.entries(data.weights).filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]) : [];
   const hasMap = !data || !!extra || tracks.length > 0;  // hide the map when nothing has a track (pool swims, treadmill)
-  const unit = qr?.sport === "run" ? "/km" : qr?.sport === "swim" ? "/100 m" : "km/h";
-  const self = qr ? [qr.exact_label ?? workoutText(qr), qr.rep_count ? `reps ${repPace(qr)} ${unit}` : null, qr.rest_s ? `rest ${restText(qr)}` : null,
-    `${dur(qr.moving_s)} moving`].filter(Boolean).join(" · ") : "";
+  const unit = speedUnit(qr?.sport);
+  const self = qr ? [appWorkoutText(qr), qr.rest_s ? `rest ${restText(qr)}` : null, `${dur(qr.moving_s)} moving`].filter(Boolean).join(" · ") : "";
 
   return (
     <section id="closest" ref={sec}>
@@ -88,19 +88,18 @@ export function NearestPanel({ id }: { id: string }) {
             defaultSort={["score", -1]} empty={data ? "No other activities of this sport." : "Loading…"} cols={[
               { key: "rank", label: "#", num: true, sort: (r) => -r.score, render: (r) => rows.indexOf(r) + 1 },
               { key: "date", label: "Date", render: (r) => <a href={`/activities/${r.id}`}>{r.date}</a> },
-              { key: "workout", label: "Workout", sort: (r) => workoutText(r) ?? "", render: (r) => <span title={[r.name, r.exact_label].filter(Boolean).join("\n")}><SportDot sport={r.sport} />{workoutText(r)}</span> },
+              { key: "workout", label: "Workout", sort: (r) => workoutText(r) ?? "", render: (r) => <span class="clip" style={{ maxWidth: "180px" }} title={workoutTip(r)}><SportDot sport={r.sport} /><TogetherMark a={r} />{workoutText(r)}</span> },
               { key: "dist_km", label: "km", num: true, render: (r) => km(r.dist_km) },
               { key: "moving_s", label: "Moving", num: true, render: (r) => dur(r.moving_s), title: "Moving time" },
               ...(intervals ? [
-                { key: "rep_speed_ms", label: `Rep ${unit}`, num: true, render: repPace, sort: (r: Row) => r.rep_speed_ms ?? null, title: "Mean rep pace / speed" },
+                { key: "rep_pace_ms", label: `Rep ${unit}`, num: true, render: repPace, sort: (r: Row) => r.rep_pace_ms ?? r.rep_speed_ms ?? null, title: `Average rep pace (total rep distance / total rep time), ${unit}` },
                 { key: "rest_s", label: "Rest", num: true, render: (r: Row) => <span title={r.rest_group_s ? `this session ${restText(r)}, its same-workout group ~${dur(r.rest_group_s)}` : ""}>{restText(r)}</span>,
                   title: "Median rest between reps in that session (the ~ value in the workout label is its group's median)" },
               ] : []),
-              { key: "place", label: "Place", render: (r) => r.place_name ?? r.place ?? "—", sort: (r) => r.place_name ?? r.place ?? "" },
+              { key: "place", label: "Place", render: (r) => { const p = r.place_name ?? r.place ?? "—"; return <span class="clip" style={{ maxWidth: "110px" }} title={p}>{p}</span>; }, sort: (r) => r.place_name ?? r.place ?? "" },
               { key: "score", label: "Score", num: true, render: (r) => r.score.toFixed(2) },
-              { key: "parts", label: "Components", sort: (r) => r.score, title: "One bar per weighted component (width = weight, fill = score; faint = not computable, counts 0.4). Hover for values.",
-                render: (r) => <Components r={r} weights={data!.weights} /> },
-              { key: "reasons", label: "Why", sort: (r) => r.reasons[0]?.text ?? "", render: (r) => <span class="muted why" title={r.reasons.map((x) => `${x.text} (${x.c} ${x.s?.toFixed(2)})`).join("\n")}>{r.reasons[0]?.text ?? ""}{r.reasons.length > 1 ? <span class="more"> +{r.reasons.length - 1}</span> : null}</span> },
+              { key: "parts", label: "Why", sort: (r) => r.score, title: "One bar per weighted component (width = weight, fill = how close; faint = not computable). Hover for the reasons.",
+                render: (r) => <span class="why-cell" title={r.reasons.map((x) => x.text).join("\n")}><Components r={r} weights={data!.weights} /><span class="why-i" aria-label="why">ⓘ</span></span> },
             ]} />
           {hasMap && <TracksMap tracks={tracks} extra={extra} fit={fit} highlight={hover} onHover={setHover} onClick={(x) => x !== id && navigate(`/activities/${x}`)}
             style={{ height: "360px" }} class="bordered" markers={false} compact empty={data ? (extra ? "" : "No GPS tracks") : "Loading…"}>

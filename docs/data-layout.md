@@ -17,12 +17,16 @@ TLS version Garmin requires.
 - `scripts/geocode_places.py <person> [--dry-run|--repick|--limit N]`: one-off OSM Nominatim reverse geocode of generically named start-cluster centres (≤ 1 request/s, cached, never re-fetched), writes `cache/geocode.json` for session_groups' place names ([session-groups.md](session-groups.md))
 - `scripts/ski_intervals.py <person> <id> ...`: ski interval detector (lap workouts / hard efforts), used by session_groups and compare; the CLI prints reps and work blocks
 - `scripts/similarity.py <person> build|search|nearest|groups|validate`: similarity engine on top of `groups.json`, writes `similarity_index.json` + `tracks.json` ([similarity.md](similarity.md))
+- `scripts/together.py build|list|show <gid>|validate`: workouts run with others across all people, writes `data/together.json` (incremental, caches in `data/_together/`) ([together.md](together.md))
 - `scripts/build_report.py <person>`: writes `data/<person>/report.html`, a self-contained overview (template: `scripts/report_template.html`)
 
 Guides: [garmin-api-guide.md](garmin-api-guide.md), [run-analysis.md](run-analysis.md), [report.md](report.md).
 
 ## Layout (`data/` is gitignored, since it's personal health data)
 ```
+data/together.json                       cross-person groups: workouts run with others (together.py)
+data/people.json                         optional: {id: {name, initials, colour, colour_dark}} (hand-edited)
+data/_together/                          together.py caches (cache.pkl, sessions.pkl); not a person folder
 data/<person>/
   _requests.jsonl                        one line per HTTP request
   activities/<YYYY-MM-DD>_<id>_<type>/
@@ -43,4 +47,5 @@ data/<person>/
   cache/series/<id>.npz, cache/tracks.json  web app FIT cache (app/server/fitcache.py, docs/app.md)
   screenshots/<YYYY-MM-DD>/              report screenshots for visual checks
   profile/user_settings.json  heart_rate_zones.json
+  profile/hr_settings.json               optional, hand-edited {max_hr, rest_hr} (Together effort as % of HR reserve)
 ```

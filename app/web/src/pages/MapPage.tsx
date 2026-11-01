@@ -7,6 +7,7 @@ import { qs, useApi, type Meta, type TrackLite } from "../lib/api";
 import { decodePolyline, type BBox } from "../lib/geo";
 import { SPORT_LABEL, km, sportColor, typeLabel } from "../lib/format";
 import { navigate, setQuery, useLocation } from "../lib/router";
+import { PageHeader } from "../components/PageHeader";
 
 /** Fit to where most tracks are: tracks whose centre is within ~60 km of the median centre. */
 function homeBBox(tracks: TrackLite[]): BBox | null {
@@ -101,8 +102,9 @@ export function MapPage() {
 
   return (
     <main class="full">
-      <div class="toolbar">
-        <h1>Map</h1>
+      <PageHeader class="toolbar" title="Map" sub={loading ? "Loading…" : error ? "" : `${data?.n ?? 0} tracks`}
+        about="Every GPS track you have recorded, coloured by sport or as a heat map of where you go most."
+        tips={["Hover a track to see the activity; click it to open", "Heat shows where tracks overlap most", "The view (centre, zoom) is in the URL: share or bookmark it"]}>
         <div class="chips">
           <button class={"chip" + (!sport ? " on" : "")} onClick={() => setQuery({ sport: null })}>All</button>
           {meta?.sports.map((s) => (
@@ -115,15 +117,13 @@ export function MapPage() {
           <option value="">All years</option>
           {meta?.years.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
-        <span class="count">{loading ? "Loading…" : error ? error : `${data?.n ?? 0} tracks`}</span>
-        <div class="tools">
-          <button onClick={() => map && data && fitBBox(map, homeBBox(data.tracks), { padding: 30, animate: true })}>Fit home</button>
-          <div class="seg">
-            <button class={mode === "lines" ? "on" : ""} onClick={() => setQuery({ mode: null })}>By sport</button>
-            <button class={mode === "heat" ? "on" : ""} onClick={() => setQuery({ mode: "heat" })}>Heat</button>
-          </div>
+        <button onClick={() => map && data && fitBBox(map, homeBBox(data.tracks), { padding: 30, animate: true })}>Fit home</button>
+        <div class="seg">
+          <button class={mode === "lines" ? "on" : ""} onClick={() => setQuery({ mode: null })}>By sport</button>
+          <button class={mode === "heat" ? "on" : ""} onClick={() => setQuery({ mode: "heat" })}>Heat</button>
         </div>
-      </div>
+      </PageHeader>
+      {error && <div class="err pane">Could not load the tracks: {error}</div>}
       <MapView class="fill" style={{ flex: 1 }} onReady={onReady} defaultBasemap="grey" />
     </main>
   );

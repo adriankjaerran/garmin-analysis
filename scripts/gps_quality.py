@@ -24,6 +24,7 @@ it falls back to fitparse.
 from __future__ import annotations
 
 import calendar
+import itertools
 import math
 import statistics
 import struct
@@ -118,6 +119,57 @@ def _read_fast(path: Path) -> dict:
             p += total
         pos = end + 2
     return out
+
+
+CLOCK_GAP_S = 600         # a record gap this long may be a watch clock jump (not a real pause)
+CLOCK_SLACK_S = 60        # record span may exceed the session's elapsed time by this much without a fix
+CLOCK_NO_SESSION_S = 6 * 3600   # without a session elapsed time: gaps longer than this are clock jumps
+
+
+def clock_jumps(ts, elapsed_s=None, start_ts=None) -> list:
+    """Watch clock jumps in a FIT file: [(ts_from, shift_s)]: timestamps >= ts_from are shifted back by shift_s
+    (cumulative over the list, see `unjump`).
+
+    Some watches (patrik's 3077, adrian's fr935 once) start recording before the clock is synced: the first part
+    of the file has no GPS and an old clock, and when the GPS fix sets the clock, the timestamps jump forward by
+    days to months (up to 9.4 M s) between two records that are really a few seconds apart. The session's
+    `total_elapsed_time` is not affected, so the jump size is known: excess = record span - session elapsed.
+    The excess is taken out of the longest record gaps >= CLOCK_GAP_S (each one is left at the median record
+    interval), so real long pauses (a 14 h hike with the watch running: elapsed = span) stay untouched. Without
+    a session elapsed time, gaps > CLOCK_NO_SESSION_S are taken out. Backwards jumps are not seen in the data
+    (timestamps only go forward); records are sorted by time anyway.
+    ts: record timestamps (s, any epoch), sorted. elapsed_s: session total_elapsed_time (s) or None.
+    start_ts: session start_time (default ts[0])."""
+    ts = sorted(set(ts))
+    if len(ts) < 2:
+        return []
+    d = [b - a for a, b in itertools.pairwise(ts)]
+    big = sorted(((g, i) for i, g in enumerate(d) if g >= CLOCK_GAP_S), reverse=True)
+    if not big:
+        return []
+    small = sorted(g for g in d if g < CLOCK_GAP_S)
+    step = min(small[len(small) // 2], 10) if small else 1
+    out = []
+    if elapsed_s:
+        t0 = min(ts[0], start_ts) if start_ts is not None else ts[0]
+        excess = ts[-1] - t0 - elapsed_s
+        for g, i in big:
+            if excess <= CLOCK_SLACK_S:
+                break
+            c = round(min(g - step, excess))   # whole seconds: record timestamps stay integers
+            if c > 0:
+                out.append((ts[i + 1], c))
+                excess -= c
+    else:
+        out = [(ts[i + 1], g - step) for g, i in big if g >= CLOCK_NO_SESSION_S]
+    return sorted(out)
+
+
+def unjump(t, jumps):
+    """timestamp t with the clock jumps (from clock_jumps) taken out"""
+    if t is None:
+        return t
+    return t - sum(c for a, c in jumps if t >= a)
 
 
 def _read_fitparse(path: Path) -> dict:

@@ -21,7 +21,12 @@ log = logging.getLogger("garmin-app")
 
 DISC = ("interval", "long", "ski")
 RACE_M = {"5k": 5000, "10k": 10000, "half": 21097.5, "marathon": 42195}
-_rebuild: dict = {"running": False, "started": None, "finished": None, "error": None, "seconds": None}
+_REBUILD0 = {"running": False, "started": None, "finished": None, "error": None, "seconds": None}
+_rebuilds: dict[str, dict] = {}   # per person
+
+
+def _rebuild_state(person: str) -> dict:
+    return _rebuilds.setdefault(person, dict(_REBUILD0))
 _rlock = threading.Lock()
 
 
@@ -35,7 +40,7 @@ def _doc(store: Store) -> dict:
     if not p.exists():
         raise HTTPException(404, "no fitness.json yet: run `uv run scripts/fitness_model.py "
                                  f"{store.person}` or POST /api/fitness/rebuild")
-    return store._memoize("fitness", lambda: [p], lambda: _prepare(json.loads(p.read_text())))
+    return store._memoize("fitness", lambda: [p], lambda: _prepare(json.loads(p.read_text()), store))
 
 
 # ------------------------------------------------------------------ formatting helpers
@@ -47,8 +52,13 @@ def _dur(s) -> str:
     return f"{h}:{m:02d}:{x:02d}" if h else f"{m}:{x:02d}"
 
 
+def _secs(v) -> str:
+    """seconds with a unit: "56 s" below a minute, else m:ss"""
+    return f"{round(v)} s" if v is not None and round(v) < 60 else _dur(v)
+
+
 def _pace(v) -> str:
-    return _dur(1000 / v) + "/km" if v and v > 0.3 else "—"
+    return _dur(1000 / v) + " /km" if v and v > 0.3 else "—"
 
 
 def _race_eq(vdot: float) -> dict:
@@ -83,16 +93,21 @@ def _prep_discs(discs: dict, sessions: list, variant: str = "pace") -> None:
         cur["last_evidence"] = {"date": last["date"], "id": last["id"], "score": last["score"], "kind": lv["kind"]} if last else None
 
 
-def _prepare(doc: dict) -> dict:
+def _prepare(doc: dict, store: Store | None = None) -> dict:
     """Add trend_90d / last_evidence per discipline (both model variants) and a sessions-by-id index
-    (memoised with the file)."""
+    (memoised with the file). The one-liners use the app's workout name and avg rep pace (store rows) when known,
+    so they read the same as Home / Activities."""
+    try:
+        A = store.activity_map() if store else {}
+    except Exception:  # noqa: BLE001 — labels only
+        A = {}
     _prep_discs(doc["disciplines"], doc["sessions"])
     for name, v in (doc.get("variants") or {}).items():
         if v.get("disciplines"):
             _prep_discs(v["disciplines"], doc["sessions"], name)
     by_id: dict[str, list] = {}
     for s in doc["sessions"]:
-        s["explain"] = explain(s)
+        s["explain"] = explain(s, A.get(str(s["id"])))
         by_id.setdefault(str(s["id"]), []).append(s)
     doc["_by_id"] = by_id
     return doc
@@ -114,8 +129,9 @@ def _eval_variants(store: Store) -> dict | None:
     return store._memoize("fitness_eval", lambda: [p], build)
 
 
-def explain(s: dict) -> str:
-    """One line: what was done and what VDOT / race time it is worth."""
+def explain(s: dict, app: dict | None = None) -> str:
+    """One line: what was done and what VDOT / race time it is worth. `app` = the store's activity row: its
+    workout name and avg rep pace (total rep distance / total rep time) replace the model's for intervals."""
     c = s.get("components") or {}
     sc = s["score"]
     k5 = ""
@@ -130,8 +146,9 @@ def explain(s: dict) -> str:
             what += " (counts for interval shape as hard evidence)"
     elif s["discipline"] == "interval":
         rest = c.get("rest_s")
-        reps = c.get("sig") or f"{c.get('n_reps', '?')} × {_dur(c.get('rep_s'))}"
-        what = f"{reps} @ {_pace(c.get('rep_speed'))}" + (f" with {_dur(rest)} rest" if rest is not None else "")
+        app = app or {}
+        reps = (app.get("workout_label") if app.get("rep_pace_ms") else None) or c.get("sig") or f"{c.get('n_reps', '?')} × {_dur(c.get('rep_s'))}"
+        what = f"{reps} @ {_pace(app.get('rep_pace_ms') or c.get('rep_speed'))}" + (f" with {_secs(rest)} rest" if rest is not None else "")
     elif s["discipline"] == "long":
         what = f"best {round((c.get('window_s') or 0) / 60)} min at {_pace(c.get('gap_speed'))} (grade-adjusted)"
         if s["kind"] == "implausible":
@@ -149,22 +166,22 @@ COMPONENT_LABELS = {
     "sig": ("Session", "rep structure detected in the session"),
     "n_reps": ("Reps", "work bouts used"),
     "rep_s": ("Rep time", "median work-bout duration"),
-    "rest_s": ("Rest", "median recovery between reps; recovery restores W′ (shorter rest = harder)"),
+    "rest_s": ("Rest", "median recovery between reps; shorter rest makes the same pace harder, so it scores higher"),
     "work_rest": ("Work:rest", "rep time / rest time"),
-    "rep_speed": ("Rep pace", "mean pace over the reps"),
-    "tau_scale": ("τ scale", "W′ recovery speed vs Skiba (0.35 = faster recovery, fitted on races)"),
-    "score_without_grade": ("Score w/o grade", "same session scored without grade adjustment"),
-    "work_hrr": ("Work %HRR", "HR during the work, % of heart-rate reserve (diagnostic only)"),
+    "rep_speed": ("Rep pace (model)", "mean pace over the reps the model used"),
+    "tau_scale": ("Recovery speed", "how fast you recover in the rests, relative to the textbook model (Skiba τ; 0.35 = faster, fitted on your races)"),
+    "score_without_grade": ("Score on the flat", "the same session scored without adjusting for hills"),
+    "work_hrr": ("Effort in the reps", "heart rate during the reps, % of heart-rate reserve (context only)"),
     "race": ("Race", "nominal distance (within 3.5 %)"),
     "time_s": ("Time", "moving time"),
-    "window_s": ("Window", "best pause-free window used"),
-    "gap_speed": ("GAP pace", "grade-adjusted pace over the window"),
-    "hrr": ("%HRR", "mean HR as % of heart-rate reserve (diagnostic only)"),
-    "climb_m": ("Net climb", "altitude gained over the window"),
+    "window_s": ("Best stretch", "the best pause-free stretch used"),
+    "gap_speed": ("Hill-adjusted pace", "pace over that stretch, adjusted for climbs and descents"),
+    "hrr": ("Effort", "mean heart rate as % of heart-rate reserve (context only)"),
+    "climb_m": ("Net climb", "altitude gained over that stretch"),
     "speed": ("Speed", "mean moving speed"),
-    "demand": ("O₂ demand", "VO2 from mechanical power (η 0.16), ml/kg/min"),
-    "surface": ("Surface", "roller (May–Oct) or snow; sets rolling resistance μ"),
-    "implausible": ("Rejected", "cross-discipline check against the interval shape"),
+    "demand": ("Oxygen demand", "oxygen needed for that power (from climb, rolling and air resistance), ml/kg/min"),
+    "surface": ("Surface", "roller skis (May–Oct) or snow; sets the rolling resistance"),
+    "implausible": ("Rejected", "faster than your interval shape allows"),
 }
 
 
@@ -233,7 +250,7 @@ def fitness(store: Store = Depends(get_store),
                          "sport": a.get("sport")})
     out = {k: v for k, v in _strip(doc).items() if k not in ("sessions", "hr_diagnostics", "disciplines", "variants")}
     out.update(disciplines=discs, variants=variants, sessions=sessions, eval_variants=_eval_variants(store),
-               rebuild=dict(_rebuild))
+               rebuild=dict(_rebuild_state(store.person)))
     if hr:
         out["hr_diagnostics"] = doc["hr_diagnostics"]
     return out
@@ -312,6 +329,7 @@ def _not_scored(store: Store, aid: str) -> dict:
 
 
 def _run_rebuild(person: str):
+    _rebuild = _rebuild_state(person)
     t0 = time.time()
     try:
         fm = _fm()
@@ -332,6 +350,7 @@ def _run_rebuild(person: str):
 @router.post("/fitness/rebuild")
 def fitness_rebuild(store: Store = Depends(get_store)):
     """Re-run fitness_model.build in a background thread (≈0.1 s with cached features, ≈10 s cold)."""
+    _rebuild = _rebuild_state(store.person)
     with _rlock:
         if _rebuild["running"]:
             return {**_rebuild, "accepted": False}
@@ -341,5 +360,5 @@ def fitness_rebuild(store: Store = Depends(get_store)):
 
 
 @router.get("/fitness/rebuild")
-def fitness_rebuild_status():
-    return dict(_rebuild)
+def fitness_rebuild_status(store: Store = Depends(get_store)):
+    return dict(_rebuild_state(store.person))

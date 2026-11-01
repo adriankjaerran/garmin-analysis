@@ -4,12 +4,14 @@
 // 30 days' tracks. One request: /api/home.
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi, type Activity, type Day } from "../lib/api";
-import { navigate, setQuery, useLocation } from "../lib/router";
-import { SPORT_LABEL, addDays, daysBetween, dur, hm, km, num, shortDate, sportColor } from "../lib/format";
-import { coreBBox, mmss, workoutLine, workoutShort, type SearchRow } from "../lib/search";
+import { currentPerson, navigate, people, setQuery, useLocation } from "../lib/router";
+import { SPORT_LABEL, addDays, daysBetween, dur, hm, km, num, secs, shortDate, sportColor } from "../lib/format";
+import { coreBBox, mmss, type SearchRow } from "../lib/search";
 import { Table, type Col } from "../components/Table";
 import { TracksMap } from "../components/TracksMap";
-import { SportDot, speedText } from "../components/ActivityBits";
+import { PageHeader } from "../components/PageHeader";
+import { SportDot, TogetherMark, speedText, workoutText, workoutTip } from "../components/ActivityBits";
+import { personName } from "../lib/people";
 import "../fitness.css";   // --disc-* tokens
 import "./home.css";
 
@@ -56,7 +58,7 @@ function LineSpark({ values, color, w = 72, h = 16 }: { values: number[]; color:
 
 /** value vs typical: bar = value, tick = typical, both on the same scale */
 function VsBar({ v, typ, color }: { v: number; typ: number; color: string }) {
-  const W = 56, m = Math.max(v, typ, 1e-9) * 1.05;
+  const W = 48, m = Math.max(v, typ, 1e-9) * 1.05;
   return (
     <svg class="vsbar" width={W} height={8}>
       <rect x={0} y={1} width={W} height={6} rx={2} fill="var(--surface-tint)" />
@@ -79,7 +81,7 @@ const DISC_COLOR: Record<string, string> = { interval: "var(--disc-interval)", l
 
 function ShapeLine({ fit }: { fit: Record<string, Shape> }) {
   return (
-    <div class="shape-line">
+    <div class="home-shape">
       <a class="lbl" href="/fitness" title="Current shape per discipline (Daniels VDOT scale) — open Fitness">Shape</a>
       {Object.entries(fit).map(([k, s]) => {
         const ov = k === "overall";
@@ -112,19 +114,15 @@ function LatestDay({ h }: { h: Home }) {
   const [hl, setHl] = useState<string | null>(null);
   const ago = daysBetween(d.date, h.anchor);
   const sm = d.summary, sl = d.sleep;
-  const rowsById = useMemo(() => new Map(h.recent.map((r) => [r.id, r])), [h]);
   const cols: Col<Activity>[] = [
     { key: "start", label: "Start", render: (a) => a.start.slice(11, 16) },
-    { key: "w", label: "Workout", sort: () => null, render: (a) => {
-      const r = rowsById.get(a.id);
-      const t = r ? workoutLine(r) : a.workout_label ?? a.type_label ?? a.type;
-      return <span class="clip" style={{ maxWidth: "230px" }} title={[a.name, a.workout_label].filter(Boolean).join(" · ")}><SportDot sport={a.sport} />{t}</span>;
-    } },
+    { key: "w", label: "Workout", sort: () => null, render: (a) => (
+      <span class="clip" style={{ maxWidth: "240px" }} title={workoutTip(a)}><SportDot sport={a.sport} /><TogetherMark a={a} />{workoutText(a)}</span>) },
     { key: "dist_km", label: "km", num: true, render: (a) => km(a.dist_km) },
     { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s ?? a.dur_s) },
-    { key: "speed", label: "Pace", num: true, sort: () => null, render: (a) => speedText(a) },
-    { key: "hr", label: "HR", num: true, render: (a) => num(a.hr) },
-    { key: "place", label: "Place", render: (a) => <span class="clip" style={{ maxWidth: "130px" }}>{a.place_name ?? a.place ?? a.location ?? "—"}</span> },
+    { key: "speed", label: "Pace", num: true, sort: () => null, title: "Moving pace: min/km on foot, /100 m for swims, km/h for ski, bike and other", render: (a) => speedText(a) },
+    { key: "hr", label: "HR", num: true, title: "Average heart rate (bpm)", render: (a) => num(a.hr) },
+    { key: "place", label: "Place", render: (a) => { const p = a.place_name ?? a.place ?? a.location ?? "—"; return <span class="clip" style={{ maxWidth: "120px" }} title={p}>{p}</span>; } },
   ];
   return (
     <section class="first">
@@ -135,7 +133,7 @@ function LatestDay({ h }: { h: Home }) {
         <div class="tools"><a class="btn" href={`/day/${d.date}`}>Day view</a></div>
       </div>
       <div class="home-day">
-        <TracksMap tracks={d.tracks} highlight={hl} onHover={setHl} onClick={(id) => navigate(`/activities/${id}`)} class="bordered"
+        <TracksMap tracks={d.tracks} highlight={hl} onHover={setHl} onClick={(id) => navigate(`/activities/${id}`)} class="bordered home-daymap"
           style={{ height: "260px" }} empty="No GPS tracks this day" />
         <div>
           <Table cols={cols} rows={d.activities} rowKey={(a) => a.id} highlight={hl} onHover={(a) => setHl(a?.id ?? null)}
@@ -152,7 +150,7 @@ function LatestDay({ h }: { h: Home }) {
                 <dt>Intensity</dt><dd>{sm ? <>{num(sm.mod)} <span class="muted">mod</span> · {num(sm.vig)} <span class="muted">vig min</span></> : "—"}</dd>
                 <dt>Sleep</dt><dd>{sl ? <>{hm(sl.total)} h <span class="muted">score {num(sl.score)}{d.sleep_date !== d.date ? ` · ${shortDate(d.sleep_date!)}` : ""}</span></> : <span class="muted">not downloaded</span>}</dd>
               </dl>
-            ) : <div class="empty">No daily summary downloaded for the last days (scripts/fetch_index.py, fetch_daily.py).</div>}
+            ) : <div class="empty">No daily summary downloaded for the last few days.</div>}
           </div>
         </div>
       </div>
@@ -185,17 +183,18 @@ function TrainingLog({ h, hover, setHover }: { h: Home; hover: string | null; se
               const cls = "tl-day" + (future ? " future" : "") + (d === h.anchor ? " today" : "") + (d < monthFrom ? " old" : "") + (ids.length ? " on" : "");
               return (
                 <div key={d} class={cls} onClick={future ? undefined : () => navigate(`/day/${d}`)} title={future ? "" : `${shortDate(d)} — open the day`}>
-                  <span class="dn">{Number(d.slice(8))}{d.slice(8) === "01" || d === wk[0] && wk === weeks[0] ? ` ${shortDate(d).split(" ")[2]}` : ""}</span>
+                  <span class="dn"><span class="wd">{WD[(new Date(d + "T12:00:00").getDay() + 6) % 7]} </span>{Number(d.slice(8))}{d.slice(8) === "01" || d === wk[0] && wk === weeks[0] ? ` ${shortDate(d).split(" ")[2]}` : ""}{ids.some((id) => rows.get(id)?.together) && <a class="tl-tg" href={`/together/${rows.get(ids.find((id) => rows.get(id)?.together)!)!.together!.gid}`}
+                    onClick={(e) => e.stopPropagation()} title="Done together: open the Together session">👥</a>}</span>
                   {ids.map((id) => {
                     const r = rows.get(id);
                     if (!r) return null;
-                    const s = workoutShort(r);
+                    const short = r.workout_label?.includes("×") ? r.workout_label : "";
                     return (
                       <a key={id} href={`/activities/${id}`} class={"tl-act" + (hover === id ? " hl" : "")} onClick={(e) => e.stopPropagation()}
                         onMouseEnter={() => setHover(id)} onMouseLeave={() => setHover(null)}
-                        title={`${workoutLine(r)} · ${km(r.dist_km)} km · ${dur(r.moving_s)}${r.place_name ? " · " + r.place_name : ""}`}>
+                        title={`${workoutText(r)} · ${km(r.dist_km)} km · ${dur(r.moving_s)}${r.place_name ? " · " + r.place_name : ""}${r.together ? ` · 👥 with ${r.together.with.map(personName).join(", ")}` : ""}`}>
                         <span class="dot" style={{ background: sportColor(r.sport) }} />
-                        <span class="t">{s || (r.dist_km ? `${km(r.dist_km)} km` : dur(r.moving_s ?? r.dur_s))}</span>
+                        <span class="t">{short || (r.dist_km ? `${km(r.dist_km)}\u00a0km` : dur(r.moving_s ?? r.dur_s))}</span>
                       </a>
                     );
                   })}
@@ -222,15 +221,16 @@ function Volume({ h, metric }: { h: Home; metric: "km" | "time" }) {
   const f = (x: number) => (metric === "km" ? `${km(x) === "—" ? "0" : km(x)}` : hm(x));
   const unit = metric === "km" ? "km" : "h";
   return (
+    <div class="tablewrap vol-wrap">
     <table class="vol">
       <thead>
-        <tr class="grp"><th /><th colSpan={3} class="c">Last 7 days</th><th colSpan={3} class="c">Last 30 days</th><th class="c">52 weeks</th></tr>
+        <tr class="grp"><th /><th colSpan={2} class="c">Last 7 days</th><th colSpan={2} class="c">Last 30 days</th><th class="c">52 weeks</th></tr>
         <tr>
           <th>Sport</th>
-          <th class="num" title="Activities">n</th><th class="num">{unit}</th>
-          <th title="vs the average week of the 4 weeks before (bar = last 7 days, tick = that average)">vs prev 4 weeks</th>
-          <th class="num" title="Activities">n</th><th class="num">{unit}</th>
-          <th title="vs the average 30 days of the 12 months before (bar = last 30 days, tick = that average)">vs 12-month avg</th>
+          <th class="num" title="Distance or time (hover for the number of activities)">{unit}</th>
+          <th title="vs the average week of the 4 weeks before (bar = last 7 days, tick = that average)">vs prev 4 wk</th>
+          <th class="num" title="Distance or time (hover for the number of activities)">{unit}</th>
+          <th title="vs the average 30 days of the 12 months before (bar = last 30 days, tick = that average)">vs 12-mo avg</th>
           <th title="Weekly volume, rolling 7-day buckets, oldest left">{metric === "km" ? "km" : "hours"} per week</th>
         </tr>
       </thead>
@@ -239,23 +239,23 @@ function Volume({ h, metric }: { h: Home; metric: "km" | "time" }) {
           const all = r.sport === "all";
           const col = all ? "var(--text-muted)" : sportColor(r.sport);
           const spark = metric === "km" ? r.weekly_km : r.weekly_s;
+          const nAct = (n: number) => `${n} ${n === 1 ? "activity" : "activities"}`;
           return (
             <tr key={r.sport} class={all ? "total" : ""}>
               <td>{all ? "All" : <><SportDot sport={r.sport} />{SPORT_LABEL[r.sport]}</>}</td>
-              <td class="num">{r.week.n || <span class="muted">0</span>}</td>
-              <td class="num">{r.week.n ? f(v(r.week)) : <span class="muted">—</span>}</td>
+              <td class="num" title={nAct(r.week.n)}>{r.week.n ? f(v(r.week)) : <span class="muted">—</span>}</td>
               <td title={`average week before: ${f(v(r.prev4))} ${unit}, ${num(r.prev4.n, 1)} activities`}>
                 <span class="vs"><VsBar v={v(r.week)} typ={v(r.prev4)} color={col} />{pctDelta(v(r.week), v(r.prev4))}</span></td>
-              <td class="num">{r.month.n || <span class="muted">0</span>}</td>
-              <td class="num">{r.month.n ? f(v(r.month)) : <span class="muted">—</span>}</td>
+              <td class="num" title={nAct(r.month.n)}>{r.month.n ? f(v(r.month)) : <span class="muted">—</span>}</td>
               <td title={`average 30 days over the year before: ${f(v(r.year30))} ${unit}, ${num(r.year30.n, 1)} activities`}>
                 <span class="vs"><VsBar v={v(r.month)} typ={v(r.year30)} color={col} />{pctDelta(v(r.month), v(r.year30))}</span></td>
-              <td><Spark values={spark} color={col} fmt={(x) => `${f(x)} ${unit}`} /></td>
+              <td><Spark values={spark} color={col} fmt={(x) => `${f(x)} ${unit}`} w={104} /></td>
             </tr>
           );
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -263,16 +263,70 @@ function Volume({ h, metric }: { h: Home; metric: "km" | "time" }) {
 function recentCols(anchor: string): Col<HomeRow>[] {
   return [
     { key: "date", label: "Date", sort: (r) => r.start ?? r.date, render: (r) => <span>{shortDate(r.date, anchor)} <span class="muted">{r.start?.slice(11, 16)}</span></span> },
-    { key: "w", label: "Workout", sort: (r) => workoutLine(r), render: (r) => (
-      <span class="clip" style={{ maxWidth: "250px" }} title={[r.name, r.exact_label ?? r.signature].filter(Boolean).join(" · ")}><SportDot sport={r.sport} />{workoutLine(r)}</span>) },
-    { key: "rest_s", label: "Rest", num: true, title: "Median rest between the main reps", render: (r) => (r.rest_s ? mmss(r.rest_s) : "") },
+    { key: "w", label: "Workout", sort: (r) => workoutText(r), render: (r) => (
+      <span class="clip" style={{ maxWidth: "230px" }} title={workoutTip(r)}><SportDot sport={r.sport} /><TogetherMark a={r} />{workoutText(r)}</span>) },
+    { key: "rest_s", label: "Rest", num: true, title: "Median rest between the main reps", render: (r) => (r.rest_s ? secs(r.rest_s) : "") },
     { key: "dist_km", label: "km", num: true, render: (r) => km(r.dist_km) },
     { key: "moving_s", label: "Moving", num: true, render: (r) => dur(r.moving_s ?? r.dur_s) },
-    { key: "speed_ms", label: "Pace", num: true, title: "Moving pace (runs, hikes /km; swims /100 m), else km/h",
+    { key: "speed_ms", label: "Pace", num: true, title: "Moving pace: min/km on foot (run, walk, hike), /100 m for swims, km/h for ski, bike and other",
       sort: (r) => r.speed_ms, render: (r) => speedText({ ...(r as any), hr: r.avg_hr } as Activity) },
-    { key: "avg_hr", label: "HR", num: true, render: (r) => num(r.avg_hr) },
-    { key: "place", label: "Place", sort: (r) => r.place_name ?? r.place ?? "", render: (r) => <span class="clip" style={{ maxWidth: "130px" }} title={r.route_name ?? ""}>{r.place_name ?? r.place ?? "—"}</span> },
+    { key: "avg_hr", label: "HR", num: true, title: "Average heart rate (bpm)", render: (r) => num(r.avg_hr) },
+    { key: "place", label: "Place", sort: (r) => r.place_name ?? r.place ?? "", render: (r) => { const p = r.place_name ?? r.place ?? "—";
+      return <span class="clip" style={{ maxWidth: "110px" }} title={[p, r.route_name].filter(Boolean).join(" · ")}>{p}</span>; } },
   ];
+}
+
+// ------------------------------------------------------------------ joint training + first-run help
+interface TGroup { gid: string; date: string; start_local: string; kind: string; label: string; label_text?: string; workout: string | null;
+  sport: string; place: { name: string | null } | null; people: string[];
+  headline: { text: string; winner?: string; rep_wins?: Record<string, number>; shared_reps?: number; avg_gap_s_per_rep?: number; with_pct?: number } }
+
+/** "Adrian won 10 of 10 reps, 7.8 s per rep faster" / the Together headline */
+function headlineText(g: TGroup): string {
+  const h = g.headline;
+  if (h.winner && h.rep_wins && h.avg_gap_s_per_rep !== undefined) {
+    const w = h.rep_wins[h.winner] ?? 0, n = h.shared_reps ?? w;
+    return `${personName(h.winner)} won ${w} of ${n} ${n === 1 ? "rep" : "reps"}, ${secs(h.avg_gap_s_per_rep, 1)} per rep faster`;
+  }
+  return h.text;
+}
+
+function LatestTogether({ anchor }: { anchor: string }) {
+  const me = currentPerson();
+  const { data } = useApi<{ n: number; groups: TGroup[] }>(people().length > 1 ? `/api/together?person=${encodeURIComponent(me)}` : null);
+  const g = data?.groups.find((x) => x.label !== "unverified") ?? data?.groups[0];
+  if (!g) return null;
+  const others = g.people.filter((p) => p !== me);
+  const ago = daysBetween(g.date, anchor);
+  return (
+    <a class="home-together" href={`/together/${g.gid}`} title="Open the Together session: who was faster, rep by rep">
+      <span class="lbl">👥 Latest together</span>
+      <span class="what"><b>{g.workout ?? g.label_text ?? "Session"}</b>{g.place?.name ? ` · ${g.place.name}` : ""} with {others.map(personName).join(", ")}</span>
+      <span class="muted">{shortDate(g.date, anchor)}{ago > 1 ? ` · ${ago} days ago` : ""}</span>
+      <span class="head-line">{headlineText(g)}</span>
+      <span class="go">Open →</span>
+    </a>
+  );
+}
+
+const START_KEY = "garmin.home.start-dismissed";
+function StartHere({ h }: { h: Home }) {
+  const [gone, setGone] = useState(() => localStorage.getItem(START_KEY) === "1");
+  if (gone) return null;
+  const last = h.latest_day?.activities.slice(-1)[0] ?? null;
+  const multi = people().length > 1;
+  const others = people().filter((p) => p !== currentPerson());
+  return (
+    <div class="start-here" role="note">
+      <b>Start here</b>
+      {last && <a href={`/activities/${last.id}`}>Your last workout <span class="muted">({workoutText(last)})</span></a>}
+      {last?.fit && <a href={`/compare?suggest=${last.id}`}>Compare it with similar ones</a>}
+      {multi && <a href="/together">Training together{others.length === 1 ? ` with ${personName(others[0])}` : ""}</a>}
+      <a href="/fitness">How fit am I?</a>
+      <button class="x" title="Hide this strip (it stays hidden on this browser)" aria-label="Dismiss"
+        onClick={() => { localStorage.setItem(START_KEY, "1"); setGone(true); }}>×</button>
+    </div>
+  );
 }
 
 // ------------------------------------------------------------------ page
@@ -287,19 +341,23 @@ export function HomePage() {
   // fit the home cluster (a trip to the mountains shouldn't shrink Oslo to a dot); "show all" widens it
   const [all, setAll] = useState(false);
   const core = useMemo(() => { const b = (h?.tracks ?? []).map((t) => t.bbox); return { ...coreBBox(b, 60), whole: b.length ? coreBBox(b, 1e6).fit : null }; }, [h]);
-  if (error) return <main><div class="err">{error}</div></main>;
+  if (error) return <main><PageHeader title="Home" /><div class="err">Could not load the home page: {error}</div></main>;
   if (!h) return <main><div class="empty">Loading…</div></main>;
   const monthRows = h.recent.filter((r) => r.date >= h.periods.month[0]);
   const shownRows = monthRows.length >= 8 ? monthRows : h.recent;
   return (
     <main class="home">
-      <div class="head home-top">
-        <h1>Home</h1>
-        <span class="sub">{shortDate(h.anchor)} {h.anchor.slice(0, 4)}</span>
+      <PageHeader title="Home" sub={`${shortDate(h.anchor)} ${h.anchor.slice(0, 4)}`} class="home-top"
+        about="Your latest training at a glance: the last active day, the last five weeks, volume against your usual, and current shape."
+        tips={["Hover a workout in a table to find it on the map (and the other way round)", "Click a day in the training log for the Day view",
+          "👥 = done with someone else; click it for the Together session", "Every view is a URL: copy it to come back to the same state"]}>
         {h.fitness && <ShapeLine fit={h.fitness} />}
-      </div>
+      </PageHeader>
+      <StartHere h={h} />
 
-      {h.latest_day ? <LatestDay h={h} /> : <section class="first"><div class="empty">No activities yet.</div></section>}
+      {h.latest_day ? <LatestDay h={h} /> : <section class="first"><div class="empty">No activities yet. Fetch some with <span class="mono">scripts/fetch_index.py</span>.</div></section>}
+
+      <LatestTogether anchor={h.anchor} />
 
       <section>
         <div class="home-two">
@@ -318,7 +376,7 @@ export function HomePage() {
               </div>
             </div>
             <Volume h={h} metric={metric} />
-            <p class="note">Bar = this period, tick = typical (average week of the 4 weeks before; average 30 days of the year before).</p>
+            <p class="note">Bar = this period, tick = typical (average week of the 4 weeks before; average 30 days of the year before). Hover a number for the activity count.</p>
           </div>
         </div>
       </section>
@@ -330,7 +388,8 @@ export function HomePage() {
               <span class="sub">{shownRows === monthRows ? `last 30 days · ${monthRows.length} activities, ${km(monthRows.reduce((s, r) => s + (r.dist_km || 0), 0))} km` : `last ${shownRows.length}`}</span>
               <div class="tools"><a href={`/activities?from=${h.periods.month[0]}`}>All activities →</a></div></div>
             <Table cols={cols} rows={shownRows} rowKey={(r) => r.id} highlight={hover} onHover={(r) => setHover(r?.id ?? null)}
-              onRow={(r) => navigate(`/activities/${r.id}`)} defaultSort={["date", -1]} stickyCols={0} />
+              onRow={(r) => navigate(`/activities/${r.id}`)} defaultSort={["date", -1]} stickyCols={1} />
+            <p class="note">“@” = average rep pace of the main reps (total rep distance / total rep time). Pace in min/km on foot (run, walk, hike), km/h for ski and bike.</p>
           </div>
           <div class="home-map">
             <div class="head"><h2>Last 30 days</h2><span class="sub">{tracks.length} tracks · hover ↔ table, click = open</span></div>

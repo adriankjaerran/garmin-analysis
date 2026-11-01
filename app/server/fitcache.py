@@ -30,7 +30,8 @@ from . import ROOT  # noqa: F401  (puts scripts/ on sys.path)
 import gps_quality as gq  # noqa: E402
 import session_groups as sg  # noqa: E402  (pool_swim; also registers the length / pool-length fields)
 
-CACHE_VERSION = 3   # 3: pool swims from the FIT length messages (series, lap starts >= 0, meta.swim)
+CACHE_VERSION = 4   # 3: pool swims from the FIT length messages (series, lap starts >= 0, meta.swim); 4: clock jumps fixed
+REPS_SINCE_VERSION = 4   # rep analyses of older caches are redone (4: run_analysis takes clock jumps out)
 FIT_EPOCH = gq.FIT_EPOCH
 SEMI = gq.SEMI
 
@@ -134,6 +135,11 @@ def read_fit(fit: Path) -> dict:
     recs = sorted((r for r in raw["record"] if "timestamp" in r), key=lambda r: r["timestamp"])
     if len(recs) < 2:
         raise ValueError("no records")
+    jumps = sg.fit_clock_jumps(raw, recs)   # watch clock jumps: same time base as session_groups.read_series
+    if jumps:
+        recs = [{**r, "timestamp": gq.unjump(r["timestamp"], jumps)} for r in recs]
+        raw = {**raw, "lap": [{**v, "start_time": gq.unjump(v["start_time"], jumps)} if v.get("start_time") else v
+                              for v in raw["lap"]]}
     t0 = recs[0]["timestamp"]
     swim = sg.pool_swim(raw)
     if swim and raw["session"][0].get("start_time"):   # time origin = session start (records start late)
@@ -283,7 +289,8 @@ def build(person: str, force: bool = False, workers: int = 8, quiet: bool = Fals
     manifest = json.loads(mpath.read_text()) if mpath.exists() and not force else {}
     old_reps = {}
     if manifest.get("_v") != CACHE_VERSION:   # new format: re-parse everything, keep rep analyses of unchanged FITs
-        old_reps = {aid: m["reps_key"] for aid, m in manifest.items() if isinstance(m, dict) and m.get("reps_key")}
+        old_reps = {aid: m["reps_key"] for aid, m in manifest.items() if isinstance(m, dict) and m.get("reps_key")} \
+            if manifest.get("_v", 0) >= REPS_SINCE_VERSION else {}
         manifest = {"_v": CACHE_VERSION}
     tracks = json.loads(tpath.read_text()) if tpath.exists() and not force and len(manifest) > 1 else {}
     fits = {p.stem: p for p in (D / "activities").glob("*/*.fit")}

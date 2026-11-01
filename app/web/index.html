@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Garmin</title>
+<script>
+  // set the theme before first paint (lib/theme.ts keeps it in sync afterwards)
+  try {
+    var p = localStorage.getItem("theme");
+    document.documentElement.dataset.theme = p === "light" || p === "dark" ? p
+      : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch (e) {}
+</script>
 </head>
 <body>
 <div id="app"></div>
