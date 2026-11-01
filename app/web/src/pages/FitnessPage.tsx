@@ -19,6 +19,9 @@ import {
 } from "../lib/fitness";
 
 const DOT_CONF: Record<string, string> = { high: "good", medium: "partial", low: "none" };
+/** a shape without a race / hard session for more than this many days is greyed ("last evidence 12 mo ago") */
+const STALE_DAYS = 90;
+const agoShort = (d: number) => d < 60 ? `${d} d` : d < 730 ? `${Math.round(d / 30.4)} mo` : `${(d / 365).toFixed(1).replace(/\.0$/, "")} y`;
 
 interface CurRow { key: string; label: string; mean: number; sd: number; hrMean: number | null; hrSd: number | null; conf: string | null; pct: number | null; pb: number | null;
   r5: number | null; r10: number | null; rh: number | null; trend: number | null; last: string | null; lastId: string | null; lastDays: number | null }
@@ -82,6 +85,12 @@ export function FitnessPage() {
         last: c.last_evidence?.date ?? null, lastId: c.last_evidence ? String(c.last_evidence.id) : null,
         lastDays: c.last_evidence ? daysAgo(c.last_evidence.date, ref) : null };
     });
+    // one race prediction: interval + long blended by precision (fitness.json overall.current.race_prediction)
+    const pr = (doc.disciplines.overall?.current as any)?.race_prediction as { vdot: number; sd: number; weights: Record<string, number>;
+      race_equivalents_s: Record<string, number> } | null | undefined;
+    if (pr) rows.push({ key: "pred", label: "Race prediction", mean: pr.vdot, sd: pr.sd, hrMean: null, hrSd: null, conf: null, pct: null, pb: null,
+      r5: pr.race_equivalents_s["5k"], r10: pr.race_equivalents_s["10k"], rh: pr.race_equivalents_s.half, trend: null,
+      last: Object.entries(pr.weights).map(([k, w]) => `${DISC_LABEL[k]} ${Math.round(w * 100)} %`).join(" · "), lastId: null, lastDays: null });
     const o = doc.disciplines.overall;
     if (o) rows.push({ key: "overall", label: DISC_LABEL.overall, mean: o.current.mean, sd: o.current.sd,
       hrMean: H?.overall?.current.mean ?? null, hrSd: H?.overall?.current.sd ?? null, conf: null, pct: o.current.mean,
@@ -112,24 +121,32 @@ export function FitnessPage() {
     const next = discs.includes(k) ? discs.filter((d) => d !== k) : DISCS.filter((d) => d === k || discs.includes(d));
     setQuery({ d: next.length === 3 ? null : next.join(",") || "none" });
   };
+  // stale: no race / hard session that counted for > STALE_DAYS (the model carries the value forward, its sd grows)
+  const stale = (r: CurRow) => DISCS.includes(r.key as Disc) && (r.lastDays === null || r.lastDays > STALE_DAYS);
   const curCols: Col<CurRow>[] = [
-    { key: "label", label: "Discipline", render: (r) => <><span class="dot" style={{ background: discColor(r.key) }} />{r.label}</> },
-    { key: "mean", label: "Current", num: true, render: (r) => <b>{pm(r.mean, r.sd)}</b>,
+    { key: "label", label: "Discipline", render: (r) => r.key === "pred"
+      ? <span title="one prediction for today: the interval and long-distance shapes averaged by how certain each is (1/sd²); a shape without recent evidence has a wide band and counts less. The band includes the disagreement between the two.">{r.label}</span>
+      : <><span class="dot" style={{ background: discColor(r.key) }} />{r.label}</> },
+    { key: "mean", label: "Current", num: true, render: (r) => stale(r)
+      ? <span style={{ opacity: 0.55 }} title={`no race or hard session for ${r.lastDays === null ? "ever" : `${r.lastDays} days`}: the value is carried forward and its uncertainty grows`}>
+          <b>{pm(r.mean, r.sd)}</b> <span class="muted">· last evidence {r.lastDays === null ? "none" : `${agoShort(r.lastDays)} ago`}</span></span>
+      : <b>{pm(r.mean, r.sd)}</b>,
       title: `smoothed shape today ± 1 sd. ${doc.variants?.pace?.label ?? "Performance only"}` },
     ...(hasHr ? [{ key: "hrMean", label: "With HR", num: true, render: (r: CurRow) => <span class="hr-val">{pm(r.hrMean, r.hrSd)}</span>,
       title: `same, ${doc.variants?.hr?.label ?? "with heart rate"}` } as Col<CurRow>] : []),
     { key: "unit", label: "Unit", render: (r) => <span class="muted">{unitShort(r.key)}</span>, sort: () => null },
     { key: "conf", label: "Confidence", render: (r) => r.conf ? <><span class={"dot " + DOT_CONF[r.conf]} />{r.conf}</> : <span class="muted">—</span>,
       title: "high: sd < 1, medium: < 2, low: ≥ 2 (no recent evidence)" },
-    { key: "pct", label: "% of best", num: true, render: (r) => (r.pct === null ? "—" : `${r.pct.toFixed(1)} %`) },
+    { key: "pct", label: "% of best", num: true, render: (r) => (r.pct === null ? "—" : <span class={stale(r) ? "muted" : ""}>{r.pct.toFixed(1)} %</span>) },
     { key: "pb", label: "Best", num: true, render: (r) => (r.pb === null ? "—" : r.pb.toFixed(1)), title: "personal best of the smoothed shape" },
     { key: "r5", label: "5k", num: true, render: (r) => r.key === "ski" ? <span class="muted" title="ski is on its own VDOT-equivalent scale; no running times">n/a</span> : raceT(r.r5) },
     { key: "r10", label: "10k", num: true, render: (r) => r.key === "ski" ? <span class="muted">n/a</span> : raceT(r.r10) },
     { key: "rh", label: "Half", num: true, render: (r) => r.key === "ski" ? <span class="muted">n/a</span> : raceT(r.rh) },
     { key: "trend", label: "Trend 90 d", num: true, render: (r) => <span style={{ color: r.trend === null ? undefined : r.trend > 0.3 ? "var(--state-good)" : r.trend < -0.3 ? "var(--state-duplicate)" : undefined }}>{signed(r.trend)}</span>,
       title: "current minus 90 days ago" },
-    { key: "last", label: "Last evidence", render: (r) => r.last ? <><a href={`/activities/${r.lastId}`}>{r.last}</a> <span class="muted">{r.lastDays} d ago</span></> : <span class="muted">{r.key === "overall" ? "" : "none"}</span>,
-      title: "latest race or hard session with weight > 0.5" },
+    { key: "last", label: "Last evidence", render: (r) => r.key === "pred" ? <span class="muted" title="share of each shape in the blended prediction">{r.last}</span>
+      : r.last ? <><a href={`/activities/${r.lastId}`}>{r.last}</a> <span class="muted">{r.lastDays} d ago</span></> : <span class="muted">{r.key === "overall" ? "" : "none"}</span>,
+      title: "latest race or hard session with weight > 0.5 (prediction row: the weight of each shape)" },
   ];
 
   const yc = (k: string, label: string): Col<any>[] => [

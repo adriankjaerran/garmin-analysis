@@ -130,7 +130,7 @@ def get_activity(aid: str, max_points: int = Query(3600, ge=100, le=20000), stor
         out["laps"] = meta.get("laps") or []
         out["reps"] = meta.get("reps") or []
         if ga.get("type") == "intervals_track" or meta.get("mode") == "track":   # track: reps are the set distance
-            out["reps"] = [sg.snap_track_rep(r) for r in out["reps"]]
+            out["reps"] = sg.snap_track_reps(out["reps"])
         out["breaks"] = meta.get("breaks") or []
         if ga.get("indoor_bislett"):   # watch distance is made up indoors: reps from the whole-lap manual laps
             out["reps"], out["breaks"] = _indoor_reps(ga["indoor_bislett"], arr)

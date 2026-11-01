@@ -91,7 +91,7 @@ SIM_W = {  # similarity presets; components missing for a pair score 0.4
                 "structure": 0.10, "elev": 0.04, "season": 0.02, "recency": 0.02},
 }
 RELATED = {frozenset(p) for p in [("intervals_track", "intervals_road"), ("intervals_road", "tempo"), ("tempo", "race?"),
-                                  ("easy", "long"), ("ski_easy", "ski_long"), ("ski_hard", "ski_long_race?"),
+                                  ("easy", "long"), ("easy", "steady"), ("steady", "tempo"), ("steady", "long"), ("ski_easy", "ski_long"), ("ski_hard", "ski_long_race?"),
                                   ("ski_long", "ski_long_race?"), ("intervals_track", "intervals_treadmill"),
                                   ("intervals_road", "intervals_treadmill"), ("ski_intervals", "ski_hard")]}
 STD = [(5, "5k"), (10, "10k"), (21.0975, "half"), (42.195, "marathon")]
@@ -110,6 +110,25 @@ TRACK_SET_M = (100, 150, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 1600, 2
 TRACK_UNDER, TRACK_OVER = 0.05, 0.125
 
 
+# ---------------------------------------------------------------- multisport files
+MULTISPORT = ("multi_sport", "multisport")
+FIT_SPORT_FAM = {1: "run", 11: "hike", 17: "hike", 2: "bike", 12: "ski", 5: "swim"}   # FIT sport enum -> family
+MULTISPORT_SHARE = 0.8   # a multisport file is a run (ski, ...) when >= 80 % of its legs' time is that family
+
+
+def multisport_family(sessions) -> str | None:
+    """the family of a multisport file from its FIT sessions [(FIT sport, elapsed s)]: the family with >= 80 % of the
+    time (2026-10-15: two running legs, 1×1300 + 2×3000 at Bislett, saved as Multisport), else None"""
+    tot = sum(d or 0 for _, d in sessions or [])
+    if tot <= 0:
+        return None
+    by = collections.Counter()
+    for sp, d in sessions:
+        by[FIT_SPORT_FAM.get(sp, "other")] += d or 0
+    fam, t = by.most_common(1)[0]
+    return fam if fam != "other" and t >= MULTISPORT_SHARE * tot else None
+
+
 def on_track(ga: dict | None) -> bool:
     """a track session: groups.json type intervals_track (Bislett and other tracks) or the watch's track mode"""
     return bool(ga) and (ga.get("type") == "intervals_track" or ga.get("mode") == "track")
@@ -123,9 +142,43 @@ def track_set_m(d):
     return min(fit, key=lambda x: abs(d - x) / x) if fit else None
 
 
-def snap_track_rep(r: dict, dist="dist", time="time", speed="speed") -> dict:
-    """a rep dict with its distance set to the track set distance (gps_dist keeps the measured one)"""
-    m = track_set_m(r.get(dist))
+def track_set_dists(times, dists):
+    """the set distance of every rep of a track session (None = not a set distance): a rep in a signature group with a
+    distance label ("3×1800 + 2×900": steady group, median within 4 % of a 100 m multiple, see signature) is that label
+    when it lies in the snap window (5 % under .. 12.5 % over), so reps agree with the workout label (1754 m in a
+    3×1800 is 1800 m, not the nearest TRACK_SET_M entry 1600 m); other reps (mixed sessions, time groups) snap to
+    TRACK_SET_M (track_set_m)."""
+    n = len(dists)
+    out = [track_set_m(d) for d in dists]
+    if not n or not all(times[i] for i in range(n)):
+        return out
+    groups = rep_groups(list(times), list(dists))
+    if len(groups) > 3:   # "N reps (mixed …)": no distance labels
+        return out
+    for g in groups:
+        ds = [dists[j] for j in g]
+        if not all(ds):
+            continue
+        d_ = float(np.median(ds))
+        r100 = round(d_ / 100) * 100
+        if r100 < 100 or max(ds) - min(ds) > 0.06 * d_ or abs(d_ - r100) > 0.04 * d_:
+            continue
+        for j in g:
+            if r100 * (1 - TRACK_UNDER) <= dists[j] <= r100 * (1 + TRACK_OVER):
+                out[j] = r100
+    return out
+
+
+def snap_track_reps(reps: list, dist="dist", time="time", speed="speed") -> list:
+    """snap_track_rep for every rep of one session, with the set distances of track_set_dists"""
+    ms = track_set_dists([r.get(time) for r in reps], [r.get(dist) for r in reps])
+    return [snap_track_rep(r, dist, time, speed, m=m) for r, m in zip(reps, ms)]
+
+
+def snap_track_rep(r: dict, dist="dist", time="time", speed="speed", m="auto") -> dict:
+    """a rep dict with its distance set to the track set distance (gps_dist keeps the measured one); `m`: the set
+    distance (track_set_dists), default track_set_m of the rep alone"""
+    m = track_set_m(r.get(dist)) if m == "auto" else m
     if m is None or m == r.get(dist):
         return r
     out = {**r, dist: m, "gps_dist": r.get(dist), "dist_source": "track_set"}
@@ -429,6 +482,8 @@ def read_series(fit: Path) -> dict:
             cur = None
     s["timer_stops"] = stops
     s["sport"] = (raw["session"][0].get("sport") if raw["session"] else None)
+    # every FIT session (a multisport file has one per leg): [(FIT sport, elapsed s)]
+    s["sessions"] = [(x.get("sport"), (x.get("total_elapsed_time") or 0) / 1000) for x in raw["session"]]
     s["laps"] = sorted(({"t": fx(l["start_time"]) - t0, "dur": (l.get("total_elapsed_time") or 0) / 1000,
                          "dist": (l.get("total_distance") or 0) / 100, "trigger": l.get("lap_trigger"),
                          "intensity": l.get("intensity"), "cycles": l.get("total_cycles")} for l in raw["lap"] if "start_time" in l), key=lambda l: l["t"])
@@ -550,6 +605,7 @@ def ana_compact(fit):
     return {"mode": x["mode"], "threshold": x["threshold"],
             "rep_times": [rp["time"] for rp in reps], "rep_dists": [rp["dist"] for rp in reps],
             "rep_speeds": [rp["speed"] for rp in reps], "rep_hr": [rp["hr"] for rp in reps],
+            "rep_starts": [rp["start"] for rp in reps],
             "breaks": [(b["time"], b["dist"], b["standing"]) for b in x["breaks"]],
             "laps": [(l.get("time"), l.get("dist"), l.get("intensity"), l.get("trigger")) for l in x["laps"]]}
 
@@ -595,6 +651,7 @@ def worker(job):
     elif G["d"][-1] >= 200:
         out["legs"], out["pauses"], out["summ"], _ = legs_and_pauses(G)
     out["elapsed"] = G["T"]
+    out["sessions"] = s["sessions"]
     hrg = G.get("hr")
     out["laps_c"] = []   # [start s, dur s, watch dist m, steps/min, mean HR, lap trigger (0 = manual), intensity] per lap
     for l in s["laps"]:
@@ -632,6 +689,45 @@ def zones_floor(person="adrian"):
     return [z[f"zone{i}Floor"] for i in range(1, 6)]
 
 
+REC_MIN_S, REC_SHARE = 30, 0.25   # a break is a recovery if >= 30 s or >= 25 % of the rep before it (45/15 s: yes)
+REC_MIN_SHARE = 0.5                # an interval session needs at least half of its breaks to be recoveries
+
+
+def recovery_share(times, breaks):
+    """share of the breaks between reps that are real recoveries (>= 30 s, or >= 25 % of the rep before it: 45/15 s
+    sets are recoveries); a short stop inside one continuous effort (a traffic light, a lap press, a GPS slowdown) isn't.
+    patrik 2026-10-27 (1625 m, 9.5 s, 792 m, 11.8 s, 4902 m, 12.1 s, 581 m: one 6.4 km steady run after a warm-up):
+    1 of 4. None without breaks or when breaks don't line up with the reps (len(times) - 1)."""
+    if not breaks or len(breaks) != len(times) - 1:
+        return None
+    rec = [b >= REC_MIN_S or b >= REC_SHARE * t for t, b in zip(times, breaks)]
+    return sum(rec) / len(rec)
+
+
+def hr_norm(person="adrian"):
+    """(max HR, resting HR) from profile/hr_settings.json (scripts/hr_settings.py), else (zones max, None)"""
+    pf = ROOT / "data" / person / "profile"
+    try:
+        h = json.loads((pf / "hr_settings.json").read_text())
+        return float(h["max_hr"]), float(h["rest_hr"]) if h.get("rest_hr") else None
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    try:
+        z = json.loads((pf / "heart_rate_zones.json").read_text())
+        z = [x for x in z if x.get("sport") in ("DEFAULT", None)][0] if isinstance(z, list) else z
+        return float(z["maxHeartRateUsed"]), None
+    except (OSError, ValueError, KeyError, TypeError, IndexError):
+        return None, None
+
+
+def hrr_of(hr, HN):
+    """mean HR as a share of the heart-rate reserve (None without HR or a resting HR)"""
+    mx, rest = HN or (None, None)
+    if not hr or not mx or not rest or mx <= rest:
+        return None
+    return (hr - rest) / (mx - rest)
+
+
 def features(a, ZF):
     x, f = a["x"], a["f"] or {}
     dist = (x.get("distance") or 0) / 1000
@@ -643,6 +739,9 @@ def features(a, ZF):
          "avg_hr": x.get("averageHR")}
     hh = f.get("hr_hist") or {}
     tot = sum(hh.values())
+    if not r["avg_hr"] and tot > 120:   # no summary HR (multisport parents): time-weighted mean of the records
+        r["avg_hr"] = sum(h * t for h, t in hh.items()) / tot
+        r["avg_hr_src"] = "records"
     r["zones"] = None
     if tot > 120:
         z = [0.0] * 6
@@ -665,6 +764,7 @@ def features(a, ZF):
                  brk_med_s=float(np.median([b[0] for b in br])) if br else 0,
                  n_manual=sum(1 for l in ana["laps"] if l[3] == "manual"),
                  n_active=sum(1 for l in ana["laps"] if l[2] == "active"), mode=ana["mode"])
+        r["rec_share"] = recovery_share(rt, [b[0] for b in br])   # share of breaks that are real recoveries
     r["at_bislet"] = bool(a["start"]) and hav(a["start"], BISLET) < 400
     return r
 
@@ -765,7 +865,7 @@ def indoor_ana(a, ind):
     breaks = [(round(t2 - (t + d), 1), None, True) for (t, d, _), (t2, _, _) in zip(reps, reps[1:]) if t2 - (t + d) >= 5]
     return {"mode": "indoor", "threshold": None, "rep_times": [d for _, d, _ in reps],
             "rep_dists": ind["rep_m"], "rep_speeds": [m / d if m else None for m, (_, d, _) in zip(ind["rep_m"], reps)],
-            "rep_hr": [h for _, _, h in reps], "breaks": breaks,
+            "rep_hr": [h for _, _, h in reps], "rep_starts": [t for t, _, _ in reps], "breaks": breaks,
             "laps": [(l[1], l[2], None, "manual" if len(l) > 5 and l[5] == 0 else "auto") for l in a["f"]["laps_c"]]}
 
 
@@ -856,8 +956,11 @@ def classify(a, ZF, easy_ref):
     tags = ["hilly"] if F["elev_per_km"] >= 25 else []
     rs, bs = F.get("rep_speed") or 0, F.get("brk_speed") or 0
     cv_max = 1.0 if F.get("n_manual", 0) >= 6 else 0.6
+    # reps must be separated by real recoveries: at least half of the breaks (recovery_share), else the detector
+    # split one continuous effort at short stops
+    rec_ok = F.get("rec_share") is None or F["rec_share"] >= REC_MIN_SHARE
     structured = (F.get("n_reps", 0) >= 3 and rs >= 1.2 * ref and F.get("rep_time", 0) >= 240
-                  and F.get("rep_cv", 9) <= cv_max and bs <= 0.8 * rs) or F.get("n_active", 0) >= 3
+                  and F.get("rep_cv", 9) <= cv_max and bs <= 0.8 * rs and rec_ok) or F.get("n_active", 0) >= 3
     if structured and F.get("rep_med_s", 0) < 35 and F.get("rep_time", 0) < 300:
         structured = False; tags.append("strides")
     if structured:
@@ -874,6 +977,27 @@ def classify(a, ZF, easy_ref):
     if F["dist_km"] >= 16 or F["moving_s"] >= 85 * 60:
         return "long", " ".join(tags), None
     return "easy", " ".join(tags), None
+
+
+STEADY_HRR, STEADY_REL, STEADY_REL_PACE, STEADY_MIN_HRR = 0.68, 1.05, 1.15, 0.60   # see steady_or_easy
+EASY_HRR = 0.65   # runs below this mean %HRR are the easy-pace reference
+
+
+def steady_or_easy(a, sref, HN):
+    """'steady' for a continuous run (classified 'easy') that was faster than easy: mean HR >= 68 % of the HR reserve
+    at >= 1.05 x the person's easy pace, or >= 1.15 x the easy pace (HR >= 60 % HRR or none). Easy pace (`sref`) =
+    median speed of the person's own continuous runs with mean HR < 65 % HRR within +-180 days (not the median of all
+    runs, which a lot of fast runs pull up: 2026-10-03 4:34 /km at HR 167 was "easy"). >= 15 min moving."""
+    F = a["F"]
+    hrr = hrr_of(F.get("avg_hr"), HN)
+    if not sref or not F.get("speed") or F["moving_s"] < 900:
+        return "easy"
+    rel = F["speed"] / sref
+    F["rel_easy"] = rel
+    if (hrr is not None and hrr >= STEADY_HRR and rel >= STEADY_REL) or (
+            rel >= STEADY_REL_PACE and (hrr is None or hrr >= STEADY_MIN_HRR)):
+        return "steady"
+    return "easy"
 
 
 def is_iv(stype):
@@ -1210,6 +1334,7 @@ def main():
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--show", nargs="*", metavar="ROUTE", help="print the comparison table of these route ids "
                     "(no id: the largest ski route)")
+    ap.add_argument("--out", help="write groups.json here instead of data/<person>/groups.json (trial runs)")
     args = ap.parse_args()
     T0 = time.time()
     D = ROOT / "data" / args.person
@@ -1225,7 +1350,9 @@ def main():
         cache = {"_v": CACHE_VERSION}
     types = {x["activityId"]: x["activityType"]["typeKey"] for x in idx}
     key = lambda p: (p.stat().st_mtime_ns, p.stat().st_size)
-    todo = [str(p) for i, p in fits.items() if FAM.get(types.get(i)) == "run" and cache.get(str(p), {}).get("key") != key(p)]
+    # multisport files too: a multisport file whose legs are runs is a run (multisport_family)
+    todo = [str(p) for i, p in fits.items() if (FAM.get(types.get(i)) == "run" or types.get(i) in MULTISPORT)
+            and cache.get(str(p), {}).get("key") != key(p)]
     with Pool(args.workers) as pool:
         for fp, ana in pool.imap_unordered(ana_job, todo, chunksize=4):
             cache[fp] = {"key": key(Path(fp)), "ana": ana}
@@ -1259,6 +1386,8 @@ def main():
             (x["startLatitude"], x["startLongitude"]) if x.get("startLatitude") else None)
         a["end"] = tuple(f["pts"][-1]) if f and f["pts"] else None
         a["fam"] = FAM.get(a["type"], "other")
+        if a["type"] in MULTISPORT:   # a multisport file whose legs are (almost) all runs is a run
+            a["fam"] = multisport_family(f.get("sessions") if f else None) or a["fam"]
         a["summ"] = f.get("summ") if f else None
         acts.append(a)
     A = {a["id"]: a for a in acts}
@@ -1394,6 +1523,18 @@ def main():
 
     for a in acts:
         a["stype"], a["detail"], a["surface"] = classify(a, ZF, easy_ref)
+    # easy vs steady: the easy pace = median speed of own continuous runs at an easy HR (steady_or_easy)
+    HN = hr_norm(args.person)
+    ez = [(dord[b["id"]], b["F"]["speed"]) for b in acts
+          if b["fam"] == "run" and b["stype"] in ("easy", "long", "tempo", "race?") and b["F"]["dist_ok"]
+          and b["F"]["dist_km"] >= 3 and b["F"].get("speed") and (h := hrr_of(b["F"].get("avg_hr"), HN)) is not None
+          and h < EASY_HRR]
+    ez_d = np.array([d for d, _ in ez]); ez_v = np.array([v for _, v in ez])
+    for a in acts:
+        if a["stype"] == "easy":
+            m = np.abs(ez_d - dord[a["id"]]) <= 180 if len(ez_d) else np.zeros(0, bool)
+            a["stype"] = steady_or_easy(a, float(np.median(ez_v[m])) if m.sum() >= 5 else None, HN)
+    for a in acts:
         ana = (a["f"] or {}).get("ana")
         a["sig"] = signature(ana) if ana and is_iv(a["stype"]) else None
 
@@ -1482,7 +1623,9 @@ def main():
              "moving_s": sm.get("moving") if sm else (round(a["F"]["moving_s"]) if a["F"]["moving_s"] else None),
              "pause_s": sm.get("pause"), "n_pauses": sm.get("n_pauses"), "longest_pause_s": sm.get("longest"),
              "sig": a["sig"], "surface": a["surface"], "dist_trusted": a["F"]["dist_ok"], "swim": f.get("swim"),
-             "indoor_bislett": {k: v for k, v in a["indoor"].items() if not k.startswith("_")} if a.get("indoor") else None}
+             "indoor_bislett": {k: v for k, v in a["indoor"].items() if not k.startswith("_")} if a.get("indoor") else None,
+             # mean HR from the records when the Garmin summary has none (multisport parents)
+             "avg_hr": round(a["F"]["avg_hr"]) if a["F"].get("avg_hr_src") == "records" else None}
         if f.get("legs") is not None:
             o["legs"] = f["legs"]; o["pauses"] = f["pauses"]
         ana = f.get("ana")
@@ -1490,6 +1633,9 @@ def main():
             o["reps"] = [[r1(t_, 1), r1(d_, 0), r1(v_, 2), h_] for t_, d_, v_, h_ in
                          zip(ana["rep_times"], ana["rep_dists"], ana["rep_speeds"], ana["rep_hr"])]
             o["breaks_s"] = [r1(b[0], 0) for b in ana["breaks"]]
+            if ana.get("rep_starts") and len(ana["rep_starts"]) == len(ana["rep_times"]):
+                # rep start (s on the FIT record time base, read_series): the app's Reps tab and chart use these reps
+                o["rep_starts"] = [r1(t_, 1) for t_ in ana["rep_starts"]]
         o["similar"] = a["similar"]
         out_acts[str(a["id"])] = {k: v for k, v in o.items() if v is not None}
     for R in routes.values():
@@ -1500,8 +1646,9 @@ def main():
                       "waypoint_cluster_m": WP_CLUSTER_M, "waypoint_share": WP_SHARE, "similarity_weights": SIM_W},
            "fields": FIELDS, "places": places, "areas": areas, "routes": routes, "activities": out_acts}
     js = json.dumps(doc, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-    (D / "groups.json").write_text(js)
-    print(f"wrote {D / 'groups.json'} ({len(js) / 1e6:.2f} MB): {len(places)} places, {len(areas)} areas, "
+    outp = Path(args.out) if args.out else D / "groups.json"
+    outp.write_text(js)
+    print(f"wrote {outp} ({len(js) / 1e6:.2f} MB): {len(places)} places, {len(areas)} areas, "
           f"{len(routes)} routes (>=2), {sum(1 for r in routes.values() if 'legs_table' in r)} compared; "
           f"types {dict(collections.Counter(a['stype'] for a in acts).most_common())}; {time.time() - T0:.1f}s")
     if args.show is not None:

@@ -90,7 +90,9 @@ app/web/
 ```
 - Reuse of the analysis code: `app/server/__init__.py` puts `scripts/` on `sys.path`; the FIT reader is
   `gps_quality._read_fast` (extended with HR/altitude/cadence/power and lap fields, the same way
-  `session_groups.py` extends it), rep/break times come from `run_analysis.analyse`, daily summaries and
+  `session_groups.py` extends it), rep/break times come from `run_analysis.analyse` (ski intervals and Bislett
+  indoor laps: from groups.json `reps` + `rep_starts`, `fitcache.reps_from_groups`, so the Reps tab, the chart
+  shading and the workout label use one rep list; meta `reps_source: "groups"`), daily summaries and
   sleep from `build_report.daily/sleep`. The scripts' CLIs are unchanged.
 - Cache: `series/<id>.npz` holds per-record arrays `t lat lon hr speed alt dist cad power` plus a `meta`
   JSON (start time, laps, reps/breaks for interval runs). `tracks.json` holds encoded polylines per
@@ -142,8 +144,11 @@ Frontend: `components/ActivityBits.tsx` `DistCell` / `distStr` / `distSort` / `t
   without a distance fall back to the index's median rep speed). Shown as "6×1000 @ 3:27 /km".
 - <a id="rep-pace"></a>**Track reps = set distance**: in a track session (groups.json type `intervals_track`:
   Bislett or the watch's track mode) a rep from 5 % under to 12.5 % over a round track distance (400, 800, 1000,
-  1600 m …) counts as exactly that distance (`session_groups.track_set_m`): 392–450 m is a 400. A track rep is never
-  really short; GPS and outer lanes make it look longer. The measured value is not shown (the API keeps it as
+  1600 m …) counts as exactly that distance (`session_groups.track_set_dists`): 392–450 m is a 400. A rep in a
+  signature group with a distance label ("3×1800 + 2×900") takes that label when it lies in the window, so the reps
+  agree with the workout label (2026-10-06 Frogner: 1744–1762 m GPS reps are 1800, not the nearest list entry 1600;
+  also 3×2100 sessions and patrik's 1×1300); mixed sessions use the list (`track_set_m`). A track rep is rarely
+  really short; GPS and outer lanes usually make it look longer. The measured value is not shown (the API keeps it as
   `gps_dist`). This applies to avg rep pace, the activity page's reps and Compare.
   Together already scores the set distance.
 - **Pace / speed** (`lib/format.ts` `speedText(sport, ms)`): m:ss /km on foot (run, walk, hike), /100 m for swims,

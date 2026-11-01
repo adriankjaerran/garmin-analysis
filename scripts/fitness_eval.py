@@ -215,7 +215,7 @@ def run(person, out=True):
 
     # (3) HR-only aerobic estimate (Swain %HRR) on steady runs
     aer = [(day(acts[i]), f["hr_aer"]["vdot"], f["hr_aer"]["hrr"], acts[i]["date"], acts[i].get("route"))
-           for i, f in feats.items() if acts[i]["sport"] == "run" and acts[i]["type"] in ("easy", "long", "tempo")
+           for i, f in feats.items() if acts[i]["sport"] == "run" and acts[i]["type"] in ("easy", "steady", "long", "tempo")
            and (f.get("hr_aer") or {}).get("vdot") and f["hr_aer"]["n_chunks"] >= 3]
     aer.sort()
     tr = pairs_sd([(a[0], a[1]) for a in aer], 10)

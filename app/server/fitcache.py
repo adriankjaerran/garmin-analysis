@@ -240,7 +240,7 @@ def load_npz(path: Path) -> tuple[dict, dict]:
 
 
 # ---------------------------------------------------------------- workers
-REP_KEYS = ("reps", "breaks", "mode", "reps_err")   # added by the rep pass; kept when only the format changes
+REP_KEYS = ("reps", "breaks", "mode", "reps_err", "reps_source")   # added by the rep pass; kept when only the format changes
 
 
 def carry_reps(meta: dict, old_npz: Path) -> dict:
@@ -277,6 +277,72 @@ def _reps_job(job):
     return aid, {"reps": [{k: r.get(k) for k in keep} for r in x["reps"]],
                  "breaks": [{k: b.get(k) for k in keep + ("hr_peak", "hr_drop", "standing")} for b in x["breaks"]],
                  "mode": x["mode"]}, None
+
+
+def groups_rep_source(ga: dict) -> bool:
+    """reps of this session come from groups.json, not run_analysis: ski intervals (ski_intervals.py; the running
+    detector found 0-16 random "reps" on skis) and Bislett indoor laps (whole manual laps; the watch distance is made
+    up). One rep list for the workout label, the Reps tab, the chart shading, Compare and the shape model."""
+    return bool(ga.get("rep_starts")) and bool(ga.get("reps")) and (
+        ga.get("type") == "ski_intervals" or bool(ga.get("indoor_bislett")))
+
+
+def groups_reps_key(ga: dict) -> str:
+    """cache key of a groups.json rep list (rebuilt when session_groups changes the reps)"""
+    import hashlib
+    return "g:" + hashlib.sha1(json.dumps([ga.get("reps"), ga.get("rep_starts")]).encode()).hexdigest()[:16]
+
+
+def reps_from_groups(ga: dict, arr: dict) -> dict:
+    """meta reps / breaks from groups.json (`reps` [time_s, dist_m, speed_ms, hr], `rep_starts`), with HR from the
+    series; breaks between consecutive reps (indoor: standing, no distance; ski: distance from the series)"""
+    t = arr["t"].astype(float)
+    hr = arr.get("hr")
+    dist = arr.get("dist")
+    indoor = bool(ga.get("indoor_bislett"))
+
+    def hr_in(a, b):
+        if hr is None:
+            return None, None
+        h = hr[(t >= a) & (t < b)].astype(float)
+        h = h[np.isfinite(h) & (h > 0)]
+        return (int(round(h.mean())), int(h.max())) if len(h) > 5 else (None, None)
+
+    def hr_at(x):
+        if hr is None or not len(t):
+            return None
+        i = int(np.clip(np.searchsorted(t, x), 0, len(t) - 1))
+        return int(hr[i]) if np.isfinite(hr[i]) and hr[i] > 0 else None
+
+    def d_at(x):
+        if dist is None or not len(t):
+            return None
+        ok = np.isfinite(dist)
+        return float(np.interp(x, t[ok], dist[ok])) if ok.any() else None
+
+    reps, breaks = [], []
+    rows = list(zip(ga["rep_starts"], ga["reps"]))
+    for j, (t0, r) in enumerate(rows):
+        dur, m = float(r[0]), r[1]
+        h, hm = hr_in(t0, t0 + dur)
+        reps.append({"start": round(t0, 2), "end": round(t0 + dur, 2), "time": round(dur, 2), "dist": m,
+                     "speed": round(m / dur, 3) if m and dur else None, "hr": h if h is not None else (r[3] if len(r) > 3 else None),
+                     "maxhr": hm})
+        if j + 1 < len(rows):
+            a, b = t0 + dur, float(rows[j + 1][0])
+            if b <= a:
+                continue
+            h, hm = hr_in(a, b)
+            peak = max((x for x in (hr_at(a + k) for k in range(-5, 6)) if x), default=None)
+            end_hr = hr_at(min(a + 60, b))
+            da, db = (None, None) if indoor else (d_at(a), d_at(b))
+            bd = round(db - da, 1) if da is not None and db is not None else None
+            sp = arr.get("speed")
+            stand = int(np.sum(sp[(t >= a) & (t <= b)] < 0.5)) if sp is not None and not indoor else int(round(b - a))
+            breaks.append({"start": round(a, 2), "end": round(b, 2), "time": round(b - a, 2), "dist": bd,
+                           "speed": round(bd / (b - a), 3) if bd is not None else None, "hr": h, "maxhr": hm,
+                           "hr_peak": peak, "hr_drop": peak - end_hr if peak and end_hr else None, "standing": stand})
+    return {"reps": reps, "breaks": breaks, "mode": "indoor" if indoor else "ski", "reps_source": "groups"}
 
 
 def build(person: str, force: bool = False, workers: int = 8, quiet: bool = False) -> dict:
@@ -320,7 +386,20 @@ def build(person: str, force: bool = False, workers: int = 8, quiet: bool = Fals
         gkey = str(gpath.stat().st_mtime_ns) if gpath.exists() else ""
         want = [aid for aid, a in groups["activities"].items() if a.get("reps") and aid in fits
                 and aid in manifest and "err" not in manifest[aid]]
-        rtodo = [(aid, str(fits[aid])) for aid in want if manifest[aid].get("reps_key") != manifest[aid]["key"]]
+        # ski intervals / Bislett indoor: the reps of groups.json (groups_rep_source), keyed by FIT + the rep list
+        gsrc = {aid: groups["activities"][aid] for aid in want if groups_rep_source(groups["activities"][aid])}
+        for aid, ga in gsrc.items():
+            k = manifest[aid]["key"] + "|" + groups_reps_key(ga)
+            if manifest[aid].get("reps_key") == k:
+                continue
+            p = sdir / f"{aid}.npz"
+            arr, meta = load_npz(p)
+            meta.pop("reps_err", None)
+            meta.update(reps_from_groups(ga, arr))
+            save_npz(p, arr, meta)
+            manifest[aid]["reps_key"] = k
+        rtodo = [(aid, str(fits[aid])) for aid in want if aid not in gsrc
+                 and manifest[aid].get("reps_key") != manifest[aid]["key"]]
         for aid, res, err in pool.imap_unordered(_reps_job, rtodo, chunksize=2):
             p = sdir / f"{aid}.npz"
             arr, meta = load_npz(p)
@@ -335,7 +414,7 @@ def build(person: str, force: bool = False, workers: int = 8, quiet: bool = Fals
         tracks.pop(aid)
     tpath.write_text(json.dumps(tracks, separators=(",", ":")))
     mpath.write_text(json.dumps(manifest))
-    res = {"parsed": len(todo), "reps": len(rtodo), "errors": errors, "tracks": len(tracks),
+    res = {"parsed": len(todo), "reps": len(rtodo), "reps_groups": len(gsrc), "errors": errors, "tracks": len(tracks),
            "seconds": round(time.time() - T0, 1)}
     if not quiet:
         print(f"series cache: parsed {len(todo)} FIT, {len(rtodo)} rep analyses, {len(tracks)} tracks, "

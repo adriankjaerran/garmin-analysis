@@ -90,6 +90,7 @@ P = {
     "prior_sd": 6.0,
 }
 DISCIPLINES = ("interval", "long", "ski")
+STALE_DAYS = 90        # current shape without a race / hard session (weight > 0.5) for longer than this: `stale`
 LABEL = {"interval": "Interval shape (short/fast running)", "long": "Long-distance running shape",
          "ski": "Ski shape (roller + snow)", "overall": "Overall (all disciplines, % of personal best)"}
 
@@ -523,7 +524,7 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
             out.append(("long", cont["vdot"] + (P["tempo_offset"] if kind == "hard" else 0.0), kind, SIG["tempo" if kind == "hard" else "cont_bound"],
                         {"window_s": cont["dur_s"], "gap_speed": round(cont["speed"], 3), "hrr": cont.get("hrr")}))
         ha = f.get("hr_aer") or {}
-        if use_hr_aer and ha.get("vdot") and ha["n_chunks"] >= 3 and t in ("easy", "long", "tempo"):
+        if use_hr_aer and ha.get("vdot") and ha["n_chunks"] >= 3 and t in ("easy", "steady", "long", "tempo"):
             out.append(("long", ha["vdot"], "hard", SIG["hr_aer"], {"hr_based": True, "n_chunks": ha["n_chunks"]}))
     elif sport == "ski":
         e = f.get("ski")
@@ -791,23 +792,51 @@ def _model(ev, today):
                               "sd_median": round(float(np.median(s[mk])), 2), "n_evidence": len(sub_y),
                               "mean_well_observed": round(float(m[obs_mk].mean()), 1) if obs_mk.sum() >= 14 else None,
                               "days_well_observed": int(obs_mk.sum())}
+        # staleness: the latest race / hard evidence that counted (weight > 0.5); the sd already grows by sqrt(q) per
+        # day without evidence (random walk), `stale` tells the UI to grey the value
+        last = max((e["day"] for e in sub if e["kind"] in ("race", "hard") and (e.get("weight") or 0) > 0.5), default=None)
+        dse = int(t1 - last) if last is not None else None
         disc_out[disc] = {
             "label": LABEL[disc], "unit": "VDOT" if disc != "ski" else "VDOT-equivalent (ml/kg/min)",
             "q_per_day": P["q_per_day"][disc], "personal_best": round(best[disc], 2),
             "current": {"date": today.isoformat(), "mean": round(cur_m, 2), "sd": round(cur_s, 2),
                         "confidence": conf(cur_s), "pct_of_best": round(100 * cur_m / best[disc], 1),
-                        "race_equivalents_s": eq or None},
+                        "race_equivalents_s": eq or None,
+                        "last_evidence_date": dt.date.fromordinal(last).isoformat() if last is not None else None,
+                        "days_since_evidence": dse, "stale": dse is None or dse > STALE_DAYS},
             "yearly": yearly,
             "weekly": weekly(days, m, s, sub),
         }
+    pred = race_prediction(disc_out)
     disc_out["overall"] = {
         "label": LABEL["overall"], "unit": "% of personal best (precision-weighted over disciplines)",
-        "current": {"date": today.isoformat(), "mean": round(float(ov_m[-1]), 1), "sd": round(float(ov_s[-1]), 1)},
+        "current": {"date": today.isoformat(), "mean": round(float(ov_m[-1]), 1), "sd": round(float(ov_s[-1]), 1),
+                    # the one running race prediction (race_prediction): blended interval + long shape
+                    "race_prediction": pred, "race_equivalents_s": pred["race_equivalents_s"] if pred else None},
         "yearly": {str(y): round(float(ov_m[np.array([dt.date.fromordinal(int(d)).year == y for d in days_all])].mean()), 1)
                    for y in sorted({dt.date.fromordinal(int(d)).year for d in days_all})},
         "weekly": weekly(days_all, ov_m, ov_s),
     }
     return disc_out
+
+
+def race_prediction(discs):
+    """One running race prediction from the interval and long shapes (each discipline's current mean and sd):
+    precision-weighted mean (w = 1/sd²). Their sd grows without evidence (random walk), so a stale shape (adrian's
+    long: last race 363 days ago, sd 2.8 vs interval 1.0) fades out of the blend by itself instead of giving a second
+    prediction minutes apart. sd = sqrt(1/sum w + weighted spread of the two means): when the shapes disagree the
+    band widens. None without a running shape."""
+    parts = [(d, discs[d]["current"]) for d in ("interval", "long") if d in discs and discs[d]["current"].get("sd")]
+    if not parts:
+        return None
+    w = np.array([1 / c["sd"] ** 2 for _, c in parts]); m = np.array([c["mean"] for _, c in parts])
+    W = float(w.sum()); mb = float((w * m).sum() / W)
+    sd = math.sqrt(1 / W + float((w * (m - mb) ** 2).sum()) / W)
+    return {"vdot": round(mb, 2), "sd": round(sd, 2),
+            "weights": {d: round(float(wi / W), 3) for (d, _), wi in zip(parts, w)},
+            "race_equivalents_s": {nm: round(race_time(mb, dist)) for dist, nm in
+                                   [(5000, "5k"), (10000, "10k"), (21097.5, "half"), (42195, "marathon")]},
+            "range_10k_s": [round(race_time(mb + sd, 10000)), round(race_time(mb - sd, 10000))]}
 
 
 def build(person, workers=8, today=None, progress=True):

@@ -38,6 +38,9 @@ cmp.validate(person)                                                          # 
   ~10 ms per file; the same detector session_groups uses, so ski reps equal groups.json reps). Route projections
   come from `session_groups.project` onto the medoid's 20 m reference. All are cached in
   `data/<p>/cache/compare.pkl`, keyed by FIT mtime+size (+ detector version for ski).
+  Track sessions (intervals_track or the watch's track mode): each rep counts as its set distance,
+  `session_groups.snap_track_reps` (the signature group's label, e.g. 1754 m in a 3×1800 = 1800 m; else the
+  `TRACK_SET_M` list; `gps_dist` keeps the measurement), see [app.md](app.md#rep-pace).
 - Sessions **without distance** (no-GPS lap workouts, HR only) work in `elapsed`, `intervals` and `breaks`
   (speed / distance / pace fields are null, pauses = timer stops only, reps are matched by duration). In
   `distance` and `moving` they are skipped with `why: "no distance ..."`. With a warm cache a call takes 0.01–0.1 s

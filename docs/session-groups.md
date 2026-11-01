@@ -1,6 +1,6 @@
 # Session groups, legs and route comparison
 
-`uv run scripts/session_groups.py adrian [--show [ROUTE_ID ...]]` → `data/adrian/groups.json`
+`uv run scripts/session_groups.py adrian [--show [ROUTE_ID ...]] [--out PATH]` → `data/adrian/groups.json` (`--out`: trial run elsewhere)
 (~5 s; first run ~15 s while the rep detector of every run is cached in
 `data/adrian/cache/session_groups.pkl`, keyed by FIT mtime+size; ski reps from `ski_intervals.py` go into
 the same cache, keyed by FIT mtime+size+detector version). `--show` prints the leg table of a
@@ -72,8 +72,27 @@ the reader (similarity tracks, fitness features, compare) and the rep cache vers
   point_to_point / loop_cw / loop_ccw (retrace share + start–end distance); `route_dir` = fwd/rev
   vs the reference (cw/ccw for loops).
 - **Session types** (rules): runs → intervals_track/road/treadmill (rep detector, manual laps),
-  tempo, long, easy, race? (fast + standard distance), run_nogps, run_other; tags hilly/strides in
-  `type_detail`. Ski → **ski_intervals** (≥ 3 reps from the ski detector below; detail
+  tempo, long, steady, easy, race? (fast + standard distance), run_nogps, run_other; tags hilly/strides in
+  `type_detail`.
+  - **Intervals need real recoveries** (`recovery_share`): a break counts as a recovery when it is ≥ 30 s or ≥ 25 % of
+    the rep before it (45/15 s sets: yes); at least half of the breaks must be recoveries (watch workouts with ≥ 3
+    `active` laps always count). Otherwise the detector split one continuous effort at traffic lights / lap presses /
+    GPS slowdowns. Changed (2026-11-01): patrik 2026-10-27 (1625 m, 9.5 s, 792 m, 11.8 s, 4902 m, 12.1 s, 581 m:
+    steady run with ~400 m lap presses) → tempo; patrik 2025-09-22 → steady, 2025-06-28 (hilly 5 km) → easy; adrian
+    2021-04-24 → steady. patrik 2026-09-10 (reps at 2:47–3:27 /km with HR 115–158, probably not on foot) still has
+    6 of 9 recovery breaks and stays intervals_road (open).
+  - **Steady vs easy** (`steady_or_easy`, after the other rules): a continuous run classified easy is `steady` when its
+    mean HR is ≥ 68 % of the HR reserve (`profile/hr_settings.json` max / rest) at ≥ 1.05 × the person's easy pace, or
+    it is ≥ 1.15 × the easy pace (HR ≥ 60 % HRR or no HR); ≥ 15 min moving. Easy pace = median speed of the person's
+    own continuous runs (≥ 3 km, trusted distance) with mean HR < 65 % HRR within ±180 days (≥ 5 runs, else no
+    steady). The old reference (median of *all* runs, used by tempo / race? / structured) is pulled up by fast runs, so
+    2026-10-03 (4:34 /km, HR 167) and 2026-10-10 (4:44 /km, HR 162) were "Easy run". Result: adrian 272 easy → 227
+    easy + 45 steady (3 in 2026), patrik 50 easy → 41 easy + 10 steady (+1 from intervals). Steady runs are lower
+    bounds in the fitness model, like easy ones. Label "Steady run".
+  - **Multisport files** (`multisport_family`): a `multi_sport` activity whose FIT sessions are ≥ 80 % of the time one
+    family (FIT sport 1 = run) gets that sport and is classified like any run (adrian 2026-10-15, two running legs at
+    Bislett: `run` / intervals_track, scored by the fitness model). Without a summary HR the mean HR comes from the
+    records (`avg_hr` in groups.json, `avg_hr_src: records`). Ski → **ski_intervals** (≥ 3 reps from the ski detector below; detail
   `lap workout` / `uphill reps` / `reps`, `short|medium|long reps`) / ski_easy / ski_hard (≥ 25 % time in
   Z4–5) / ski_long (≥ 150 min or ≥ 35 km); `surface` guess roller? (May–Oct) / snow — classic vs skate
   isn't in the files (all sport 12). Other sports keep their sport / activity type as type (hike,
@@ -86,7 +105,12 @@ the reader (similarity tracks, fitness features, compare) and the rep cache vers
   (bislet_gps_lost / no_gps), gps_cover, n_reps, rep_laps [[start_s, dur_s, n]], rep_m}. Overrides:
   `data/<person>/indoor_bislett.json` `time_only` {id: reason}. `indoor_grid()` gives consumers the matching 1 Hz speed
   (rep distance / rep time in reps, 0 between, no altitude). See [distance-calibration.md](distance-calibration.md). Intervals (runs and ski) get `sig` ("6×1000", "10×4:00",
-  "3×1800 + 2×900"; ski: durations only, "4×4:00"), `reps` [time_s, dist_m, speed_ms, hr] and `breaks_s`.
+  "3×1800 + 2×900"; ski: durations only, "4×4:00"), `reps` [time_s, dist_m, speed_ms, hr], `breaks_s` and
+  `rep_starts` (s on the read_series time base; ski intervals, Bislett indoor and run reps analysed after 2026-11-01;
+  the app's series cache takes the reps of ski / indoor sessions from here).
+  Track sessions: each rep counts as its set distance, `track_set_dists(times, dists)` (the signature group's distance
+  label when the rep is 5 % under .. 12.5 % over it, else `TRACK_SET_M` via `track_set_m`); `snap_track_reps` applies
+  it to rep dicts (compare, the activity page, avg rep pace).
 - **Pool swims** (`pool_swim()`, FIT sport 5 with length messages and a pool length): the records of a pool swim
   come in bursts and their distance steps per length, so pauses / legs from records are garbage (12:40 "moving",
   8 km/h). Instead: moving = swimming time of the active lengths, distance = valid lengths × pool length (lengths

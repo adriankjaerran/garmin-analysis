@@ -89,7 +89,7 @@ OVERVIEW_PTS = 200           # overview polyline (index) <= 200 points
 DETAIL_TOL_M = 3.0           # tracks.json: Douglas-Peucker tolerance
 
 KIND_LABEL = {"intervals": "Interval running", "tempo": "Tempo run", "race": "Race", "long": "Long run",
-              "easy": "Easy run", "other": "Other run", "nogps": "Run without GPS"}
+              "easy": "Easy run", "steady": "Steady run", "other": "Other run", "nogps": "Run without GPS"}
 SPORT_LABEL = {"hike": "Hike", "cycling": "Cycling", "lap_swimming": "Pool swim", "open_water_swimming": "Open water swim",
                "rowing_v2": "Rowing", "kayaking_v2": "Kayaking", "stop_watch": "Stopwatch (no GPS)",
                "multi_sport": "Multisport", "other": "Other", "run": "Run", "ski": "Ski"}
@@ -329,10 +329,11 @@ def dist_band(sport, km):
 
 
 FAMILY = {"intervals_track": "intervals", "intervals_road": "intervals", "intervals_treadmill": "intervals",
-          "tempo": "tempo", "race?": "race", "long": "long", "easy": "easy", "run_nogps": "nogps",
+          "tempo": "tempo", "race?": "race", "long": "long", "easy": "easy", "steady": "steady", "run_nogps": "nogps",
           "run_other": "other", "ski_easy": "easy", "ski_hard": "hard", "ski_long": "long", "ski_long_race?": "long",
           "ski_intervals": "intervals"}
-RELATED_FAM = {frozenset(p) for p in [("run/intervals", "run/tempo"), ("run/tempo", "run/race"), ("run/easy", "run/long"),
+RELATED_FAM = {frozenset(p) for p in [("run/intervals", "run/tempo"), ("run/tempo", "run/race"), ("run/easy", "run/long"), ("run/easy", "run/steady"),
+                                      ("run/steady", "run/tempo"), ("run/steady", "run/long"),
                                       ("ski/easy", "ski/long"), ("ski/hard", "ski/long"), ("run/easy", "run/nogps"),
                                       ("ski/intervals", "ski/hard")]}
 
@@ -542,7 +543,7 @@ def build(person="adrian", workers=8, quiet=False):
         r = {"id": aid, "date": o["date"], "start": (x.get("startTimeLocal") or o["date"])[:16], "name": x.get("activityName"),
              "sport": sport, "atype": o["atype"], "gps": gps, "dist_km": dist_km, "dist_trusted": o.get("dist_trusted", False),
              "dur_s": o.get("dur_s"), "moving_s": round(mov) if mov else None, "climb_m": r_(x.get("elevationGain")),
-             "desc_m": r_(x.get("elevationLoss")), "avg_hr": r_(x.get("averageHR")), "max_hr": r_(x.get("maxHR")),
+             "desc_m": r_(x.get("elevationLoss")), "avg_hr": r_(x.get("averageHR")) or o.get("avg_hr"), "max_hr": r_(x.get("maxHR")),
              "speed_ms": round(dist_km * 1000 / mov, 3) if mov and dist_km and o.get("dist_trusted") else None,
              "loc": x.get("locationName") or None, "area": o.get("area"),
              "start_place": o.get("place"), "start_place_name": pname(o.get("place")),

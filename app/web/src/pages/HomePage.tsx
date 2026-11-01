@@ -88,7 +88,15 @@ function pctDelta(v: number, typ: number) {
 const DISC_SHORT: Record<string, string> = { interval: "Interval", long: "Long", ski: "Ski", overall: "Overall" };
 const DISC_COLOR: Record<string, string> = { interval: "var(--disc-interval)", long: "var(--disc-long)", ski: "var(--disc-ski)", overall: "var(--disc-overall)" };
 
+/** a shape without a race / hard session for more than this many days is stale: greyed, "last evidence 12 mo ago" */
+const STALE_DAYS = 90;
+/** "12 d" / "5 mo" / "2.5 y" */
+export const agoShort = (d: number) => d < 60 ? `${d} d` : d < 730 ? `${Math.round(d / 30.4)} mo` : `${(d / 365).toFixed(1).replace(/\.0$/, "")} y`;
+
 function ShapeLine({ fit }: { fit: Record<string, Shape> }) {
+  // one race prediction: the interval + long shapes blended by precision (fitness.json overall.race_prediction),
+  // so a stale long shape (its sd grows every day without evidence) doesn't give a second, minutes-apart answer
+  const pred = fit.overall?.race_equivalents_s;
   return (
     <div class="home-shape">
       <a class="lbl" href="/fitness" title="Current shape per discipline (Daniels VDOT scale) — open Fitness">Shape</a>
@@ -96,22 +104,32 @@ function ShapeLine({ fit }: { fit: Record<string, Shape> }) {
         const ov = k === "overall";
         const t = s.trend_90d;
         const eq = s.race_equivalents_s;
+        const ago = !ov && s.last_evidence ? daysBetween(s.last_evidence.date, s.date) : null;
+        const stale = !ov && (ago === null || ago > STALE_DAYS);
         const tip = [s.label, ov ? `${num(s.mean, 1)} % of personal best` : `${num(s.mean, 1)} ± ${num(s.sd, 1)} ${s.unit}`,
           s.pct_of_best ? `${num(s.pct_of_best, 0)} % of best` : "", t !== null ? `${t >= 0 ? "+" : ""}${num(t, 1)} in 90 days` : "",
-          eq ? `≈ 5k ${mmss(eq["5k"])}, 10k ${dur(eq["10k"])}` : "", s.last_evidence ? `last hard evidence ${s.last_evidence.date}` : "",
+          !ov && eq ? `≈ 5k ${mmss(eq["5k"])}, 10k ${dur(eq["10k"])}` : "",
+          ov && pred ? `today ≈ 5k ${mmss(pred["5k"])}, 10k ${dur(pred["10k"])}, half ${dur(pred.half)} (interval + long shape blended by how certain each is)` : "",
+          s.last_evidence ? `last hard evidence ${s.last_evidence.date}` : "",
+          stale ? `no race or hard session for ${ago === null ? "ever" : `${ago} days`}: the value is carried forward and its uncertainty grows` : "",
           s.confidence ? `confidence ${s.confidence}` : ""].filter(Boolean).join(" · ");
         return (
-          <a key={k} class="disc" href={`/fitness?d=${k === "overall" ? "interval,long,ski" : k}`} title={tip}>
+          <a key={k} class={"disc" + (stale ? " stale" : "")} href={`/fitness?d=${k === "overall" ? "interval,long,ski" : k}`} title={tip}
+            style={stale ? { opacity: 0.55 } : undefined}>
             <span class="dot" style={{ background: DISC_COLOR[k] }} />
             <span class="nm">{DISC_SHORT[k] ?? k}</span>
             <b>{ov ? `${num(s.mean, 0)} %` : num(s.mean, 1)}</b>
             {!ov && s.sd !== null && <span class="muted">±{num(s.sd, 1)}</span>}
-            {!ov && s.pct_of_best && <span class="muted">{num(s.pct_of_best, 0)} %</span>}
-            {t !== null && <span class={Math.abs(t) < 0.2 ? "muted" : t > 0 ? "up" : "down"}>{t > 0 ? "↑" : t < 0 ? "↓" : "→"}{num(Math.abs(t), 1)}</span>}
-            <LineSpark values={s.weekly} color={DISC_COLOR[k]} />
+            {!ov && !stale && s.pct_of_best && <span class="muted">{num(s.pct_of_best, 0)} %</span>}
+            {stale ? <span class="muted">last evidence {ago === null ? "none" : `${agoShort(ago)} ago`}</span>
+              : t !== null && <span class={Math.abs(t) < 0.2 ? "muted" : t > 0 ? "up" : "down"}>{t > 0 ? "↑" : t < 0 ? "↓" : "→"}{num(Math.abs(t), 1)}</span>}
+            {!stale && <LineSpark values={s.weekly} color={DISC_COLOR[k]} />}
           </a>
         );
       })}
+      {pred && <a class="disc" href="/fitness" title={`One race prediction for today: your interval and long-distance shapes blended by how certain each is (a stale shape counts less) · 5k ${mmss(pred["5k"])} · 10k ${dur(pred["10k"])} · half ${dur(pred.half)}`}>
+        <span class="nm">Today</span><b>10k ≈ {dur(pred["10k"])}</b>
+      </a>}
       <a class="more" href="/fitness">Fitness →</a>
     </div>
   );

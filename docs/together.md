@@ -103,8 +103,8 @@ the anchor's for intervals / races, else a member of the group sport who didn't 
 | gid | label | people (role) |
 |---|---|---|
 | 2026-10-20_2007_Bislet | same_workout | adrian 15×400 (full), patrik 10×400 (partial) |
-| 2026-10-15_2012_Bislet | same_workout 0.79 | patrik 1×1300 + 2×3000, adrian multisport (partial: cut the 2nd 3000 at 2 km) |
-| 2026-10-06_1911_Frogner-stadion | same_workout | adrian 3×1800 + 2×900, patrik (joined 22 min late, all 5 reps) |
+| 2026-10-15_2012_Bislet | same_workout 0.79 | patrik 1×1300 + 2×3000, adrian multisport file, a run since 2026-11-01 (partial: cut the 2nd 3000 at 2 km) |
+| 2026-10-06_1911_Frogner-stadion | same_workout | adrian 3×1800 + 2×900 (adrian 5–0), patrik (joined 22 min late, all 5 reps) |
 | 2026-09-10_1841_Bislet | together 0.97 | easy run; patrik continued alone with reps |
 | 2026-06-29_0824_Weinan-1 | together 0.88 | hike |
 | 2025-11-11_1936_Bislet | same_workout | adrian 6×800 + 2×400, patrik "10 reps mixed" |
@@ -114,7 +114,7 @@ the anchor's for intervals / races, else a member of the group sport who didn't 
 | 2023-07-15_1415_Riverside-County-1 | together 0.99 | hike |
 | 2023-05-07_1200_Lier-1 | same_race | adrian 39:08, patrik 43:26 |
 | 2021-01-23_1526_Trondheim-1 | together 0.99 | easy run |
-| hidden: 2026-10-27_2004_Bislet, 2026-01-20_2006_Bislet | same_place_diff_workout | 6×1000 vs steady run; indoor laps vs steady run |
+| hidden: 2026-10-27_2004_Bislet, 2026-01-20_2006_Bislet | same_place_diff_workout | 6×1000 vs patrik's tempo run (was misdetected as "5 reps (mixed)"); indoor laps vs steady run |
 
 ## `data/together.json`
 ```
@@ -158,7 +158,11 @@ earliest file start).
     at which the person's distance since their own start reaches set distance × their **GPS scale** (median own rep
     distance ÷ set distance over their full reps, 0.95–1.05; `gps_scale`).
   - `merged`: a detected rep shorter than 92 % (the detector split it at a slowdown) → the stream time to the set
-    distance when it's ≤ 1.3 × the slot's best; the own extra reps inside it are absorbed.
+    distance when it's ≤ 1.3 × the slot's best **and** the stretch from the detected rep end to the set distance was
+    run at ≥ 70 % of the rep's own speed (`_kept_running`, `MERGE_PACE`); the own extra reps inside it are absorbed.
+    A slower stretch is the recovery: the watch measured the rep short and the set distance is only reached while
+    walking (2026-10-06 Frogner: adrian's rep 2 was 6:43 to his lap press, the stream reached 1800 m at 9:48, so the
+    replay showed patrik "passing" him at 1780 m). Then the cell is `partial`.
   - `partial` (◐): otherwise; shown with own time / distance, not ranked.
   - Set-time slots (`0:45`): metres covered in the set time (÷ GPS scale), ranked by metres; `result_s` = the time to
     cover the winner's metres at own pace (so totals add up).
@@ -203,6 +207,9 @@ earliest file start).
 
 Validation (2026-11-01, `together.py validate`: 0 failures over 19 groups; detected rep times equal each person's own
 `compare --mode intervals` rep times, totals = sums, cumulative leader at 0):
+2026-10-06 (fixed 2026-11-01): adrian's 1800s are 416.8 / 403.2 / 411.7 s and 900s 187.2 / 171.2 s (detector =
+lap presses; they were 472 / 588 / 507 / 205 / 201 s "merged" because the 1754 m GPS reps had been snapped to 1600 m,
+see app.md#rep-pace), adrian 5–0, +223.8 s over 5 reps (was "Patrik 2–3"); no other session changed.
 2026-10-20: adrian 12:52.3, patrik 14:10.7 over 10 × 400 (+78.4 s, adrian 10–0, closest rep 10 +2.5 s; rep 1: patrik
 ≈ 54 m behind at 70 s); 2025-11-11: 6 shared reps, adrian 6–0 (rep 1 patrik ran 2 × 330 m, rep 2 split by his detector,
 ◐); 2024-04-14: patrik's reps from onsets (typed easy), +30–40 s per 1000 m (positions confirm 75–145 m behind at

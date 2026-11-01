@@ -119,12 +119,12 @@ def test_replay_segments_and_passes(client):
     assert d["segments"][9]["total"]["patrik"]["gap_s"] == pytest.approx(78.4, abs=0.2)
     assert d["segments"][10]["total"] is None and len(d["segments"][10]["people"]) == 1
     assert d["passes"] == []                                                  # adrian ahead in every rep
-    # 2026-10-06 (3 × 1800): patrik passes adrian late in rep 2 and takes the overall lead
+    # 2026-10-06 (3 × 1800 + 2 × 900): adrian's GPS measured his 1800s at 1744-1762 m; the rep ends at his lap press
+    # (6:43 for rep 2), not 46 m further into the walking recovery (9:48, which let patrik "pass" him at 1780 m)
     f = client.get("/api/together/2026-10-06_1911_Frogner-stadion/replay").json()
     r2 = next(x for x in f["segments"] if x["label"] == "2")
-    assert [(p["who"], p["whom"]) for p in r2["passes"]["own"]] == [("patrik", "adrian")]
-    assert 1700 < r2["passes"]["own"][0]["at_m"] <= 1800
-    assert {"person": "patrik", "from_rank": 2, "to_rank": 1} in r2["moves"]
+    assert r2["passes"]["own"] == [] and r2["moves"] == []
+    assert r2["total"]["adrian"]["rank"] == 1
     assert all(p["t_s"] >= f["segments"][p["seg"]]["start_s"] for p in f["passes"])
     # continuous: per km along the shared route, route_m per person
     lier = client.get("/api/together/2023-05-07_1200_Lier-1/replay").json()

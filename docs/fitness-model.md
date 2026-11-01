@@ -58,7 +58,7 @@ and moving time.
 
 **Long: continuous efforts.** Daniels VDOT of the best grade-adjusted window of 20 / 30 / 45 / 60 / 90 min
 inside one pause-free leg.
-- Tempo runs are `hard` and get `tempo_offset` = +3.0. Tempo is run below race effort: the median
+- Tempo runs are `hard` and get `tempo_offset` = +3.0. Steady runs (session_groups `steady`) are bounds like easy runs. Tempo is run below race effort: the median
   residual was −3.0 before the offset.
 - Every other run is a `bound` (a lower bound only, e.g. a long easy run).
 - **Cross-check:** long evidence above the interval shape + 3 + 2·sd is marked `implausible`. That's
@@ -95,6 +95,25 @@ inside one pause-free leg.
 | race | full weight to 2.5 sd, then (2.5/z)² | same |
 | hard | full weight to 1.0 sd, then (1/z)² | full to 2.5 sd, then (2.5/z)² |
 | bound | ignored | ignored up to +2 sd (no ratchet from noise), counted 2–4 sd, then (4/z)² |
+
+## Stale shapes and the one race prediction
+- **Uncertainty grows without evidence.** The random walk adds q per day, so a discipline without new race / hard
+  evidence keeps its last value and its sd grows by √(q·days): adrian's long shape (last race 2025-11-02, 364 days)
+  is 58.4 ± 2.8 while interval is 52.8 ± 1.0; patrik's long was 44.2 ± 3.7 (923 days) before his 2026-10-27 tempo.
+  The smoother itself is unchanged (q is fitted, see below), so form_delta (which refits the same smoother) stays
+  consistent.
+- **Staleness fields** in every `current`: `last_evidence_date` (latest race / hard item with weight > 0.5, the same
+  rule as the API's `last_evidence`), `days_since_evidence`, `stale` (> `STALE_DAYS` = 90 days, or none). The app
+  greys a stale value and says "last evidence 12 mo ago" (Home shape strip, Fitness table, activity Shape section),
+  and hides its % of best / trend there.
+- **One race prediction** (`race_prediction`, `disciplines.overall.current.race_prediction`; its
+  `race_equivalents_s` is also `overall.current.race_equivalents_s`, which Home shows as "Today 10k ≈ 39:01"):
+  the interval and long shapes averaged with weights 1/sd². A stale shape has a wide band, so it fades out by
+  itself instead of giving a second prediction minutes apart (adrian: interval 89 %, long 11 % → VDOT 53.5 ± 2.0,
+  10k 39:01, range 37:49–40:19; patrik: 55 / 45 % → 48.2 ± 1.3, 10k 42:40). sd = √(1/Σw + Σw·(mᵢ − m̄)²/Σw): the
+  spread between the two shapes is added, so the band widens when they disagree (adrian's 10k-race long shape 58.4
+  vs his session-based interval shape 52.8). It is one number for all distances; the per-discipline equivalents stay
+  in the Fitness table (interval for 5k–10k, long for 10k–half).
 
 ## Evaluation (`scripts/fitness_eval.py`, numbers from 2026-10-31)
 Data: 108 interval sessions (track 58, road 47 GPS), 7 races (5k ×3, 10k ×3, half ×1), 8 tempo, 189
@@ -213,10 +232,13 @@ So HR is reported as **diagnostics only**: `components.work_hrr` / `hrr` per ses
  disciplines: {
    interval|long|ski: {label, unit, q_per_day, personal_best,
      current: {date, mean, sd, confidence (high <1 / medium <2 / low), pct_of_best,
-               race_equivalents_s {5k, 10k, half, marathon} | null for ski},
+               race_equivalents_s {5k, 10k, half, marathon} | null for ski,
+               last_evidence_date, days_since_evidence, stale (> 90 days)},
      yearly: {YYYY: {mean, max, sd_median, n_evidence, mean_well_observed (days with sd<2), days_well_observed}},
      weekly: [{date, mean, sd, n (non-bound evidence that week), days_since_evidence}]},
-   overall: {label, unit, current {date, mean, sd}, yearly {YYYY: mean}, weekly [{date, mean, sd}]}},
+   overall: {label, unit, current {date, mean, sd, race_prediction {vdot, sd, weights {interval, long},
+             race_equivalents_s, range_10k_s [fast, slow]} | null, race_equivalents_s (= the prediction's)},
+             yearly {YYYY: mean}, weekly [{date, mean, sd}]}},
  variants: {pace: {label, hr_used_in_score}, hr: {label, hr_used_in_score, disciplines (same shape as above)}},
  sessions: [{id, date, discipline, type, score, kind (race|hard|bound|implausible), sigma,
              weight (robust weight 0..1 the smoother gave it), shape_at (smoothed value that day),
@@ -319,9 +341,11 @@ p10 −12.6 (15, low confidence). patrik intervals median −3.0, p10 −12.7 (1
   came out +2.9 because his 400s were fast).
 - Noise: |delta| < ~2 (adrian) is within test-retest (track 1.5–2.4, road 2.4). Ski deltas carry the ski score noise
   (sd 3.4 on R3, snow hard sessions ~9 below): always low confidence.
-- The score is only as good as the session label: a run labelled `intervals_*` that wasn't (patrik 2026-10-27, steady
-  while adrian did 6×1000: −5.9, downweighted; patrik 2026-09-10, an easy run together scored 60.4: "score
-  unreliable") is scored as one. patrik's watch records every 5 s, which blurs short reps.
+- The score is only as good as the session label. patrik 2026-10-27 (a steady run split at ~10 s stops, was scored as
+  intervals: −5.9) is a tempo run since 2026-11-01 (session_groups `recovery_share`): long evidence 47.9, +3.7 vs form
+  (low confidence, sparse reference). patrik 2026-09-10 (reps at 2:47–3:27 /km with HR 115–158, probably not on foot)
+  is still `intervals_road`, scored 60.4: "score unreliable" (outlier + downweighted); in the with-HR variant it pulls
+  patrik's interval shape up (53.9 vs 48.7 performance-only). patrik's watch records every 5 s, which blurs short reps.
 - No HR fallback for easy runs: the HR-aerobic estimate failed as a score (test-retest 4.7 VDOT, above), and the
   efficiency factor exists for only 36 of adrian's easy runs and 1 of patrik's, rounded to 3 decimals (≈ 5 % steps).
 - HR-intent parameters (HR max 206, watch trust by date) are adrian's and are applied to patrik too.

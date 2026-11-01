@@ -95,6 +95,7 @@ MATCH_OVERLAP = 0.5    # ... and the reps overlap > 50 % of the shorter one
 TAIL_TOL = 0.04        # a detected rep > 4 % longer than the set distance (x GPS scale): time at the set distance
 FULL_TOL = 0.08        # a rep within +-8 % of the set distance is the full rep (GPS error: time = detector time)
 PARTIAL = 0.92         # shorter than 92 % of the set distance: partial (shown, not ranked)
+MERGE_PACE = 0.7       # a split rep is merged only if the stretch to the set distance was run at >= 70 % of rep speed
 TIME_TOL = 0.15        # time-target reps (0:45): own duration within +-15 % of the set time
 SUSPECT_FAST = 0.10    # a rep > 10 % faster than the person's median for the same set distance: implausible (flagged)
 TIE_MIN_S = 1.0        # dead heat: |gap| <= max(1 s, half the coarser recording interval)
@@ -119,7 +120,7 @@ FAMILY = {   # Garmin typeKey -> sport family (same as app/server/store.py FAMIL
     "cycling": "bike", "road_biking": "bike", "mountain_biking": "bike", "indoor_cycling": "bike",
     "lap_swimming": "swim", "open_water_swimming": "swim",
 }
-STYPE_LABEL = {"easy": "Easy run", "long": "Long run", "tempo": "Tempo run", "race?": "Race", "hike": "Hike",
+STYPE_LABEL = {"easy": "Easy run", "steady": "Steady run", "long": "Long run", "tempo": "Tempo run", "race?": "Race", "hike": "Hike",
                "run_other": "Run", "run_nogps": "Run (no GPS)", "cycling": "Ride", "walking": "Walk"}
 # automatic person colours (light theme, dark theme): blue, orange, green, purple, teal, ochre, red, slate.
 # Each has >= 3:1 contrast on white and on the dark background, and neighbours differ for colour-blind readers.
@@ -1213,6 +1214,20 @@ def _infer_target(cells):
     return ("dist", int(round(dref / 50) * 50) or 50)
 
 
+def _kept_running(D, r, te):
+    """a split rep: the stretch from the detected rep end to the set distance (te) was run at >= MERGE_PACE x the rep's
+    own stream speed (the detector cut it at a slowdown). A slower stretch is the recovery jog / walk: the watch measured
+    the rep short (GPS) and the set distance is reached only in the recovery, so it isn't a merged rep (2026-10-06
+    Frogner: 1754 m of an 1800 m rep, the last 46 m at walking pace took the "rep" from 7:52 to 9:48)."""
+    gi = np.arange(len(D))
+    a, b = float(r["start"]), float(r["end"])
+    if te is None or b <= a or te <= b:
+        return True
+    v_rep = (np.interp(b, gi, D) - np.interp(a, gi, D)) / (b - a)
+    v_ext = (np.interp(te, gi, D) - np.interp(b, gi, D)) / (te - b)
+    return v_ext >= MERGE_PACE * v_rep
+
+
 def _t_at_dist(D, st, m):
     """first time (grid s, fractional) when distance since grid time st reaches m; None if never"""
     d0 = float(np.interp(st, np.arange(len(D)), D))
@@ -1380,7 +1395,7 @@ def _intervals(g, P):
                 else:
                     # split rep (detector cut it at a slowdown): the stream from own start to the set distance, if plausible
                     ref = min([x for x in ref_t if x != r["time"]] or [r["time"] * tv / r["dist"]])
-                    if ti is not None and ti <= 1.3 * ref:
+                    if ti is not None and ti <= 1.3 * ref and _kept_running(D, r, te):
                         c.update(time_s=_r(ti, 1), dist_m=tv, method="merged", scale=1 / p["k"])
                         for sj, s2 in enumerate(slots):
                             r2 = s2["cells"].get(key)

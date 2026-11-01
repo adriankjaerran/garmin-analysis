@@ -2,10 +2,11 @@
 // how it compares with your shape that day, and race equivalents. Model internals (evidence weight, σ, the
 // with-HR variant, components, HR diagnostics) are behind "Details".
 import { useApi } from "../lib/api";
-import { DISC_LABEL, KIND_HELP, KIND_LABEL, discColor, pm, raceT, unitShort, type FitnessSession } from "../lib/fitness";
+import { DISC_LABEL, KIND_HELP, KIND_LABEL, daysAgo, discColor, pm, raceT, unitShort, type FitnessSession } from "../lib/fitness";
 import "../fitness.css";
 
 const HR_KEYS = ["work_hrr", "hrr"];
+const STALE_DAYS = 90;   // as the Fitness page: a shape without a race / hard session for longer is greyed
 /** what the kind of evidence means for the shape, in plain words */
 const COUNTS: Record<string, string> = { race: "a race: counts fully", hard: "a hard session: counts fully unless far below your shape",
   bound: "an easy or long session: only counts if it shows more than your shape", implausible: "ignored (faster than your shape allows: bad GPS or mislabelled)" };
@@ -56,7 +57,14 @@ export function ShapeSection({ id }: { id: string }) {
               <dt>Race equivalents</dt><dd>{eq ? `5k ${raceT(eq["5k"])} · 10k ${raceT(eq["10k"])} · half ${raceT(eq.half)}` : <span class="muted">{s.discipline === "ski" ? "none (ski has its own scale)" : "—"}</span>}</dd>
               <dt>How it counts</dt><dd title={KIND_HELP[s.kind]}>{COUNTS[s.kind] ?? KIND_LABEL[s.kind]}</dd>
               <dt>Your shape that day</dt><dd>{sh ? <>{pm(s.shape_at ?? sh.mean, sh.sd)}{s.shape_race_equivalents_s ? <span class="muted"> · 5k {raceT(s.shape_race_equivalents_s["5k"])}</span> : null}</> : "—"}</dd>
-              <dt>Your shape now</dt><dd>{s.current ? <>{pm(s.current.mean, s.current.sd)} <span class="muted">{s.current.pct_of_best !== undefined ? `${s.current.pct_of_best.toFixed(0)} % of your best` : ""}</span></> : "—"}</dd>
+              <dt>Your shape now</dt><dd>{s.current ? (() => {
+                const c = s.current, ago = c.last_evidence ? daysAgo(c.last_evidence.date, c.date) : null;
+                // stale: no race / hard session for > 90 days: the value is carried forward, greyed, its band grows
+                return ago === null || ago > STALE_DAYS
+                  ? <span style={{ opacity: 0.6 }} title="no recent race or hard session: the model carries the last value forward and its uncertainty grows every day">
+                      {pm(c.mean, c.sd)} <span class="muted">· last evidence {ago === null ? "none" : `${ago} days ago`}</span></span>
+                  : <>{pm(c.mean, c.sd)} <span class="muted">{c.pct_of_best !== undefined ? `${c.pct_of_best.toFixed(0)} % of your best` : ""}</span></>;
+              })() : "—"}</dd>
             </dl>
             <details class="howto shape-details">
               <summary>Details: how the model scored it</summary>

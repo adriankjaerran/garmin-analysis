@@ -29,7 +29,11 @@ SPORTS = ["run", "ski", "hike", "bike", "swim", "other"]
 SPORT_LABEL = {"run": "Run", "ski": "Ski", "hike": "Hike", "bike": "Bike", "swim": "Swim", "other": "Other"}
 
 
-def family(type_key: str | None) -> str:
+def family(type_key: str | None, ga: dict | None = None) -> str:
+    """sport family of a Garmin type; a multisport file takes groups.json's sport (`ga`), which session_groups sets
+    from the FIT legs (multisport_family: >= 80 % of the time running -> run)"""
+    if type_key in ("multi_sport", "multisport") and ga and ga.get("sport") in SPORTS and ga["sport"] != "other":
+        return ga["sport"]
     return FAMILY.get(type_key or "", "other")
 
 
@@ -77,7 +81,7 @@ def rep_pace(reps: list | None, w: dict, sport: str, track: bool = False) -> flo
     """average speed of the main reps (m/s) = total rep distance / total rep time — the one "avg rep pace" of the
     app (Home, Activities, Closest, activity page). groups.json reps are [time_s, dist_m, speed, hr]; the main part
     is the similarity index's (`main_part` of `rep_parts`). Reps without a distance (Bislett indoor laps): the
-    index's median rep speed. On a track (`track`) each rep counts as its set distance (session_groups.track_set_m:
+    index's median rep speed. On a track (`track`) each rep counts as its set distance (session_groups.track_set_dists:
     a 416 m GPS rep is 400 m)."""
     if not reps or not w.get("rep_count"):
         return None
@@ -87,8 +91,10 @@ def rep_pace(reps: list | None, w: dict, sport: str, track: bool = False) -> flo
         g = parts[w.get("main_part") or 0] if len(parts) == len(w.get("parts") or parts) else max(parts, key=len)
     except Exception:  # noqa: BLE001 — a label helper must not take the list down
         return w.get("rep_speed_ms")
+    if track:   # set distances of the whole session (track_set_dists: the signature's group labels, else TRACK_SET_M)
+        sets = sim.sg.track_set_dists([r[0] for r in reps], [r[1] for r in reps])
     ts = [reps[j][0] for j in g if reps[j][0] and reps[j][1]]
-    ds = [((sim.sg.track_set_m(reps[j][1]) or reps[j][1]) if track else reps[j][1]) for j in g if reps[j][0] and reps[j][1]]
+    ds = [((sets[j] or reps[j][1]) if track else reps[j][1]) for j in g if reps[j][0] and reps[j][1]]
     if not ts or sum(ts) <= 0:
         return w.get("rep_speed_ms")
     return round(sum(ds) / sum(ts), 3)
@@ -284,7 +290,7 @@ class Store:
                 "name": a.get("activityName"),
                 "type": tk,
                 "type_label": type_label(tk),
-                "sport": family(tk),
+                "sport": family(tk, ga),
                 # pool swims: valid lengths x pool length (glitch lengths dropped, see session_groups.pool_swim)
                 "dist_km": _r(sw["dist_m"] / 1000, 2) if sw and sw.get("dist_m") else _r((a.get("distance") or 0) / 1000, 2) or None,
                 # dist_trusted false: dist_km is the watch's (inflated) number, kept for compatibility; lists show
@@ -294,7 +300,8 @@ class Store:
                 "dur_s": _r(a.get("duration"), 0),
                 "moving_s": ga.get("moving_s") or _r(a.get("movingDuration"), 0),
                 # whole-activity average HR (Garmin summary, incl. pauses); Compare's hr_avg is moving-only
-                "hr": _r(a.get("averageHR"), 0), "maxhr": _r(a.get("maxHR"), 0),
+                # no summary HR (multisport parents): groups.json avg_hr from the records
+                "hr": _r(a.get("averageHR"), 0) or ga.get("avg_hr"), "maxhr": _r(a.get("maxHR"), 0),
                 "elev": _r(a.get("elevationGain"), 0),
                 "load": _r(a.get("activityTrainingLoad"), 0), "te": _r(a.get("aerobicTrainingEffect"), 1),
                 "kcal": _r(a.get("calories"), 0),
@@ -311,10 +318,10 @@ class Store:
                 "workout_label": workout_name(tk, x.get("workout") or {}, tog.get(aid)),
                 "workout_detail": ((x.get("workout") or {}).get("exact_label") or (x.get("workout") or {}).get("signature")),
                 # average rep pace of the main reps = total rep distance / total rep time (m/s), see rep_pace()
-                "rep_pace_ms": rep_pace(ga.get("reps"), x.get("workout") or {}, family(tk),
+                "rep_pace_ms": rep_pace(ga.get("reps"), x.get("workout") or {}, family(tk, ga),
                                         # track reps count as their set distance; indoor Bislett laps (1086 m) are already exact
                                         ga.get("type") == "intervals_track" and not ga.get("indoor_bislett")),
-                "rep_hr": rep_hr(ga.get("reps"), x.get("workout") or {}, family(tk)),
+                "rep_hr": rep_hr(ga.get("reps"), x.get("workout") or {}, family(tk, ga)),
                 "swim": {k: sw.get(k) for k in ("pool_m", "lengths", "dist_m", "active_s", "rest_s", "pace_100m_s",
                                                 "strokes_per_length", "bad_lengths", "n_rests", "longest_rest_s")} if sw else None,
                 "fit": bool(folder and any(folder.glob("*.fit"))),
