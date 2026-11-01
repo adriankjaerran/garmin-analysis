@@ -110,6 +110,40 @@ def test_replay(client):
         assert all(a < b for a, b in zip(v["t"], v["t"][1:]))
 
 
+def test_replay_segments_and_passes(client):
+    d = client.get(f"/api/together/{B400}/replay").json()
+    assert d["segment_kind"] == "rep" and len(d["segments"]) == 15
+    s1 = d["segments"][0]
+    assert set(s1["people"]) == {"adrian", "patrik"} and s1["target_m"] == 400
+    assert s1["total"]["adrian"]["rank"] == 1 and s1["moves"] == []          # adrian leads after every rep
+    assert d["segments"][9]["total"]["patrik"]["gap_s"] == pytest.approx(78.4, abs=0.2)
+    assert d["segments"][10]["total"] is None and len(d["segments"][10]["people"]) == 1
+    assert d["passes"] == []                                                  # adrian ahead in every rep
+    # 2026-10-06 (3 × 1800): patrik passes adrian late in rep 2 and takes the overall lead
+    f = client.get("/api/together/2026-10-06_1911_Frogner-stadion/replay").json()
+    r2 = next(x for x in f["segments"] if x["label"] == "2")
+    assert [(p["who"], p["whom"]) for p in r2["passes"]["own"]] == [("patrik", "adrian")]
+    assert 1700 < r2["passes"]["own"][0]["at_m"] <= 1800
+    assert {"person": "patrik", "from_rank": 2, "to_rank": 1} in r2["moves"]
+    assert all(p["t_s"] >= f["segments"][p["seg"]]["start_s"] for p in f["passes"])
+    # continuous: per km along the shared route, route_m per person
+    lier = client.get("/api/together/2023-05-07_1200_Lier-1/replay").json()
+    assert lier["segment_kind"] == "km" and len(lier["segments"]) == 10
+    assert all("route_m" in v for v in lier["people"].values())
+
+
+def test_passes_hysteresis():
+    import numpy as np
+    import together as tg
+    x = np.arange(0, 100, 1.0)
+    a = x * 4.0
+    jitter = a + np.where(np.arange(100) % 2, 1.5, -1.5)                    # side by side within 1.5 m: no pass
+    assert tg._passes(x, {"a": a, "b": jitter}, "rep") == []
+    b = np.where(x < 50, a + 10, a - 10)                                      # b leads by 10 m, then a by 10 m
+    ps = tg._passes(x, {"a": a, "b": b}, "rep")
+    assert [(p["who"], p["whom"], p["x_s"]) for p in ps] == [("a", "b", 50)]
+
+
 def test_unknown_group_404(client):
     assert client.get("/api/together/1999-01-01_0000_Nowhere").status_code == 404
     assert client.get("/api/together/1999-01-01_0000_Nowhere/replay").status_code == 404

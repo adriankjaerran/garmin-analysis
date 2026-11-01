@@ -100,6 +100,12 @@ SUSPECT_FAST = 0.10    # a rep > 10 % faster than the person's median for the sa
 TIE_MIN_S = 1.0        # dead heat: |gap| <= max(1 s, half the coarser recording interval)
 NICE_M = (100, 150, 200, 250, 300, 400, 500, 600, 800, 1000, 1200, 1500, 1600, 2000, 2500, 3000, 4000, 5000)
 REPLAY_STEP_S = 2
+# replay passes: a pair's order flips and the new lead holds >= PASS_M for >= PASS_HOLD_S consecutive seconds
+# (hysteresis: GPS jitter / running side by side isn't a pass). rep = along the track (own distance x scale),
+# km / route = along the reference's path (projection: noisier)
+PASS_M = {"rep": 2.0, "km": 8.0, "route": 10.0}
+PASS_HOLD_S = {"rep": 3, "km": 8, "route": 10}
+KM_MIN_M = 300         # continuous: a last partial km shorter than this isn't a segment
 CONT_STEP_M = 50       # continuous: gap-over-distance grid
 GAP_VMIN, GAP_VMIN_HIKE = 1.5, 0.25   # m/s: slowest plausible moving speed (bounds a time gap by the distance apart)
 GAP_SPIKE_S = 60       # a gap > this off its 450 m running median (a spike <= 200 m wide): projection artefact -> null
@@ -1629,22 +1635,21 @@ def _closeup(s, byk, keys):
     return out
 
 
-def _continuous(g, P):
-    """continuous runs / hikes / races: gap over distance (projected onto the reference's path), distance apart over
-    time, who led where, km splits; race finish order"""
+def _route_progress(g, P):
+    """continuous: the joint window [a, b] (absolute s), the reference polyline and each person's progress along it
+    (clock s, metres along the reference (running max), on-path mask), or {available: False, why} when there's none"""
     act = [p for p in P if p["role"] != "other" and p.get("T") is not None and p["T"]["gps"].any()]
     if len(act) < 2:
-        return {"available": False, "why": "fewer than 2 participants with GPS"}
+        return None, {"available": False, "why": "fewer than 2 participants with GPS"}
     a = max(p["T"]["base"] for p in act)
     b = min(p["T"]["base"] + p["T"]["T"] for p in act)
-    t0 = _t0(P)
     spans = [p["together"] for p in act if p.get("together")]
     if g["label"] == "partly_together" and spans:   # only the stretch run together
         gs = _utc(g["start_utc"].replace("Z", ""))
         a = max(a, gs + 60 * min(x["from_min"] for x in spans))
         b = min(b, gs + 60 * max(x["to_min"] for x in spans))
     if b - a < 120:
-        return {"available": False, "why": "no time overlap"}
+        return None, {"available": False, "why": "no time overlap"}
     race = g["label"] == "same_race"
     a_ov, b_ov = a, b
     if race:   # a race: each person's whole file (the faster one's file ends before the others finish)
@@ -1657,7 +1662,7 @@ def _continuous(g, P):
     if "alt" in Gr:
         Gw["alt"] = Gr["alt"][i0:i1 + 1]
     if Gw["gps"].sum() < 30:
-        return {"available": False, "why": "reference has too little GPS in the overlap"}
+        return None, {"available": False, "why": "reference has too little GPS in the overlap"}
     rp = sg.ref_polyline(Gw)
     prog = {}
     for p in act:
@@ -1668,6 +1673,17 @@ def _continuous(g, P):
         tc = p["T"]["base"] + np.arange(G["T"] + 1)
         w = (tc >= a) & (tc <= b)
         prog[p["key"]] = (tc[w], np.maximum.accumulate(tp[w]), on[w])
+    return (act, a, b, a_ov, b_ov, race, ref, Gw, rp, prog), None
+
+
+def _continuous(g, P):
+    """continuous runs / hikes / races: gap over distance (projected onto the reference's path), distance apart over
+    time, who led where, km splits; race finish order"""
+    R, why = _route_progress(g, P)
+    if R is None:
+        return why
+    act, a, b, a_ov, b_ov, race, ref, Gw, rp, prog = R
+    t0 = _t0(P)
     lo = max(v[1][0] for v in prog.values())
     hi = min(v[1][-1] for v in prog.values())
     keys = [p["key"] for p in act]
@@ -1932,9 +1948,206 @@ def headline(s) -> dict:
     return {"kind": g["label"], "text": g["label_text"]}
 
 
+def _passes(x, D, kind):
+    """passes on a common axis x (1 s steps): D = {key: metres along (NaN = no data)}. A pass = a pair's order flips
+    and the new lead holds >= PASS_M[kind] for >= PASS_HOLD_S[kind] s; the first established order isn't a pass.
+    -> [{x_s (where the lead changed sign), at_m (the passer's metres there), who, whom}] sorted by x"""
+    hy, hold = PASS_M[kind], PASS_HOLD_S[kind]
+    out = []
+    for a, b in itertools.combinations(list(D), 2):
+        diff = D[a] - D[b]
+        state, cand, run = 0, 0, 0
+        for n, v in enumerate(diff):
+            sg_ = 0 if not np.isfinite(v) else (1 if v >= hy else -1 if v <= -hy else 0)
+            if sg_ == 0:
+                cand, run = 0, 0
+                continue
+            if sg_ != cand:
+                cand, run = sg_, 0
+            run += 1
+            if run < hold or cand == state:
+                continue
+            if state != 0:
+                # the crossing: the last sample before n where the lead was still the old one's (or level)
+                m = n
+                while m > 0 and np.isfinite(diff[m - 1]) and diff[m - 1] * cand > 0:
+                    m -= 1
+                who, whom = (a, b) if cand > 0 else (b, a)
+                dw = D[who][m]
+                out.append({"x_s": _r(float(x[m]), 0), "at_m": _r(float(dw) if np.isfinite(dw) else None, 0),
+                            "who": who, "whom": whom})
+            state = cand
+    out.sort(key=lambda e: e["x_s"])
+    return out
+
+
+def _moves(prev, cur):
+    """rank changes between two standings {key: rank}: [{person, from_rank, to_rank}] (up first)"""
+    mv = [{"person": k_, "from_rank": prev[k_], "to_rank": r} for k_, r in cur.items() if k_ in prev and prev[k_] != r]
+    return sorted(mv, key=lambda m: (m["to_rank"] - m["from_rank"], m["to_rank"]))
+
+
+def _ranked(tot):
+    """{key: total_s} -> {key: {total_s, gap_s, rank}}"""
+    order = sorted(tot.items(), key=lambda kv: kv[1])
+    return {k_: {"total_s": _r(v, 1), "gap_s": _r(v - order[0][1], 1), "rank": n + 1} for n, (k_, v) in enumerate(order)}
+
+
+def _seg_dist(fn, st, x, off, run_s, cap, full=True):
+    """metres into a segment at axis x for one person: fn(abs t) = metres along, st = own start (abs), off = own
+    start on the axis (0 = own-start alignment), run_s = own segment time, cap = segment length: after the finish a
+    full segment is exactly at the line (GPS distance x scale is within a few m of it), a partial one holds"""
+    tt = st + np.clip(x - off, 0, run_s)
+    d = fn(tt) - fn(np.array([st]))[0]
+    d = np.clip(d, 0, cap if cap else None)
+    d[x < off] = 0.0
+    if cap and full:
+        d[x - off >= run_s] = cap
+    return d
+
+
+def _segment_passes(people, fns, kind):
+    """passes in one segment for both alignments; people = {key: {st (abs), run_s, scale, cap}}"""
+    out = {}
+    if len(people) < 2:
+        return {"own": [], "clock": []}
+    s0 = min(v["st"] for v in people.values())
+    W = math.ceil(max(v["run_s"] for v in people.values())) + 2
+    dstart = math.ceil(max(v["st"] for v in people.values()) - s0)
+    for align, ext in (("own", 0), ("clock", dstart)):
+        x = np.arange(0, W + ext + 1, 1.0)
+        D = {k_: _seg_dist(fns[k_], v["st"], x, 0.0 if align == "own" else v["st"] - s0, v["run_s"], v["cap"],
+                           not v.get("partial")) for k_, v in people.items()}
+        out[align] = _passes(x, D, kind)
+    return out
+
+
+def _rep_segments(g, P, s, t0):
+    """interval sessions: one segment per rep slot (start / time per person, passes own / clock, total so far, rank
+    changes overall); the whole-session passes (clock) with group-clock times"""
+    iv = s["intervals"]
+    byk = {p["key"]: p for p in P}
+    cum = iv["cumulative"]
+    ci = {sl: n for n, sl in enumerate(cum["slots"])}
+    segs, allp = [], []
+    prev_rank = None
+    for sl in iv["slots"]:
+        tgt = sl.get("target") or {}
+        cap = tgt.get("value") if tgt.get("kind") == "dist" else None
+        ppl, fns = {}, {}
+        for k_, cells in iv["reps"].items():
+            c = cells[sl["slot"]]
+            p = byk.get(k_)
+            if not c or p is None or p.get("T") is None:
+                continue
+            run_s = c.get("time_s") if not c.get("partial") else c.get("own_time_s")
+            run_s = run_s or c.get("own_time_s")
+            if not run_s:
+                continue
+            T = p["T"]
+            st_abs = t0 + c["clock_start_s"]
+            sc = c.get("scale") or 1.0
+            ppl[k_] = {"st": st_abs, "run_s": float(run_s), "scale": sc, "cap": cap, "partial": bool(c.get("partial"))}
+            if not (T["S"] or {}).get("no_dist"):
+                G = T["G"]
+                fns[k_] = (lambda tt, G=G, b=T["base"], sc=sc: np.interp(tt - b, np.arange(G["T"] + 1), G["d"]) * sc)
+        if not ppl:
+            continue
+        s0 = min(v["st"] for v in ppl.values())
+        pas = _segment_passes({k_: v for k_, v in ppl.items() if k_ in fns}, fns, "rep")
+        for e in pas["clock"]:
+            allp.append({**e, "t_s": _r(s0 - t0 + e["x_s"], 1), "seg": len(segs), "label": sl["label"]})
+        total = moves = None
+        if sl["slot"] in ci:
+            n = ci[sl["slot"]]
+            tot = {k_: v[n]["total_s"] for k_, v in cum["people"].items() if v[n]}
+            if len(tot) >= 2:
+                total = _ranked(tot)
+                cur = {k_: v["rank"] for k_, v in total.items()}
+                moves = _moves(prev_rank, cur) if prev_rank else []
+                prev_rank = cur
+        segs.append({"i": len(segs), "kind": "rep", "slot": sl["slot"], "label": sl["label"],
+                     "title": f"Rep {sl['label']}" + (f" · {tgt['text']}" if tgt.get("text") else ""),
+                     "target_m": cap, "start_s": _r(s0 - t0, 1),
+                     "end_s": _r(max(v["st"] + v["run_s"] for v in ppl.values()) - t0, 1),
+                     "people": {k_: {"start_s": _r(v["st"] - t0, 1), "time_s": _r(v["run_s"], 1), "scale": _r(v["scale"], 4),
+                                     "partial": bool(iv["reps"][k_][sl["slot"]].get("partial")),
+                                     "result_s": iv["reps"][k_][sl["slot"]].get("result_s"),
+                                     "rank": iv["reps"][k_][sl["slot"]].get("rank")} for k_, v in ppl.items()},
+                     "passes": pas, "total": total, "moves": moves})
+    return segs, sorted(allp, key=lambda e: e["t_s"])
+
+
+def _km_segments(g, P, t0):
+    """continuous sessions: one segment per km along the reference's path (from where everyone is on it), passes per
+    km (own / clock) and over the whole window (clock), total time so far per km; + each person's metres along the
+    path (route_m) for the client"""
+    R, _why = _route_progress(g, P)
+    if R is None:
+        return None
+    act, a, b, a_ov, b_ov, race, ref, Gw, rp, prog = R
+    lo = max(v[1][0] for v in prog.values())
+    hi = min(v[1][-1] for v in prog.values())
+    keys = list(prog)
+    fns = {k_: (lambda tt, tc=v[0], pr=v[1]: np.interp(tt, tc, pr, left=np.nan, right=np.nan)) for k_, v in prog.items()}
+    if hi - lo < KM_MIN_M:
+        return None
+    bnd = [lo + 1000.0 * n for n in range(int((hi - lo) // 1000) + 1)]
+    if hi - bnd[-1] >= KM_MIN_M or len(bnd) == 1:
+        bnd.append(hi)
+    else:   # a short remainder joins the last km
+        bnd[-1] = hi
+    segs = []
+    first = {}
+    prev_rank = None
+    for n in range(1, len(bnd)):
+        ppl = {}
+        for k_ in keys:
+            tc, pr, _ = prog[k_]
+            ja, jb = np.searchsorted(pr, [bnd[n - 1], bnd[n] - 0.5], side="left")
+            if jb >= len(tc):
+                continue
+            ppl[k_] = {"st": float(tc[ja]), "run_s": float(tc[jb] - tc[ja]), "scale": 1.0, "cap": float(bnd[n] - bnd[n - 1])}
+            first.setdefault(k_, float(tc[ja]))
+        if not ppl:
+            break
+        fk = {k_: (lambda tt, f=fns[k_], b0=bnd[n - 1]: np.nan_to_num(f(tt), nan=b0)) for k_ in ppl}
+        pas = _segment_passes(ppl, fk, "km")
+        tot = {k_: v["st"] + v["run_s"] - first[k_] for k_, v in ppl.items()}
+        total = _ranked(tot) if len(tot) >= 2 else None
+        moves = None
+        if total:
+            cur = {k_: v["rank"] for k_, v in total.items()}
+            moves = _moves(prev_rank, cur) if prev_rank else []
+            prev_rank = cur
+        L = bnd[n] - bnd[n - 1]
+        res = sorted((v["run_s"], k_) for k_, v in ppl.items())
+        segs.append({"i": n - 1, "kind": "km", "slot": n - 1, "label": str(n),
+                     "title": f"km {n}" + ("" if abs(L - 1000) < 1 else f" · {round(L)} m"),
+                     "target_m": _r(L, 0), "from_m": _r(bnd[n - 1] - lo, 0),
+                     "start_s": _r(min(v["st"] for v in ppl.values()) - t0, 1),
+                     "end_s": _r(max(v["st"] + v["run_s"] for v in ppl.values()) - t0, 1),
+                     "people": {k_: {"start_s": _r(v["st"] - t0, 1), "time_s": _r(v["run_s"], 1), "scale": 1.0, "partial": False,
+                                     "result_s": _r(v["run_s"], 1), "rank": [kk for _, kk in res].index(k_) + 1} for k_, v in ppl.items()},
+                     "passes": pas, "total": total, "moves": moves})
+    # the whole window on the clock, metres along the shared route
+    tt = np.arange(math.ceil(a), math.floor(b) + 1, 1.0)
+    D = {k_: fns[k_](tt) - lo for k_ in keys}
+    allp = []
+    for e in _passes(tt, D, "route"):
+        t_abs = float(e["x_s"])
+        seg = next((sg_["i"] for sg_ in segs if sg_["start_s"] <= t_abs - t0 <= sg_["end_s"] + 1), None)
+        e.pop("x_s")
+        allp.append({**e, "t_s": _r(t_abs - t0, 1), "seg": seg,
+                     "label": segs[seg]["label"] if seg is not None else None})
+    return segs, allp, {k_: (v[0], v[1] - lo) for k_, v in prog.items()}, lo
+
+
 def replay(gid, step_s=REPLAY_STEP_S, max_points=4000, doc=None) -> dict:
     """per participant position over the group clock (s since t0_utc), thinned to step_s (and at most max_points),
-    + HR; rep windows per slot for "reps only" playback"""
+    + HR; rep windows per slot for "reps only" playback; segments (reps, or km along the shared route for continuous
+    sessions) with per-person start / time, passes (own-start and clock alignment), total time so far and rank
+    changes; passes over the whole session on the clock"""
     doc = doc or load()
     g = find(gid, doc)
     if g is None:
@@ -1943,6 +2156,23 @@ def replay(gid, step_s=REPLAY_STEP_S, max_points=4000, doc=None) -> dict:
     if not any(p.get("T") for p in P):
         return {"gid": g["gid"], "available": False, "why": "no FIT on any side", "people": {}}
     t0 = _t0(P)
+    s = None
+    try:
+        s = session(g["gid"], doc)
+    except Exception:  # noqa: BLE001, S110
+        pass
+    segs, allp, route, mode = [], [], {}, None
+    try:
+        if s and s.get("intervals"):
+            segs, allp = _rep_segments(g, P, s, t0)
+            mode = "rep"
+        elif s and (s.get("continuous") or {}).get("available"):
+            km = _km_segments(g, P, t0)
+            if km:
+                segs, allp, route, _lo = km
+                mode = "km"
+    except Exception as e:  # noqa: BLE001 — positions still replay without segments
+        print("replay segments", g["gid"], e, file=sys.stderr)
     ppl = {}
     for p in P:
         T = p.get("T")
@@ -1952,15 +2182,14 @@ def replay(gid, step_s=REPLAY_STEP_S, max_points=4000, doc=None) -> dict:
         idx = np.flatnonzero(T["gps"])
         st = max(int(step_s), math.ceil(len(idx) / max_points))
         idx = idx[::st]
-        ppl[p["key"]] = {"person": p["person"], "role": p["role"], "t": cmp._lst(T["base"] + idx - t0, 1),
+        tt = T["base"] + idx
+        ppl[p["key"]] = {"person": p["person"], "role": p["role"], "t": cmp._lst(tt - t0, 1),
                          "lat": cmp._lst(G["lat"][idx], 6), "lon": cmp._lst(G["lon"][idx], 6),
                          "hr": cmp._lst(G["hr"][idx], 0) if "hr" in G else None,
                          "dist_m": cmp._lst(G["d"][idx], 0)}
-    s = None
-    try:
-        s = session(g["gid"], doc)
-    except Exception:  # noqa: BLE001, S110
-        pass
+        if p["key"] in route:
+            tc, pr = route[p["key"]]
+            ppl[p["key"]]["route_m"] = cmp._lst(np.interp(tt, tc, pr, left=np.nan, right=np.nan), 0)
     reps = []
     if s and s.get("intervals"):
         iv = s["intervals"]
@@ -1969,7 +2198,12 @@ def replay(gid, step_s=REPLAY_STEP_S, max_points=4000, doc=None) -> dict:
             reps.append({"slot": sl["slot"], "label": sl["label"], "start_s": sl["start_s"],
                          "end_s": _r(sl["start_s"] + max((c.get("time_s") or c.get("own_time_s") or 0) for _, c in cells) + 2, 1) if cells else None})
     return {"gid": g["gid"], "available": bool(ppl), "t0_utc": _iso(t0), "step_s": step_s, "people": ppl, "reps": reps,
-            "note": "t = seconds since t0_utc on the group clock (each participant's clock offset applied)"}
+            "segment_kind": mode, "segments": segs, "passes": allp,
+            "pass_rule": {"min_lead_m": PASS_M, "hold_s": PASS_HOLD_S},
+            "note": "t = seconds since t0_utc on the group clock (each participant's clock offset applied); "
+                    "segment passes x_s = s into the segment on that alignment's axis (own: since each person's own "
+                    "start; clock: since the earliest start), at_m = the passer's metres into the segment; "
+                    "session passes t_s on the group clock"}
 
 
 # ------------------------------------------------------------------ list / filters (shared with the API)

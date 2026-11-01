@@ -284,10 +284,35 @@ About 20–130 kB per session (5–30 kB gzipped), dominated by the rep close-up
 ### `GET /api/together/{gid}/replay?step_s=2&max_points=4000`
 ```
 {gid, available, t0_utc, step_s, note,
- people: {key: {person, role, t: [s on the group clock], lat: [...], lon: [...], hr: [...], dist_m: [...]}},
- reps: [{slot, label, start_s, end_s}]}      # rep windows on the same clock ("reps only" playback)
+ people: {key: {person, role, t: [s on the group clock], lat: [...], lon: [...], hr: [...], dist_m: [...],
+                route_m?: [metres along the shared route, continuous only; null outside the joint window]}},
+ reps: [{slot, label, start_s, end_s}],      # rep windows on the same clock ("reps only" playback)
+ segment_kind: "rep" | "km" | null,          # intervals: one segment per rep slot; continuous: per km of the route
+ segments: [{i, kind, slot, label: "4", title: "Rep 4 · 400 m" | "km 3", target_m: 400 | null, from_m? /* km */,
+             start_s, end_s /* earliest start, last finish, group clock */,
+             people: {key: {start_s, time_s /* the time run in the replay */, scale, partial, result_s, rank}},
+             passes: {own: [{x_s, at_m, who, whom}], clock: [...]},   # x_s = s into the segment on that axis
+             total: {key: {total_s, gap_s, rank}} | null,             # total time so far, incl. this segment
+             moves: [{person, from_rank, to_rank}] | null}],          # overall rank changes vs the previous one
+ passes: [{t_s, at_m, who, whom, seg, label}],                        # the whole session on the group clock
+ pass_rule: {min_lead_m: {rep: 2, km: 8, route: 10}, hold_s: {rep: 3, km: 8, route: 10}}}
 ```
-Positions only where the participant has GPS (Bislett indoor laps are masked). 100–300 kB (25–75 kB gzipped).
+Positions only where the participant has GPS (Bislett indoor laps are masked). 150–250 kB (35–75 kB gzipped);
+segments + passes add ~0.05 s to a cold call.
+
+- **Rep segments** (`_rep_segments`): every slot someone ran; per person the rep's group-clock start
+  (`clock_start_s`) and the time at the set distance (`time_s`; partial reps: their own time). Metres into the rep =
+  own distance since own start × the cell's `scale`, capped at the set distance, exactly at the line after a full
+  finish. `total` = the session's `cumulative` (shared reps only, so extra reps have none); `moves` compares its
+  ranks with the previous shared rep's.
+- **Km segments** (`_km_segments`, continuous with `continuous.available`): each person projected onto the
+  reference's path (`_route_progress`, the same projection as the gap over distance), km boundaries from where everyone
+  is on it (a last piece < 300 m joins the last km); `total` = time from the person's start of km 1 to the end of
+  this km. Session passes are computed over the whole joint window by metres along the route.
+- **Passes** (`_passes`): per pair on a 1 s axis, the order flips and the new lead holds ≥ `min_lead_m` for
+  ≥ `hold_s` consecutive seconds (GPS jitter / running side by side isn't a pass; the first established order isn't
+  one); `x_s` / `at_m` = where the lead last changed sign. "own" = everyone from their own start (a virtual race on
+  speed), "clock" = real time (a late start counts).
 
 ### Also
 - `GET /api/together/people`: `{people: {id: display}}`; `GET /api/people` has the same as `info`.
@@ -306,8 +331,21 @@ Positions only where the participant has GPS (Bislett indoor laps are masked). 1
   (Replay ✕ when open). Overlapping map tracks: each line under the next is drawn 2.5 px wider (outline).
   Side-by-side gap chart: 250 m rolling median and at least a 15 s scale. Unverified: the GPS map of whoever has one,
   plain-language reason, proper-cased caveats. Tables scroll sideways on mobile; Best / Fade / Effort hidden < 500 px.
-- Replay: standings as a table with one unit per column (rep: distance m, metres behind, time; break: the last rep's
-  time and gap; continuous: km and metres behind), "Reps so far" / "So far" under it.
+- Replay (`components/Replay.tsx`, Community "Replay upgrade"): chips **Whole session · R1 … Rn** (km 1 … km n for
+  continuous sessions; dashed = only one person ran it, ⇄ = has passes). A rep chip, the ▶ at the end of each "Rep by
+  rep" row (`?replay=1&rrep=<label>`) or the close-up's Replay ▶ starts **rep mode**: every dot at its own start of
+  the rep (Own start) or on the real clock (Clock, the same `align` toggle as the close-up), all on one clock, the map
+  zoomed to the rep (faint lines = each person's rep path, 20 s trails, initials in the dots, each dot waits at its
+  finish). Live table: metres behind the leader → after the finish the time behind the first finisher, rep time,
+  **total so far** (previous shared reps + the running rep; the session total at the finish). **Passes & moves** feed
+  (newest first, only what has happened): "R4 · 210 m: Patrik passes Adrian", "Patrik moves up to 1st overall". At the
+  last finish a **finish card** on the map (ranking, gaps, totals, rank changes) for 2.6 s, then **auto-advance** to the
+  next rep with ≥ 2 people (checkbox). Whole session = the group clock (reps only skips breaks), live standings as
+  before (continuous: metres along the shared route), the session passes in the feed and a short finish card after
+  each rep. Speeds 1–16× (whole continuous sessions up to 64×; rep mode starts at the speed that runs a median rep in
+  ≤ 30 s), scrub bar with rep bands / km ticks, finish ticks (person colours) and pass markers (▼ in the passer's
+  colour). Keys: space play / pause, ← → previous / next rep (or km), shift ← → 5 s, 1–9 / 0 = rep 1–10, W = whole
+  session. Person colours from `lib/people.ts` (map: light variant), both themes.
 
 ## Limits / next
 - Thresholds were tuned on 18 adrian × patrik FIT pairs; re-check with a third person (pace 0.7 rule, 50 m radius).
@@ -316,3 +354,7 @@ Positions only where the participant has GPS (Bislett indoor laps are masked). 1
   geometry would make them exact (T4).
 - Continuous gap over distance projects onto the first participant's path; a participant who leaves it (detour) shows
   as a jump.
+- Replay passes inherit the rep times: a rep whose detected end is late (2026-10-06 adrian R2 588 s, he's 20 m from
+  the line at 7:52) shows as being passed near the line. Km / route passes use the projection's running maximum, so a
+  track snapped to a later part of the path would be a (lasting) fake pass; the 10 m / 10 s rule only filters jitter.
+  Interval passes need a distance stream (Bislett indoor laps without GPS have no dots, so no passes either).
