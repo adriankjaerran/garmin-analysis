@@ -23,7 +23,7 @@ records = [{f.name: f.value for f in m if f.value is not None} for m in ff.get_m
 
 ## What's inside (tested)
 
-Two watches so far (from FIT `file_id`, checked on 32 files). The switch was between 2026-02-17 and
+Adrian has used two watches (from FIT `file_id`, checked on 32 files). The switch was between 2026-02-17 and
 2026-02-24, most likely 2026-02-18 (two identical ski sessions recorded 1 s apart that night).
 
 | | Forerunner 935 (`fr935`), 2018-12 → 2026-02-17 | Product id 4315 (probably Forerunner 965), 2026-02-24 → |
@@ -35,6 +35,10 @@ Two watches so far (from FIT `file_id`, checked on 32 files). The switch was bet
 | Sensors | wrist HR, accelerometer, barometer; no chest strap / foot pod | same + sensor hub; power and running dynamics are **wrist-based** |
 | Other messages | lap, event, device_info, device_settings, user_profile, workout_step | lap, session, event, device_info, `gps_metadata` (1 Hz), many `unknown_*` (233/325/326) |
 
+- Power and running dynamics exist only on the 4315 (from 2026-02-24). The FR935's `temperature` is the wrist sensor
+  (biased by body heat), so it isn't the weather. No file has weather.
+- Patrik's watch (product 3077) records every 4–6 s (median gap 3–4 s) with HR, cadence and GPS-only
+  `enhanced_altitude`. It has no power, dynamics or temperature.
 - HR and cadence are in **every** run file from both watches (and in every run's summary in the list).
 - GPS mode (GPS only / all systems / multi-band) is **not decodable** from either watch's FIT.
 - Without downloading: in the activity list, `avgPower` present ⇔ the new watch (holds for all 492 runs).

@@ -1,8 +1,8 @@
 # How to work with the Garmin Personal API (practical guide)
 
-What works, learned from ~280 logged requests on Adrian's account (Oct 2026). Details:
+What works, learned from ~1,700 logged requests on Adrian's and Patrik's accounts (Oct 2026). Details:
 [endpoints-tested.md](endpoints-tested.md), [api-reference.md](api-reference.md) (official spec),
-[rate-limits-observed.md](rate-limits-observed.md), [rate-limits-and-terms.md](rate-limits-and-terms.md).
+[rate-limits-and-terms.md](rate-limits-and-terms.md) (what Garmin documents about limits, tokens and terms).
 
 ## 1. Keys and tokens
 - Each person creates a key at <https://connect.garmin.com/app/settings/personalApiToken>.
@@ -10,8 +10,8 @@ What works, learned from ~280 logged requests on Adrian's account (Oct 2026). De
 - Store keys as `GARMIN_<NAME>_API_KEY` in `.env` (gitignored). Never print them.
 - Swap the key for a token:
   `POST https://personal.connectapi.garmin.com/personalapitoken-service/personal-api/personal-api-key/token`
-  with `Authorization: ApiKey <key>`. The body is the **raw JWT as plain text**. It's valid 24 h,
-  with no refresh token: just ask again. `scripts/garmin_client.py` does this and refreshes after 23 h.
+  with `Authorization: ApiKey <key>`. The body is the **raw JWT as plain text**. It's valid 24 h (`exp` = `iat` +
+  24 h), with no refresh token: just ask again. `scripts/garmin_client.py` does this and refreshes after 23 h.
 - Data calls: `Authorization: Bearer <jwt>`, `Accept: application/json`.
 
 ## 2. Environment
@@ -43,16 +43,19 @@ Gotchas:
   Laps come from the FIT file; interval totals from `splitSummaries` in `activity/{id}`.
 - Timestamps mix epoch ms, ISO strings without a timezone (`...GMT` / `...Local` pairs) and FIT UTC.
 
-## 4. Rate limits and pacing
-- Not documented, and no rate-limit headers. We hit 429 after ~150–200 back-to-back requests
-  in ~15 min; it cleared within ~30–40 min.
-- Since then, 282 logged requests at ≤ 1 req/s gave **no 429s** (200 ×260, 204 ×15, 400 ×7 from
-  deliberate range tests).
+## 4. Rate limits
+- Not documented (see [rate-limits-and-terms.md](rate-limits-and-terms.md)), and no rate-limit headers on any
+  response (no `X-RateLimit-*`, no `Retry-After`, even on 429). The API is behind Cloudflare.
+- Observed: the first 429 came after ~150–200 requests in ~15 min sent back-to-back (~0.2 s each). After that *all*
+  endpoints returned 429 (token endpoint not tested). It had cleared by the next session, at most ~30–40 min later;
+  the exact window and whether the limit is per key, token or user are unknown.
+- Since then (all logged in `_requests.jsonl`): ~1,700 requests at ≤ 1 req/s, including a 393-call FIT backfill at
+  3 s, with **no 429s** (adrian: 200 ×1375, 204 ×33 (HRV), 400 ×7 (deliberate range tests), 500 ×2; patrik: 200 ×304).
 - Do this:
   - interactive work and small batches: `--min-interval 1`;
   - big backfills: `--min-interval 3–5`, in chunks of a few hundred; it resumes (activities
     that already have a `.fit` are skipped);
-  - prefer range endpoints (a year of daily summaries = 1 call);
+  - prefer range endpoints (a year of daily summaries = 1 call instead of 365);
   - on 429 the client waits 15 s, doubling to 5 min, and gives up after 30 min.
 
 ## 5. Recommended sync strategy
@@ -67,6 +70,7 @@ Gotchas:
 4. Intraday HR only exists from 2026-06-01 and may be a rolling window: sync it daily so it
    isn't lost.
 
-## 6. Scripts
-See [data-layout.md](data-layout.md) for the commands and the `data/` layout,
-[run-analysis.md](run-analysis.md) for how runs are analysed, and [report.md](report.md) for the HTML report.
+Scale: a full download for one person is ~717 activities × 1–4 calls (FIT only vs all parts), plus intraday HR
+per day since 2026-06-01 (~150) and sleep in 31-day chunks.
+
+Commands and the `data/` layout: [data-layout.md](data-layout.md).

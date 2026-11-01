@@ -1,6 +1,6 @@
 # Session groups, legs and route comparison
 
-`uv run scripts/session_groups.py adrian [--show [ROUTE_ID ...]] [--out PATH]` → `data/adrian/groups.json` (`--out`: trial run elsewhere)
+`uv run scripts/session_groups.py adrian [--workers N] [--show [ROUTE_ID ...]] [--out PATH]` → `data/adrian/groups.json` (`--out`: trial run elsewhere)
 (~5 s; first run ~15 s while the rep detector of every run is cached in
 `data/adrian/cache/session_groups.pkl`, keyed by FIT mtime+size; ski reps from `ski_intervals.py` go into
 the same cache, keyed by FIT mtime+size+detector version). `--show` prints the leg table of a
@@ -31,12 +31,9 @@ the reader (similarity tracks, fitness features, compare) and the rep cache vers
   `<Garmin locationName>-<rank by size>`. Known and landmark names are also the place id; everything else
   keeps the generic id. The rank counts every cluster without a KNOWN name, so generic ids stay
   stable (`Oslo-3` stays `Oslo-3` although `Oslo-1/2/4/5` got landmark names); a landmark-named place keeps
-  its old id in `generic_id`. Currently named by landmark: Marienlyst
-  (was Oslo-1, start of the Holmenkollen climbs, 95 m), Aker Brygge (Oslo-2, 295 m), Øya (Trondheim-2, 56 m),
-  Frogner stadion (Oslo-4), Nationaltheatret (Oslo-5), Fauske sentrum (Fauske-2), Frognerparken (Oslo-9),
-  Lerkendal (Trondheim-4), St. Hanshaugen (Oslo-16), Rådhusplassen (Oslo-19). Where an activity mostly
+  its generic id in `generic_id` (e.g. Marienlyst = Oslo-1, the start of the Holmenkollen climbs). Where an activity mostly
   happens (named places / regions by time share) is in [similarity.md](similarity.md). User overrides:
-  `data/adrian/places.json` `{"Oslo-3": "Bogstad"}` (place id or old generic id) or
+  `data/adrian/places.json` `{"Oslo-3": "Bogstad"}` (place id or generic id) or
   `{"59.933,10.719": "name"}` (any place whose centre is within 400 m).
   All naming is one function, `name_places(cens, sizes, locs, over, geocode)`, priority **user override >
   KNOWN > LANDMARKS > cached reverse geocode > `<loc>-<rank>`**. An override or a geocode name changes only
@@ -76,19 +73,17 @@ the reader (similarity tracks, fitness features, compare) and the rep cache vers
   `type_detail`.
   - **Intervals need real recoveries** (`recovery_share`): a break counts as a recovery when it is ≥ 30 s or ≥ 25 % of
     the rep before it (45/15 s sets: yes); at least half of the breaks must be recoveries (watch workouts with ≥ 3
-    `active` laps always count). Otherwise the detector split one continuous effort at traffic lights / lap presses /
-    GPS slowdowns. Changed (2026-11-01): patrik 2026-10-27 (1625 m, 9.5 s, 792 m, 11.8 s, 4902 m, 12.1 s, 581 m:
-    steady run with ~400 m lap presses) → tempo; patrik 2025-09-22 → steady, 2025-06-28 (hilly 5 km) → easy; adrian
-    2021-04-24 → steady. patrik 2026-09-10 (reps at 2:47–3:27 /km with HR 115–158, probably not on foot) still has
-    6 of 9 recovery breaks and stays intervals_road (open).
+    `active` laps always count). This stops the detector splitting one continuous effort at traffic
+    lights / lap presses / GPS slowdowns into "intervals" (e.g. patrik 2026-10-27: 1625 m, 9.5 s, 792 m, 11.8 s,
+    4902 m, 12.1 s, 581 m, a steady run with ~400 m lap presses, is tempo). Open: patrik 2026-09-10 (reps at
+    2:47–3:27 /km with HR 115–158, probably not on foot) has 6 of 9 recovery breaks and stays intervals_road.
   - **Steady vs easy** (`steady_or_easy`, after the other rules): a continuous run classified easy is `steady` when its
     mean HR is ≥ 68 % of the HR reserve (`profile/hr_settings.json` max / rest) at ≥ 1.05 × the person's easy pace, or
     it is ≥ 1.15 × the easy pace (HR ≥ 60 % HRR or no HR); ≥ 15 min moving. Easy pace = median speed of the person's
     own continuous runs (≥ 3 km, trusted distance) with mean HR < 65 % HRR within ±180 days (≥ 5 runs, else no
-    steady). The old reference (median of *all* runs, used by tempo / race? / structured) is pulled up by fast runs, so
-    2026-10-03 (4:34 /km, HR 167) and 2026-10-10 (4:44 /km, HR 162) were "Easy run". Result: adrian 272 easy → 227
-    easy + 45 steady (3 in 2026), patrik 50 easy → 41 easy + 10 steady (+1 from intervals). Steady runs are lower
-    bounds in the fitness model, like easy ones. Label "Steady run".
+    steady). The median of *all* runs (the reference for tempo / race? / structured) is pulled up by fast runs, so it
+    would leave runs like 2026-10-03 (4:34 /km, HR 167) "easy". Result: adrian 227 easy + 45 steady, patrik 41 easy +
+    10 steady. Steady runs are lower bounds in the fitness model, like easy ones. Label "Steady run".
   - **Multisport files** (`multisport_family`): a `multi_sport` activity whose FIT sessions are ≥ 80 % of the time one
     family (FIT sport 1 = run) gets that sport and is classified like any run (adrian 2026-10-15, two running legs at
     Bislett: `run` / intervals_track, scored by the fitness model). Without a summary HR the mean HR comes from the
@@ -122,8 +117,8 @@ the reader (similarity tracks, fitness features, compare) and the rep cache vers
   `workout` (type 0.30, pace/intensity/structure); missing components score 0.4; `reasons` = top 3.
 
 ## Ski intervals (`scripts/ski_intervals.py`, detector `ski-1.0`)
-The run detector needs ≥ 2.5 m/s steps, so on skis it found either nothing or random fast stretches
-(downhills; 3 Holmenkollen climbs got 13–16 "reps" in compare). The ski detector runs on the same 1 Hz
+The run detector needs ≥ 2.5 m/s steps, so on skis it finds either nothing or random fast stretches
+(downhills). The ski detector runs on the same 1 Hz
 grid (fast reader, ~10 ms per file, all 135 ski files in ~1 s), same code in session_groups and compare:
 - **Lap workout** (`mode ski_laps`): ≥ 5 consecutive time-triggered laps (or laps marked rest/recovery)
   alternating between two durations; work = the longer phase (equal: the phase where HR rises).

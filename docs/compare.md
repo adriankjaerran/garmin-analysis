@@ -120,7 +120,7 @@ and distance modes starts at the same place. Intervals and breaks are rep-aligne
   anchor|crossing|at_line|join, reason, offset_s, moving_offset_s, offset_m (cut: file seconds / watch metres),
   dist_to_line_m (|offset| at the crossing, or distance to the path at the join), zone_pause_s, join_m, x_offset_s,
   x_offset_moving_s (late: where it enters the time modes), shape_err_m, closest_m (excluded)}}, excluded [{id,
-  reason, closest_m}], late [ids]}`. `finish` is reserved for the finish line (Phase 1b).
+  reason, closest_m}], late [ids]}`. `finish` is reserved for a finish line ([open items](plans/open-items.md)).
 - Cost: 1–10 ms per session (no cache; the GPS path length is cached on the store's session).
 
 ## t = 0 at rep 1 (`start="rep1"`)
@@ -163,8 +163,7 @@ per-second median over the sessions present (needs at least half of them).
   `step_m` = max(10, length / 1500).
 - **Start.** On the route axis a session's time counts from its first on-route fix, so a lead-in before it
   gets on the route (even when it joins at the route start) isn't dumped into the first bins (R11
-  2023-11-26, 890 m / 324 s lead-in: was 0 → +161 → +323 s within 20 m, first leg 647 s; now 0 → +12 → +24 s,
-  348 s). Then the clock starts when the session **leaves** its start: leading bins (within 300 m) slower
+  2023-11-26, 890 m / 324 s lead-in: 0 → +12 → +24 s within the first 20 m). Then the clock starts when the session **leaves** its start: leading bins (within 300 m) slower
   than max(20 s, 4 × its median bin, elapsed time) are cut off (standing / milling about / GPS creeping at
   the start).
 - **Coverage.** On the route axis some stretches aren't *covered*: the session didn't run them on the route,
@@ -187,9 +186,8 @@ per-second median over the sessions present (needs at least half of them).
   (**positive = behind**). It's accumulated per bin from the first bin both sessions cover, so a session
   that joins the route late starts at 0 there. Sessions that join mid-route (first on-route fix > 0) start
   20 m after the join, because the projection waits there until the session catches up. Increments only
-  count on bins both sessions covered (see Coverage). Before this guard ~15 % of route sessions had impossible
-  gaps (R30 2026-05-22: −2985 s on 15 km after the projection jumped 10 km; now +166 s over the 36 % both
-  covered). Example, R3, newest
+  count on bins both sessions covered (see Coverage), so a projection jump can't create time (R30 2026-05-22: +166 s
+  over the 36 % both covered, not −2985 s after a 10 km jump). Example, R3, newest
   session (2026-08-10) vs 2026-06-07: −42 s at km 2, −35 s at km 4, +33 s at km 6, +52 s at km 8, +26 s
   at the finish (moving time). In elapsed time the 06-07 session is ahead by 272 s because it stopped less.
   Median reference: increments are the per-bin median, so `median {x, moving_s, speed_kmh, hr}`.
@@ -203,6 +201,14 @@ per-second median over the sessions present (needs at least half of them).
 ### `intervals` (rep-aligned, breaks collapsed)
 - **Reps**: detector v2 reps, with strides left out (groups of ≤ 2 consecutive reps < 35 s, the
   same rule as the signature). Ski: the ski_intervals reps as detected (only ski_intervals sessions have any).
+- **Why the detected rep start is the anchor** (here, in Per rep / Rep N and for `start=rep1`). It is precise and
+  exists for every rep: ±0.5 s for Adrian, ±1–2 s for Patrik (3–6 s on rolling starts). The alternatives are worse:
+  - the **lap press** is a human reaction: Adrian presses +0.5 s late on median, up to 3.7 s. Patrik pressed on only
+    26 of 57 reps (he uses auto 1 km laps or programmed workouts);
+  - the **same GPS spot** as the reference's start is off by 2–4 s at accelerating speed. It also only works where
+    reps start at the same place (Bislett yes; road and ski reps start 0.1–4 km apart);
+  - **"up to speed"** (50 % of rep speed) is robust to rolling starts. It would make a good second option and is
+    listed in [open items](plans/open-items.md).
 - **Matching** against the anchor session (the first id, also with the median reference). It's an
   order-preserving DP. Rep cost c = min(|log distance ratio|, |log time ratio|) when that's ≤ 5 % (same
   prescribed rep, e.g. 1000 m at different speeds or 4:00 at different distances). Otherwise c = the
@@ -291,8 +297,7 @@ Correctness checks first, for any person (`validate_fixes`; `route_scan` is the 
     path differs by 35 m").
   - R1 Bislett laps: 34 of 34 kept, the first pass; 3 cut after more than a lap (warm-up outside the track, e.g.
     18440364486 at 625 s / 1515 m).
-  - R13 out & back reversed (20212154644, 14326254571): excluded at the route start and with a point at km 2 (the
-    prototype took them as joins).
+  - R13 out & back reversed (20212154644, 14326254571): excluded at the route start and with a point at km 2.
   - patrik R2, anchor 23057172015 (by hand): 3 crossings, 24002107294 late via a side street (+27 m), 19081639913
     excluded (crosses only in the opposite direction).
 
@@ -319,7 +324,7 @@ Then (adrian only):
   the breaks view every break starts at its common x (0 misses). Breaks are 143–175 s, mostly stand+walk,
   HR drop at 60 s 26–69 bpm.
 - **Ski (135 sessions):** 18 ski_intervals; compare's ski reps equal groups.json reps in all 18 (0 differ), no
-  other ski session has reps (before: the run detector gave 13–16 random "reps" to 3 R3 climbs). The 11 easy R3
+  other ski session has reps. The 11 easy R3
   climbs raise "no reps found". The 7 R3 interval climbs align into slots `1, 1+1, 2, 3, 4` (rest medians 66–225 s,
   HR drop at 60 s 25–36 bpm per session); breaks view 5 break slots. Four no-GPS lap workouts (`7×4:00`,
   `8×4:00`, `4×4:00` ×2) align into 8 slots by duration.
@@ -351,7 +356,17 @@ Then (adrian only):
   table), so their x is the distance from their own start, not the same physical point, and their waypoint
   legs aren't physical either. The coverage guard keeps them from absurd gaps (the R4 2020-04-07 loop jumped
   6 m → 5866 m: now no jump); whether to exclude them, group them or compare them on their own distance is
-  still open (plan decision 8).
+  still open ([open items](plans/open-items.md)).
+- **Coarse sampling** (patrik's 3077 and the FR935 record every 2–5 s, the 4315 every 1 s). Decimating Adrian's 1 Hz
+  files to 5 s shows the bias:
+  - moving pace on intervals with standing breaks comes out +3 % slower (6×1000: 292 → 301 s/km), because
+    interpolating across a 5 s gap turns standing seconds into slow jogging;
+  - continuous runs change by < 1 s/km;
+  - rep times move by ±1 s (400 m) to ±1.4 s (1000 m), and 45 s hill reps by up to 5 s;
+  - GAP takes altitude from GPS only, and that noise makes Patrik's GAP on the flat track differ from his pace by
+    −7…+3 s/km (Adrian's by 0–0.3 s/km).
+
+  Compare doesn't correct for or flag any of this yet. Mixed-sampling comparisons favour the 1 s file.
 - Coverage depends on the projection: where it stalls (some out & back / point-to-point sessions turn or
   leave the medoid's line, e.g. adrian R8 2024-08-10 at 9.0 of 17.8 km) the rest counts as not covered.
 - With `delta_moving_s`, slow walking (> 0.5 m/s) at stops counts as moving. `delta_elapsed_s` includes

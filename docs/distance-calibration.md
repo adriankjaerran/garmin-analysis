@@ -1,7 +1,9 @@
-# Distance calibration (Adrian, 2026-10-30)
+# Distance calibration (Adrian)
 
-Script: `scripts/calibrate_distance.py adrian` -> `data/adrian/calibration.json`.
-Report: Runs -> Distance check. Next steps: [plans/timing-and-distance-accuracy.md](plans/timing-and-distance-accuracy.md).
+Pipeline: `calibrate_distance.py` (track geometry) → `gps_lap_analysis.py` → `evaluate_detector.py` →
+`route_accuracy.py` → `calibrate_distance.py` again, which merges their outputs into `data/adrian/calibration.json`
+(read by `run_analysis.py` and the report).
+Report: Sessions → Distance check. Open items: [plans/open-items.md](plans/open-items.md).
 
 ## Truth we used
 - **Bislet track geometry.** A stadium model of a standard 400 m track (straights 84.39 m,
@@ -20,7 +22,7 @@ Report: Runs -> Distance check. Next steps: [plans/timing-and-distance-accuracy.
 | Garmin lap distance | −0.08 % | −0.53 % | +0.48 % |
 | Watch distance field (FIT `record.distance`) | +0.00 % | −0.21 % | +0.25 % |
 | Raw GPS positions | −0.27 % | −0.29 % | −0.24 % |
-| Our detected reps | −0.82 % | −2.51 % | +0.60 % |
+| Detected reps (detector v1.1; v2 below) | −0.82 % | −2.51 % | +0.60 % |
 
 - In track mode the watch **already corrects positions and distance onto the track**: all
   track-mode points sit at a constant −1.1 m offset (synthetic, not raw GPS). So lane changes
@@ -28,9 +30,7 @@ Report: Runs -> Distance check. Next steps: [plans/timing-and-distance-accuracy.
 - Garmin snaps lap distances to round numbers (400, 1000 m). For a 6 × 1000 m session,
   6,000 m is what Garmin reports, and the geometry agrees to about 0.1 %.
 - The watch's **speed field lags 3–4 s**, and in track mode the distance field stalls for
-  1–3 s around each lap mark. Rep detection now uses speed from distance differences: the
-  error against Garmin laps went from −20 m to −6 m per rep (median). The rest comes from
-  ~1 s of smoothing at each end.
+  1–3 s around each lap mark, so rep detection uses speed from distance differences, not the speed field.
 
 ### Normal running mode at Bislet (GPS only, 6 runs)
 - The watch reads **+1.7 % to +5.9 % more than lane 1**, but the GPS puts you 0.9–3.4 m
@@ -79,7 +79,7 @@ puts Adrian +0.3 m from it, so the line placement is right).
   +0.5 s), FR935 smart recording is interpolated, press timing can't be separated from lag in absolute
   terms (consistent within a session; session medians vary ±1 s, attributed to ±3 m GPS bias).
 
-### Signal lags vs lap press, step model (Phase 2; `gps_lap_analysis.py` → `lag_table`)
+### Signal lags vs lap press, step model (`gps_lap_analysis.py` → `lag_table`)
 A step (1 s ramp) is fitted to each signal around every rep start/end press, lag by least squares,
 90 % CI of the median bootstrapped by session. Median start / end lag in seconds:
 
@@ -95,14 +95,14 @@ A step (1 s ramp) is fitted to each signal around every rep start/end press, lag
 - Track-mode negative lags are an artefact of snapping and stalls, so compensation is clamped to 0.
 - Lags include Adrian's reaction at the press and the acceleration itself, so they're relative to the press, not physics.
 
-### Rep detector v2 (Phase 3; `evaluate_detector.py`, details in [run-analysis.md](run-analysis.md))
+### Rep detector v2 (`evaluate_detector.py` → `detector_eval.json`, details in [run-analysis.md](run-analysis.md))
 Change points (PELT) on distance-derived speed, sub-second refit, minus the lag fitted on this
 detector's own offsets (`calibration.json` `detector_lags`). Leave-one-session-out on 58 Bislet
 sessions / 365 rep laps: median |start err| 0.44–0.50 s, |duration err| 0.46–0.82 s, rep distance vs
 geometry −0.40..+0.21 % (median) by watch/mode. v1.1 was 1–3.6 s and −0.8..−1.2 %.
 
-### Outside Bislet (Phase 4; `route_accuracy.py`, `gps_quality.py` → `route_accuracy.json`)
-All 492 runs downloaded (backfill 2026-10-30, 393 calls at 3 s, no 429).
+### Outside Bislet (`route_accuracy.py`, `gps_quality.py` → `route_accuracy.json`)
+Based on all 492 runs (FIT backfill: 393 calls at 3 s, no 429).
 
 | Race | Truth | Garmin | GPS positions |
 |---|---|---|---|
@@ -127,7 +127,7 @@ All 492 runs downloaded (backfill 2026-10-30, 393 calls at 3 s, no 429).
 - Caveats: the environment guess is a jitter threshold and doesn't really find cities (Copenhagen and Rome count as
   "open"). Satellites and accuracy can't be decoded from `gps_metadata`. A third device (product 3077, 6 runs in 2021) exists.
 
-### Bislett indoor lap, winter (27 sessions; `session_groups.bislett_indoor`, 2026-10-31)
+### Bislett indoor lap, winter (27 sessions; `session_groups.bislett_indoor`)
 In winter the reps are run on the indoor lap under the Bislett stands: **546.5 m per lap** (Adrian), and each rep
 stops 7–8 m before the line, so **rep = n laps × 546.5 m − 7.5 m** (1 lap 539.0 m, 2 laps 1,085.5 m, 3 laps 1,632.0 m).
 - **Detection, two ways:** (a) main place Bislet and GPS track length < 30 % of the watch distance (7 sessions at
@@ -143,21 +143,19 @@ stops 7–8 m before the line, so **rep = n laps × 546.5 m − 7.5 m** (1 lap 5
   (100 s → 1, 220 s → 2, 345 s → 3); no unique n → time-only. Per rep, 2:40–4:30 /km or no distance.
 - **Override** `data/adrian/indoor_bislett.json` `time_only`: 2025-01-21 (5 × 5:00, jogged rests: 3 laps = 3:03 /km,
   2 laps = 4:36 /km, neither fits) has no rep distance.
-- No-GPS sessions in the fitness model: 19 new interval items (47.5–56.2), 2026 interval evidence 28 → 37, 2025
-  40 → 47. The first 7 (GPS lost at Bislet):
+- In the fitness model the no-GPS sessions give 19 interval items (47.5–56.2), scored from the whole-lap reps with
+  speed 0 between reps (standing rests); no continuous / long items. The 7 GPS-lost sessions, with what the speed
+  detector would make of them:
 
-| Date | Reps | n laps | Pace /km | Old sig (speed detector) | Fitness interval item, old → new |
+| Date | Reps | n laps | Pace /km | Speed-detector sig | Fitness interval item |
 |---|---|---|---|---|---|
-| 2024-12-10 | 3 × 6:00 | 3 | 3:31–3:40 | 1×1500 + 3×7:00 | 55.6 → 50.6 |
-| 2024-12-17 | 9 × 1:28–1:43 | 1 | 2:51–3:10 | 8 reps (mixed) | 57.3 → 55.0 |
-| 2025-01-07 | 6 × ~4:00 | 2 | 3:29–3:50 | 4×4:00 + 1×3000 | 50.8 → 50.1 |
-| 2025-01-28 | 6 × 4:00 | 2 | 3:26–3:42 | 7 reps (mixed) | 52.1 → 48.2 |
-| 2025-02-04 | 6 × 3:45 | 2 | 3:17–3:34 | 3×4:00 + 1×3600 | 55.0 → 51.1 |
-| 2026-01-13 | 3 × 5:45, 3:45, 1:30 | 3, 2, 1 | 3:27–3:37 (1 lap 2:53) | 5 reps (mixed) | 50.0 → 50.9 |
-| 2026-01-20 | 10 × ~1:42 | 1 | 3:05–3:15 (last 2:53) | 1×2400 + 1×7700 + 2×8:45 | 66.2 → 54.4 |
-
-The old "long" bound items of all 7 (and the implausible 68.6 on 2026-01-20) are gone; the 2026 interval max
-went 56.2 → 54.9, no other session changed. Between reps the speed is 0 (standing rests).
+| 2024-12-10 | 3 × 6:00 | 3 | 3:31–3:40 | 1×1500 + 3×7:00 | 50.6 |
+| 2024-12-17 | 9 × 1:28–1:43 | 1 | 2:51–3:10 | 8 reps (mixed) | 55.0 |
+| 2025-01-07 | 6 × ~4:00 | 2 | 3:29–3:50 | 4×4:00 + 1×3000 | 50.1 |
+| 2025-01-28 | 6 × 4:00 | 2 | 3:26–3:42 | 7 reps (mixed) | 48.2 |
+| 2025-02-04 | 6 × 3:45 | 2 | 3:17–3:34 | 3×4:00 + 1×3600 | 51.1 |
+| 2026-01-13 | 3 × 5:45, 3:45, 1:30 | 3, 2, 1 | 3:27–3:37 (1 lap 2:53) | 5 reps (mixed) | 50.9 |
+| 2026-01-20 | 10 × ~1:42 | 1 | 3:05–3:15 (last 2:53) | 1×2400 + 1×7700 + 2×8:45 | 54.4 |
 
 ## Which number to believe
 1. **Track mode, lap button pressed:** Garmin lap distance (exactly the nominal lane-1

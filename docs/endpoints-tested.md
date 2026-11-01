@@ -1,7 +1,7 @@
 # Endpoints tested (live, Adrian's key, 2026-10-30)
 
 Base: `https://personal.connectapi.garmin.com`. Auth: `Authorization: Bearer <token>`
-(see `rate-limits-observed.md` for the token flow). Official full list: `api-reference.md`.
+(token flow: [garmin-api-guide.md](garmin-api-guide.md)). Official full list: [api-reference.md](api-reference.md).
 
 Latency: median 150–200 ms per request, the token exchange ~1.3 s, FIT download ~350 ms.
 
@@ -32,13 +32,13 @@ Latency: median 150–200 ms per request, the token exchange ~1.3 s, FIT downloa
 | `GET /biometric-service/heartRateZones/v2` | - | 200 | | |
 | `GET /userprofile-service/userprofile/settings` | - | 200 | | |
 | `GET /usersummary-service/usersummary/daily` | `calendarDate` | 200 | 1 day | 87 flat fields (in spec, not in Python client) |
-| `GET /weight-service/weight/all/{s}/{e}` | path | 400 for 2018..2026 | ? | in spec; range too long or other format, not explored further |
+| `GET /weight-service/weight/all/{s}/{e}` | path | 200 / 400 | 1 year OK, 2018..2026 -> 400 | in spec |
 
 Errors return JSON like
 `{"clientMessage": "...", "errorId": "<uuid>", "error": "NotAcceptableException"}` (406), and an
 empty body for 400s on range overruns.
 
-## Session 2026-10-30 (evening): watch coverage + search filters (35 requests, ~50 s, no 429)
+## Search filters and watch coverage
 
 | Endpoint | Params | Status seen | Notes |
 |---|---|---|---|
@@ -47,10 +47,9 @@ empty body for 400s on range overruns.
 | `GET .../search/activities` | `requiredField=avgPower` (+`activityType=running`) | 200 | 53 runs, 2026-02-24..; = all new-watch runs. `activityType=running` also includes track/indoor |
 | `GET .../search/activities` | `minAvgPower=1` | 200 | same 53 |
 | `GET .../search/activities` | `sortOrder=asc` | 200 | oldest first (2018-12-22) |
-| `GET /weight-service/weight/all/{s}/{e}` | 1 year | 200 | 1 entry; works with short ranges (the 2018..2026 400 was the range) |
 | `GET /wellnessactivity-service/activity/summary/range/{s}/{e}` | 30 days | 200 `[]` | still empty |
 
-- **No device endpoint** exists in the spec or api-reference (no devices/gear). List items and
+- **No device endpoint** exists in the spec (no devices/gear). List items and
   `activity.json` have no `deviceId`; only `metadataDTO.manufacturer` (`GARMIN`) and
   `metadataDTO.sensors` (`[]`/null). The watch is only visible in the FIT `file_id.garmin_product`.
 - Watch switch: FR935 (serial ...7371) up to 2026-02-17, product 4315 (serial ...0964) from 2026-02-24.

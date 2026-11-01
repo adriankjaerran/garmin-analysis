@@ -1,9 +1,8 @@
 # Getting data, onboarding a runner, calibrating a watch
 
-Learned on Adrian's account (717 activities, 2 watches), 2026-10-30. API details:
+Learned on Adrian's account (717 activities, 2 watches). API details:
 [garmin-api-guide.md](garmin-api-guide.md), [endpoints-tested.md](endpoints-tested.md).
-Accuracy background: [distance-calibration.md](distance-calibration.md), plan:
-[plans/timing-and-distance-accuracy.md](plans/timing-and-distance-accuracy.md).
+Accuracy background: [distance-calibration.md](distance-calibration.md); open items: [plans/open-items.md](plans/open-items.md).
 
 ## 1. Best way to get the data
 
@@ -28,8 +27,7 @@ What each call is worth:
   download: avg/max HR (100 % of runs), cadence (485/492 runs), stride, and since the new watch
   power/GCT/VO. HR time-in-zone only from 2024-12, fastest splits from 2024-09.
 
-Pacing: ≤ 1 req/s has never given a 429 (~450 requests so far). Bursts of 150–200 back-to-back
-did. Search pages: `limit=200` works, `limit≥500` returns 500.
+Pacing: ≤ 1 req/s has never given a 429. Bursts of 150–200 back-to-back did ([garmin-api-guide.md](garmin-api-guide.md#4-rate-limits)). Search pages: `limit=200` works, `limit≥500` returns 500.
 
 Which watch recorded what, without downloading: in the list, `avgPower` non-null ⇒ new watch
 (Adrian: holds for all 492 runs). `requiredField=avgPower` on the search filters to those.
@@ -40,7 +38,7 @@ or guessed (standard distance, fast pace, few laps).
 ## 2. Onboarding a new runner
 1. They create a Personal API key (1 year), we store `GARMIN_<NAME>_API_KEY` in `.env`.
 2. `fetch_index.py <name>`.
-3. Ask them (the same four questions we asked Adrian):
+3. Ask them:
    - races with official chip times/splits, and any route with a known length;
    - watch model(s) and **when they switched**, plus GPS mode (GPS only / all systems / multi-band).
      It isn't in the FIT;
@@ -80,10 +78,9 @@ So today **track mode (timing lags) and GPS mode (distance/lag) are measured on 
 Lags measured on one shouldn't be applied to the other without checking. To close the gap: a few
 GPS-mode runs at Bislet with the new watch, pressing lap at the line.
 
-## 4. Status for Adrian (2026-10-30, evening)
-- Downloaded: all 492 runs (FIT), 100 earlier + 392 in the backfill (393 calls at 3 s, ~20 min, no 429).
-- Lag table per watch (step model), detector v2 (±0.5 s timing), per-activity distance uncertainty: see
-  [distance-calibration.md](distance-calibration.md) and [run-analysis.md](run-analysis.md).
+## 4. Status for Adrian
+- All 492 runs downloaded as FIT. Lag table per watch, detector v2 (±0.5 s timing) and per-activity distance
+  uncertainty: [distance-calibration.md](distance-calibration.md), [run-analysis.md](run-analysis.md).
 - Still thin: **new watch in GPS mode at Bislet** (5 sessions, ~40 presses) and **no repeated routes on the
   new watch**. A few GPS-mode runs at Bislet with lap at the line, and repeating one or two regular loops,
   would close both gaps.

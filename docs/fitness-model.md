@@ -58,8 +58,8 @@ C(i) = 155.4i⁵ − 30.4i⁴ − 43.3i³ + 46.3i² + 19.5i + 3.6 J/kg/m.
 and moving time.
 - ≤ 7 km counts for interval, with kind `race`.
 - Longer races count for long (`race`). On the distance curve each race sits at its own distance, so a 10k is
-  counted once. (`collect_evidence` still emits the old interval/`hard` σ 2 copy of a 10k for the per-discipline
-  back-tests; `build` drops it, `is_10k_dup`.)
+  counted once. (`collect_evidence` also emits an interval/`hard` σ 2 copy of a 10k for the per-discipline
+  back-tests in `fitness_eval.py`; `build` drops it, `is_10k_dup`.)
 
 **Long: continuous efforts.** Daniels VDOT of the best grade-adjusted window of 20 / 30 / 45 / 60 / 90 min
 inside one pause-free leg.
@@ -81,8 +81,7 @@ inside one pause-free leg.
   the same ~390 m net climb. The FR935's altitude on one leg is off by up to ±40 %, so windows are
   ≥ 20 min.
 - `ski_hard` and `ski_intervals` sessions are `hard` (ski_intervals are hard sessions with detected reps,
-  [session-groups.md](session-groups.md); 7 Holmenkollen climbs moved from ski_hard to ski_intervals and
-  stay `hard`, so the scores didn't change), the rest are `bound`.
+  [session-groups.md](session-groups.md)), the rest are `bound`.
 
 ## Smoother (`smooth_series`)
 - Daily random walk θ_t = θ_{t−1} + N(0, q), Kalman filter + RTS smoother. In a gap the mean holds (or
@@ -103,9 +102,8 @@ inside one pause-free leg.
 
 ## Stale shapes
 - **Uncertainty grows without evidence.** The random walk adds q per day, so a discipline without new race / hard
-  evidence keeps its last value and its sd grows by √(q·days). Before the distance curve adrian's long shape (last
-  race 2025-11-02, 364 days) was 58.4 ± 2.8 while interval was 52.8 ± 1.0; now intervals inform long through θ and
-  long is 55.9 ± 1.5 (only the slope is old).
+  evidence keeps its last value and its sd grows by √(q·days). On the distance curve intervals inform long through θ,
+  so only the slope goes stale without 10k+ evidence.
 - **Staleness fields** in every `current`: `last_evidence_date` (latest race / hard item with weight > 0.5, the same
   rule as the API's `last_evidence`; for interval / long any item on the distance curve), `days_since_evidence`,
   `stale` (> `STALE_DAYS` = 90 days, or none). The app greys a stale value and says "last evidence 12 mo ago" (Home
@@ -119,12 +117,12 @@ Running is one model since model_version 2 (`smooth_curve`, parameters in `CURVE
   s_t = φ·s_{t−1} + noise with **q_s = 0.005** and stationary sd **1.5** (= the prior, `slope_prior_sd`), φ = √(1 − q_s/1.5²),
   time constant ≈ 2·1.5²/q_s ≈ 900 days. The slope is shrunk towards the Daniels default (0, same VDOT at every
   distance) unless the evidence is strong and recent; an old distance profile fades back towards 0. Choice:
-  "Slope shrinkage" below (until 2026-11-01: a random walk, q_s 0.001, prior N(0, 3²), adrian +2.0).
+  "Slope shrinkage" below.
   2-state Kalman filter + RTS smoother on the daily grid, per-kind σ (`SIG`)
   and the same asymmetric robust IRLS weights as `smooth_series`, with each residual taken against the curve at the
   item's own distance.
 - **Effective distance per item** (`evidence_km`; `sessions[].km`):
-  - race: its nominal distance (5k / 10k / half / marathon). A 10k counts once (the old interval/hard copy is gone).
+  - race: its nominal distance (5k / 10k / half / marathon). A 10k counts once.
   - interval session (hard): **5 km**. The −2.5 offset ties the session scores to the race level; 7.07 km (the
     log-mean of the 5k + 10k races it was fitted on) was tried: better race MAE only because of the soft 5k
     (without it 0.72 vs 0.73), slightly worse forecasts, and worse for patrik. So 5 km.
@@ -258,9 +256,7 @@ Today (2026-11-01, `GET /api/<person>/fitness/predict`; curve on / off):
 | patrik time, curve on (−0.25 per doubling) | 11:54* | 20:36 | 42:53 | 1:35:28* | 3:19:30* |
 | patrik time, curve off (48.1 everywhere) | 11:56* | 20:36 | 42:42 | 1:34:35* | 3:16:51* |
 
-\* extrapolated. With the earlier random-walk slope (+2.0): adrian 10k 38:13, half 1:21:49, marathon 2:50:54; patrik
-(−0.8) 5k 20:23, 10k 42:50. Before (v1): adrian one VDOT 53.5 ± 2.0 for every distance (10k 39:01, half 1:26:21),
-long shape 58.4 ± 2.8 (stale); patrik 48.2 ± 1.3 (10k 42:40).
+\* extrapolated.
 
 ## Evaluation (`scripts/fitness_eval.py`, numbers from 2026-10-31)
 Data: 108 interval sessions (track 58, road 47 GPS), 7 races (5k ×3, 10k ×3, half ×1), 8 tempo, 189
@@ -413,7 +409,7 @@ Components:
 ## API for a backend
 `build(person, workers=8, today=None) -> doc` is the whole file. Lower level:
 - `load_features(person)` → (acts, feats, rest). Cached.
-- `apply_hr_intent(ev)` / `variant_evidence(acts, feats, variant)` → the hr variant's evidence.
+- `apply_hr_intent(ev)` → the hr variant's evidence (copies of the pace evidence).
 - `collect_evidence(acts, feats, tau=, hr_b=, use_hr_aer=)` and `score_session(act, feat)` → evidence items.
 - `smooth_series(obs, day0, day1, q)` → (days, mean, sd, weights, forecasts). `forecast_errors(obs, q)`.
 - Distance curve: `smooth_curve(obs, day0, day1, q_theta=, q_slope=, slope_sd=, revert=)` with obs (day, score, sigma,
@@ -421,12 +417,12 @@ Components:
   slope, var_theta, var_slope, cov, km, evidence_km, flat=False)` → {vdot, sd_state, sd, extrapolated, …} (flat: the
   distance curve off, slope 0); `evidence_km(item)`,
   `curve_x(km)`, `curve_obs(ev)`, `slope_text`, `dist_label`; parameters `CURVE`.
-- Physiology helpers: `vdot_from_race`, `race_time`, `speed_for`, `daniels_vo2`, `daniels_pct`, `cs_dprime`,
-  `vdot_from_cs`.
+- Physiology helpers: `vdot_from_race`, `vdot_from_perf`, `race_time`, `speed_for`, `daniels_vo2`, `daniels_pct`,
+  `cs_dprime`.
 - Model pieces: `gap_factor`, `ski_vo2_demand`, `wbal_min`, `wbal_vdot`, `continuous_vdot`, `ski_effort`,
   `hr_aerobic`.
 - Per FIT: `session_series(fit, act)` and `session_features(fit, act, hr_rest)`.
-- `fitness_eval.run(person)` → the eval dict.
+- `fitness_eval.run(person)` → the eval dict (its `variants` are served as `eval_variants` in `GET /api/fitness`).
 
 ## Shape trend (2026-11-01, model_version 2, mean-reverting slope; distance curve on)
 | | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 | now |
@@ -435,10 +431,6 @@ Components:
 | Long (VDOT at 14.5 km) | 49.0* | 51.7* | 50.5 | 49.5* | 53.5 | 55.1* | 56.7 (peak 59.0) | 55.6* | 54.9 ± 2.1 (no 10k+ evidence in 2026; θ from intervals, slope fading) |
 | Ski (VDOT-eq.) | 39.6* | 41.5* | 43.5* | 46.3* | 49.1* | 49.9 | 50.4 | 53.9 | 55.3 ± 2.8 |
 | Overall (% of best) | 80.5 | 85.5 | 85.9 | 85.8 | 91.7 | 93.3 | 95.2 | 95.4 | 95.1 ± 2.3 |
-
-v1 (separate shapes, 2026-10-31): interval 2025 54.9, long 2025 57.8 / now 58.4 ± 2.8, overall now 95.5 ± 1.6. The
-interval yearly values are 0.1–0.8 lower in v2 because a 10k no longer counts as an interval item at its own VDOT
-(it sits at 10 km on the curve, one doubling up).
 
 \* 0–2 pieces of evidence that year. The value is interpolated between evidence and the band is wide.
 Check `n_evidence` / `days_well_observed`.
@@ -471,7 +463,7 @@ Check `n_evidence` / `days_well_observed`.
 ## Form delta (`scripts/form_delta.py`)
 "How well did this session go compared to the person's form": **delta = session score − shape on the day before,
 from the shape model refitted without this session** (VDOT points; "+2.1 vs form" / "−1.3 vs form"). Used by the
-Community pages (plan decision 5).
+Community pages.
 ```
 uv run scripts/form_delta.py adrian <activity_id>   # one session (JSON)
 uv run scripts/form_delta.py adrian --series        # weekly shape trend
@@ -495,12 +487,14 @@ fd.together_deltas()                    # together.json groups with a `form` per
   distance curve off (`data/<person>/settings.json`, "Distance curve on / off") the reference is θ of the same
   leave-one-out fit (`ref_flat`, cached next to `ref`; the setting is read per call, Community keys its caches on
   the settings file's mtime). Long deltas therefore compare with the curve, which intervals inform:
-  adrian's 2021 tempos are −7.5 (v1: −3.9) because the intervals said he was fitter than those tempos. Leaving the session out stops it pulling its own reference (a good session
+  adrian's 2021 tempos are −7.5 because the intervals said he was fitter than those tempos. Leaving the session out stops it pulling its own reference (a good session
   otherwise looks smaller: `score − shape_at` under-states it). Chosen over the forward filter (only earlier
   sessions): with sparse data the forward filter swings after each odd session (patrik's 2026-09-10 glitch raised
   his forward shape from 41 to 52, so the next three sessions looked 3–6 points bad) and it fits worse: median
   |delta| of hard sessions 2.1 (forward) vs 1.8 (leave-one-out) for adrian's intervals, 6.8 vs 5.4 for patrik's.
-  Cost: later sessions inform the reference, so an old delta can shift slightly when `fitness.json` is rebuilt.
+  Each other session enters the reference with the shape model's robust weight (`sigma / √weight`), so a session the
+  model rejected (patrik 2026-09-10, 60.4, weight < 0.5) doesn't inflate the reference (unweighted it pushed patrik's
+  October reference to 57 → deltas −8 to −11). Cost: later sessions inform the reference, so an old delta can shift slightly when `fitness.json` is rebuilt.
 - **Confidence** from the combined sd √(ref_sd² + σ²): high < 2, medium < 3, else low. **z** = delta / that sd.
 - **Flags:** `hr_not_maximal` (the HR-intent variant demoted it), `downweighted` (model weight < 0.5),
   `sparse_reference` (ref_sd > 3), `outlier` (|z| > 3: confidence low), `no_reference` (the discipline's only
@@ -520,15 +514,11 @@ long −0.1 (4).
   came out +2.9 because his 400s were fast).
 - Noise: |delta| < ~2 (adrian) is within test-retest (track 1.5–2.4, road 2.4). Ski deltas carry the ski score noise
   (sd 3.4 on R3, snow hard sessions ~9 below): always low confidence.
-- The score is only as good as the session label. patrik 2026-10-27 (a steady run split at ~10 s stops, was scored as
-  intervals: −5.9) is a tempo run since 2026-11-01 (session_groups `recovery_share`): long evidence 47.9, +3.7 vs form
-  (low confidence, sparse reference). patrik 2026-09-10 (reps at 2:47–3:27 /km with HR 115–158, probably not on foot)
+- The score is only as good as the session label. patrik 2026-10-27 (a steady run split at ~10 s stops) is classed
+  tempo by session_groups `recovery_share` (as intervals it scored −5.9): long evidence 47.9, +3.7 vs form (low
+  confidence, sparse reference). patrik 2026-09-10 (reps at 2:47–3:27 /km with HR 115–158, probably not on foot)
   is still `intervals_road`, scored 60.4: "score unreliable" (outlier + downweighted); in the with-HR variant it pulls
   patrik's interval shape up (53.9 vs 48.7 performance-only). patrik's watch records every 5 s, which blurs short reps.
 - No HR fallback for easy runs: the HR-aerobic estimate failed as a score (test-retest 4.7 VDOT, above), and the
   efficiency factor exists for only 36 of adrian's easy runs and 1 of patrik's, rounded to 3 decimals (≈ 5 % steps).
 - HR-intent parameters (HR max 206, watch trust by date) are adrian's and are applied to patrik too.
-
-**Robust reference (2026-11-01):** each other session enters the leave-one-out reference with the shape model's robust
-weight (`sigma / √weight`), so a session the model rejected (e.g. patrik 2026-09-10, 60.4, weight < 0.5) no longer
-inflates the form the other sessions are compared with (it had pushed patrik's October reference to 57 → deltas −8 to −11).

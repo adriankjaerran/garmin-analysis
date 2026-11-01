@@ -29,10 +29,10 @@ These pages contain everything Garmin publishes about the Personal API. The `/gc
 
 **Not documented.** The FAQ, the Personal API page, the OpenAPI spec, and the Python client say nothing about rate limits, quotas, request budgets, or throttling windows. The spec documents no `429` response on any endpoint. Its error codes are only 400, 401, 403, 404, 500, and 204 "No data" on the HRV endpoints.
 
-Our own observation (not official): we got HTTP 429 after about 190 rapid sequential requests. We don't know the window, the reset time, or whether the limit is per key, per token, or per user.
+What we observed (not official): HTTP 429 after ~150–200 rapid back-to-back requests; see [garmin-api-guide.md](garmin-api-guide.md#4-rate-limits).
 
 ### Retry-After and backoff
-**Not documented.** The official client does no retries and no backoff. Any non-2xx response raises `HttpError(status_code, method, url, response_text)` [GH `client.py`]. The README doesn't mention 429. We have no official information on whether 429 responses include `Retry-After`. Inspect the headers of a real 429 to find out.
+**Not documented.** The official client does no retries and no backoff. Any non-2xx response raises `HttpError(status_code, method, url, response_text)` [GH `client.py`]. The README doesn't mention 429. Nothing official says whether 429 responses include `Retry-After`; the 429s we got had no `Retry-After` and no rate-limit headers.
 
 Indirect guidance that reduces call volume:
 - Use the range endpoints instead of per-day calls. Max ranges per [SW] are: `v2/dailysummaries` 1 year; sleep summaries, hydration, and Body Battery 31 days; steps and stress 28 days. See [api-reference.md](api-reference.md).

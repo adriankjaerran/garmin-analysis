@@ -1,15 +1,13 @@
-# What data we can get (tested on Adrian's account, 2026-10-30)
+# What data we can get (tested on Adrian's account, Oct 2026)
 
 All findings below come from real calls with `GARMIN_ADRIAN_API_KEY`. Raw responses are in
-`data/adrian/` (gitignored). See `endpoints-tested.md` for per-endpoint behaviour and
-[garmin-api-guide.md](garmin-api-guide.md) for how to fetch it.
+`data/adrian/` (gitignored). Per-endpoint behaviour: [endpoints-tested.md](endpoints-tested.md); how to fetch:
+[garmin-api-guide.md](garmin-api-guide.md).
 
-**Downloaded so far (2026-10-31):** the activity list (717, newest 2026-10-27), daily summaries
-2018-12-20 → 2026-10-30, the watch's FIT file for **all 717 activities**, and 14 days of intraday HR,
-sleep, SpO2 etc. The 2026-10-31 backfill fetched activity+details+FIT for the 90 non-run activities
-that were missing (hiking 64, stop_watch 8, cycling 6, lap_swimming 5, rowing_v2 3, multi_sport,
-kayaking_v2, other, open_water_swimming 1 each) in 271 requests at 1 req/2 s, with no failures and
-no 429s. All 8 stop_watch FITs are ~0.5 KB (summary only, no per-second records), and the 2021
+**Downloaded for Adrian:** the activity list (717 activities, from 2018-12-22), daily summaries from 2018-12-20,
+the watch's FIT file for **all 717 activities** (492 runs; non-runs: hiking 64, stop_watch 8, cycling 6,
+lap_swimming 5, rowing_v2 3, multi_sport, kayaking_v2, other, open_water_swimming 1 each), and 14 days of intraday
+HR, sleep, SpO2 etc. All 8 stop_watch FITs are ~0.5 KB (summary only, no per-second records), and the 2021
 open-water swim is 1 KB. **No all-day location data:** the API (OpenAPI spec) has no location or
 position-history endpoint; GPS exists only inside activities (FIT, `/details`, start/end lat-lon).
 
@@ -49,7 +47,7 @@ position-history endpoint; GPS exists only inside activities (FIT, `/details`, s
 - **FIT file** (`download-service/files/activity/{id}`): ZIP with one `<id>_ACTIVITY.fit`.
   Must send `Accept: application/zip, application/x-zip-compressed, application/octet-stream`;
   `Accept: application/octet-stream` alone gives **406**. ~100 KB per 45 min run (current
-  watch), ~20–25 KB on the FR935. See `fit-files.md`.
+  watch), ~20–25 KB on the FR935. See [fit-files.md](fit-files.md).
 
 ## Daily health
 
@@ -75,8 +73,8 @@ position-history endpoint; GPS exists only inside activities (FIT, `/details`, s
 
 ## Accuracy of activity distance and timing
 See [distance-calibration.md](distance-calibration.md) and [run-analysis.md](run-analysis.md). In short:
-Garmin's track-mode lap distances match track geometry (~0.1 %); GPS runs read about 1 % long against
-certified courses; the watch's speed field lags ~4 s.
+Garmin's track-mode lap distances match track geometry (~0.1 %); GPS runs read +0.2..+1.2 % long against
+measured courses; the watch's speed field lags ~4 s.
 
 ## Timestamps
 

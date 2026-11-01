@@ -1,6 +1,6 @@
 # Similarity engine: places, regions, routes, workout hierarchy, search, nearest
 
-`scripts/similarity.py` is a library for the future API, with a CLI on top. It builds on
+`scripts/similarity.py` is a library used by the app's API (search, nearest, places), with a CLI on top. It builds on
 `groups.json` from [session-groups.md](session-groups.md): start places, areas, routes, session
 types, interval signatures, reps and breaks. It also re-reads every FIT track (the fast reader, ~3 s
 for all files, cached) to find where an activity actually happens.
@@ -13,7 +13,7 @@ uv run scripts/similarity.py adrian search --rep-count 5-7 --rep-dist-m 900-1100
 uv run scripts/similarity.py adrian search --rep-len 4:00 --tol 0.15 --place Bislet
 uv run scripts/similarity.py adrian search --signature '~×1:15' --region Dubai
 uv run scripts/similarity.py adrian nearest 24874084265 -k 10 --preset workout -w pace=0.3
-uv run scripts/similarity.py adrian groups route|place|start_place|region|family|signature|exact|workout [--touched]
+uv run scripts/similarity.py adrian groups route|place|start_place|region|family|signature|exact|workout [--touched] [--min-n N]
 ```
 
 ```python
@@ -37,7 +37,7 @@ Loading the index takes 0.04 s. One `nearest` call over all 717 activities takes
 | `Index.groups(kind, min_n=1, touched=False, filters=None) -> list[dict]` | `{key, label, n, first, last, ids, sports[, family, places]}`; `workout` gives a tree `{key, label, n, children:[{key, n, children:[{key, n, ids}]}]}` |
 | `Index.components(q, c) -> (scores, texts)` | per-component scores for one pair |
 | `Index.overlap(a, b) -> float or None` | route overlap of two activities |
-| `encode_polyline / decode_polyline`, `encode_ints / decode_ints`, `decode_ints_pairs` | artifact encodings |
+| `encode_polyline`, `encode_ints`, `encode_pairs`, `decode_ints_pairs` | artifact encodings (polylines are decoded in the frontend) |
 
 ### Search filters (`Index.search`)
 - **Equal to a value or in a list:** `sport` (run, ski, hike, cycling, …), `atype`, `family`, `category`,
@@ -90,12 +90,12 @@ same sport (`same_sport=False` lifts that). `filters` limits them further using 
 - **Main place** (`place`, an id): the named place with ≥ 40 % of the time (`place_src: "named"`). Otherwise
   it's the start cluster from session_groups (`place_src: "start"`, e.g. `Marienlyst`, `Fauske-1`; start
   clusters are named by user override, KNOWN spots, curated landmarks, a cached reverse geocode, else
-  `<loc>-<rank>`, see [session-groups.md](session-groups.md)). Since index version 2 every place field is an
+  `<loc>-<rank>`, see [session-groups.md](session-groups.md)). Every place field is an
   **id** (`place`, `start_place`, `end_place`, `places[].name`, route `start_place` / `end_place` / `via` /
   `place`) with a display name next to it (`place_name`, `start_place_name`, `end_place_name`, `places[].label`,
   route `*_name` / `via_names`, `places[id].name`): ids stay stable for filters and other scripts
   (`fitness_model.py` and `compare.py` test `place == "Bislet"`), names can change (`Bislett`, overrides).
-  `Index.search(place=...)` accepts ids, names or old generic ids (case-insensitive).
+  `Index.search(place=...)` accepts ids, names or generic ids (case-insensitive).
 - **Counts** (`places[id]`): `n` = touched = activities whose main, start or end place it is or that spend ≥ 5 % /
   3 min there — exactly what a `place` search returns (`touched_places(a)`); `n_main` = main place; `n_start` =
   start-cluster members. Regions likewise (`touched_regions`: main, Garmin municipality, touched polygons).
@@ -180,10 +180,8 @@ FIT, keyed by mtime + size).
 - **Bislet** (shown as "Bislett"): 94 activities have Bislet as main place (56 intervals, 28 easy, 3 race?, …),
   108 touch it (`places["Bislet"].n`, = `search place=Bislet`). The session_groups start cluster "Bislet" has 107; 14 of those actually happen elsewhere:
   St. Hanshaugen (8, a 4.8 km out & back, route R9) and Frognerparken (6).
-- **Fixed in session_groups.py**: every start cluster within 600 m of a known spot got that spot's id.
-  Their `places` entries overwrote each other, so `places["Bislet"].n` was 1 while 113 activities
-  pointed to it. Now the known name goes to the nearest cluster only. Other clusters get `<loc>-N`
-  ids (Bislet start cluster 107). The output schema is unchanged.
+- A known spot's id goes to the nearest start cluster only (other clusters within 600 m get `<loc>-N` ids), so
+  `places` entries don't overwrite each other.
 - **Holmenkollen**: R3 = `Holmenkollen climb: Marienlyst → Frognerseteren via Holmenkollen 9.1 km`,
   19 rollerski sessions, +489 m, 100 % mutual overlap. 25 activities touch Holmenkollen (23 ski,
   1 run, 1 hike). By intensity the climbs split into `ski/easy · R3` (11), `ski/intervals · R3` (7, hard
@@ -194,12 +192,11 @@ FIT, keyed by mtime + size).
   (`4×4:00 · rest ~2:00` 6, `3×4:00 · rest ~2:00` 2, `8×4:00 · rest ~1:00`, `7×4:00 · rest ~1:00`,
   `5×1:00 · rest ~0:30`). `nearest` of the `8×4:00` returns the `7×4:00` first (0.56).
 - **Marka**: 85 activities touch it, 61 are mostly inside it (40 ski, 20 run, starting mainly at
-  Sognsvann and Oslo-3); Bymarka 12. Frognerparken is the main place of 20 activities and touched by 25
-  (one more main than before: a start cluster in the park is now named Frognerparken). St. Hanshaugen
-  touched 18 / main 10 (start cluster Oslo-16 → St. Hanshaugen; touched counts now include start / end places).
+  Sognsvann and Oslo-3); Bymarka 12. Frognerparken is the main place of 20 activities and touched by 25. St. Hanshaugen
+  touched 18 / main 10 (touched counts include start / end places).
 - **6×1000**: 19 sessions. 17 at Bislet (2024-11 → 2026-10, rest medians 135–194 s) form
   `6×1000 · rest ~2:30`, and two Trondheim road sessions in 2022 (rest 61 / 78 s) form
-  `6×1000 · rest ~1:00` (start place Øya, was Trondheim-2). A search for 5–7 reps of 900–1100 m also finds 5×1000 (Trondheim 2020–23,
+  `6×1000 · rest ~1:00` (start place Øya). A search for 5–7 reps of 900–1100 m also finds 5×1000 (Trondheim 2020–23,
   rest 1:00 / 1:30 / 2:00) and Bislet `1×300 + 5×1000`, `1×800 + 5×1000` (main part 5×1000). Other
   exact groups: Dubai `8×1:15 · rest ~0:30` (4) and `12×1:15 · rest ~0:45` (4); `4×1000 · rest ~2:00` (3).
 - **Other sports** (all 64 hikes, 6 rides, 1 open-water swim, 3 rowing, 1 kayak, 1 multisport, 1 "other"

@@ -1,8 +1,8 @@
 # How runs are analysed (`scripts/run_analysis.py`, detector v2)
 
 Input: one FIT file. Output (dict used by the report): reps, breaks, Garmin laps matched to
-reps, km splits, totals. Calibration of the results: [distance-calibration.md](distance-calibration.md).
-Plan and status: [plans/timing-and-distance-accuracy.md](plans/timing-and-distance-accuracy.md).
+reps, km splits, totals (no CLI; called by session_groups, the report and the app cache). Calibration of the results: [distance-calibration.md](distance-calibration.md).
+Open items: [plans/open-items.md](plans/open-items.md).
 v1.1 (threshold on 5 s-smoothed speed) is still available as `analyse_v1` for comparison.
 
 ## Steps
@@ -44,8 +44,8 @@ median. In GPS mode only ~46 % of individual reps are within ±0.5 % (p10..p90 �
 In GPS mode the detected distance beats Garmin's lap distance (−0.7..−1.25 %, booked 1.5 s before the press).
 
 ## Pipeline order (calibration)
-`gps_lap_analysis.py` → `evaluate_detector.py` → `route_accuracy.py` → `calibrate_distance.py` (merges
-everything into `calibration.json`) → `build_report.py`.
+`calibrate_distance.py` (track geometry; the next two need it) → `gps_lap_analysis.py` → `evaluate_detector.py` →
+`route_accuracy.py` → `calibrate_distance.py` again (merges everything into `calibration.json`) → `build_report.py`.
 
 ## Signal quirks (from the FIT files; step-model lags vs lap press, see distance-calibration.md)
 - `enhanced_speed` is smoothed by the watch and **3–5 s late** (ends later than starts).
