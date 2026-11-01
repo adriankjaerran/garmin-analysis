@@ -2,21 +2,8 @@
 main.home { padding-top: var(--space-3); }
 .home-top .head { flex-wrap: wrap; }
 .home-top .tools { min-width: 0; max-width: 100%; }
-/* current shape: one line, one link per discipline */
-.home-shape { font-size: var(--fs-13); margin-left: auto; display: flex; align-items: center; gap: 0; border: 1px solid var(--hairline); border-radius: var(--radius-control);
-  height: var(--control); overflow: hidden; white-space: nowrap; }
-.home-shape > a { display: inline-flex; align-items: center; gap: 6px; padding: 0 var(--space-3); height: 100%; color: var(--text);
-  border-left: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
-.home-shape > a:first-child { border-left: 0; }
-.home-shape > a:hover { background: var(--surface-hover); text-decoration: none; }
-.home-shape .lbl { color: var(--text-muted); font-weight: var(--fw-semibold); background: var(--surface-tint); }
-.home-shape .disc .dot { margin-right: 0; }
-.home-shape .disc .nm { color: var(--text-muted); }
-.home-shape .more { color: var(--accent); }
-.home .up { color: var(--state-good); }
-.home .down { color: var(--state-duplicate); }
-.spark { display: block; }
-.home-shape .spark { display: inline-block; }
+/* current shape: one line of plain text */
+.home-shape { font-size: var(--fs-13); margin: 0 0 0 auto; font-variant-numeric: tabular-nums; }
 
 /* latest day: the daily summary as one muted line under the activities */
 .day-line { margin: var(--space-2) 0 0; font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
@@ -38,10 +25,8 @@ main.home { padding-top: var(--space-3); }
 .tl-day .dn { font-size: var(--fs-12); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .tl-day.today .dn { color: var(--accent); font-weight: var(--fw-semibold); }
 .tl-act { display: flex; align-items: baseline; font-size: var(--fs-12); color: var(--text); overflow: hidden; border-radius: 3px; padding: 0 2px; margin: 0 -2px; line-height: 1.35; }
-.tl-act .dot { flex: none; }
 /* long workout names ("3×1800 + 2×900") wrap inside the day instead of being cut to "3…" */
 .tl-act .t { overflow-wrap: normal; word-break: keep-all; font-variant-numeric: tabular-nums; min-width: 0; }
-.tl-act .dot { margin-right: 4px; }
 .tl-act:hover, .tl-act.hl { background: var(--accent-surface); text-decoration: none; }
 .tl-sum { padding: 4px var(--space-2); display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .tl-sum b { font-size: var(--fs-13); }
@@ -78,7 +63,6 @@ table.vol .vs > span { min-width: 40px; text-align: right; }
   .tl-sum { grid-column: 1 / -1; flex-direction: row; justify-content: flex-end; align-items: center; gap: var(--space-2); border-top: 1px dashed var(--hairline); padding: 2px var(--space-2); }
   .tl-sum .mix { margin-top: 0; }
   .home-top .tools { margin-left: 0; width: 100%; }
-  .home-shape { overflow-x: auto; max-width: 100%; }
 }
 
 /* training log labels: the full workout ("6×1200") on wide screens, the compact one ("6×1.2k") below 500 px;

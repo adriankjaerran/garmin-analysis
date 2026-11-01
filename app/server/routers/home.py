@@ -1,7 +1,7 @@
 """/api/home: everything the Home page needs in one response — the latest active day, a 5-week training log,
-volume per sport (last 7 / 30 days vs typical), recent workouts (search rows with workout fields), the last 30 days'
-tracks and the current shape per discipline. Built from the same sources as the other endpoints (store activities,
-similarity index rows, tracks.json, fitness.json); memoised per anchor date and data version."""
+volume per sport (last 7 / 30 days vs typical), recent workouts (search rows with workout fields) and the current
+shape per discipline. Built from the same sources as the other endpoints (store activities, similarity index rows,
+fitness.json); memoised per anchor date and data version. Only what HomePage.tsx reads."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from .search import row as search_row
 
 router = APIRouter(tags=["home"])
 
-WEEKS = 52          # rolling 7-day buckets for the sparklines
 LOG_WEEKS = 5       # Monday-aligned weeks in the training log
 N_RECENT = 15       # recent workouts at least (more when the last 30 days have more)
 
@@ -29,16 +28,15 @@ def _d(s: str) -> dt.date:
 
 
 def _agg(acts) -> dict:
-    """n, km (trusted distances only: store.volume_km), s (moving), climb; n_untrusted = activities whose
+    """n, km (trusted distances only: store.volume_km), s (moving); n_untrusted = activities whose
     distance isn't trusted (indoor / no GPS: their time counts, their km don't)"""
-    n = km = s = climb = nu = 0
+    n = km = s = nu = 0
     for a in acts:
         n += 1
         km += volume_km(a)
         nu += a.get("dist_trusted") is False
         s += a["moving_s"] or a["dur_s"] or 0
-        climb += a["elev"] or 0
-    return {"n": n, "km": round(km, 1), "s": int(s), "climb": int(climb), "n_untrusted": int(nu)}
+    return {"n": n, "km": round(km, 1), "s": int(s), "n_untrusted": int(nu)}
 
 
 def _scale(x: dict, f: float) -> dict:
@@ -51,23 +49,19 @@ def _fitness(store: Store) -> dict | None:
     except HTTPException:
         return None
     out = {}
-    for k in (*fitness_router.DISC, "overall"):
+    for k in fitness_router.DISC:
         d = doc["disciplines"].get(k)
         if not d:
             continue
         c = d["current"]
+        ev = c.get("last_evidence")
         out[k] = {"label": d.get("label"), "unit": d.get("unit"), "mean": c.get("mean"), "sd": c.get("sd"),
-                  "confidence": c.get("confidence"), "pct_of_best": c.get("pct_of_best"), "trend_90d": c.get("trend_90d"),
-                  "race_equivalents_s": c.get("race_equivalents_s"), "last_evidence": c.get("last_evidence"),
-                  "date": c.get("date"),
-                  # weekly means of the last ~26 weeks for a sparkline
-                  "weekly": [w["mean"] for w in d.get("weekly", [])[-26:]]}
+                  "date": c.get("date"), "last_evidence_date": ev.get("date") if ev else None}
     return out
 
 
 def build(store: Store, anchor: dt.date) -> dict:
     acts = store.activities()  # newest first
-    tracks = store.tracks()
     ix = store.index()
     upto = [a for a in acts if _d(a["date"]) <= anchor]
     latest = upto[0]["date"] if upto else None
@@ -86,11 +80,9 @@ def build(store: Store, anchor: dt.date) -> dict:
         lst = [a for x in by_sport.values() for a in x] if sp == "all" else by_sport.get(sp, [])
         if not lst:
             continue
-        weekly = [_agg(win(lst, 7 * i, 7 * (i + 1))) for i in range(WEEKS)][::-1]   # oldest first, last = last 7 days
         row = {"sport": sp,
                "week": _agg(win(lst, 0, 7)), "prev4": _scale(_agg(win(lst, 7, 35)), 1 / 4),
-               "month": _agg(win(lst, 0, 30)), "year30": _scale(_agg(win(lst, 30, 30 + 365)), 30 / 365),
-               "weekly_km": [w["km"] for w in weekly], "weekly_s": [w["s"] for w in weekly]}
+               "month": _agg(win(lst, 0, 30)), "year30": _scale(_agg(win(lst, 30, 30 + 365)), 30 / 365)}
         if sp != "all" and not (row["month"]["n"] or row["year30"]["n"] >= 0.25):
             continue   # a sport not done for a year or more: leave it out
         volume.append(row)
@@ -122,15 +114,11 @@ def build(store: Store, anchor: dt.date) -> dict:
         rows.append(r)
     app_fields(store, rows)
 
-    # ---- last 30 days' tracks (20 m polylines)
-    map_tracks = [{"id": a["id"], "date": a["date"], "sport": a["sport"], "bbox": tracks[a["id"]]["bbox"],
-                   "poly": tracks[a["id"]]["poly_lo"]}
-                  for a in upto if _d(a["date"]) >= month_start and a["id"] in tracks]
-
     latest_day = None
     if latest:
         latest_day = days_router.day(latest, store)
-        latest_day.pop("hr", None)
+        for k in ("hr", "tracks", "prev_active", "next_active"):   # Home shows the activities + summary line only
+            latest_day.pop(k, None)
         # the daily summary / sleep of the latest day are often not downloaded yet: fall back to the most recent
         # earlier day (<= 3 days back) and say which day it is
         daily, sleep = store.daily(), store.sleep()
@@ -144,10 +132,9 @@ def build(store: Store, anchor: dt.date) -> dict:
                         break
 
     return {"anchor": anchor.isoformat(), "latest": latest,
-            "periods": {"week": [(anchor - dt.timedelta(days=6)).isoformat(), anchor.isoformat()],
-                        "month": [month_start.isoformat(), anchor.isoformat()],
+            "periods": {"month": [month_start.isoformat(), anchor.isoformat()],
                         "log": [log_start.isoformat(), (log_start + dt.timedelta(days=7 * LOG_WEEKS - 1)).isoformat()]},
-            "latest_day": latest_day, "volume": volume, "days": dict(days), "recent": rows, "tracks": map_tracks,
+            "latest_day": latest_day, "volume": volume, "days": dict(days), "recent": rows,
             "fitness": _fitness(store)}
 
 
@@ -170,7 +157,7 @@ def home(date: str | None = Query(None, description="anchor date (default: today
         fit_v = id(fitness_router._doc(store))
     except HTTPException:
         pass
-    key = (anchor, id(acts), id(store.tracks()), id(store.index()), fit_v, id(store.daily()), id(store.sleep()))
+    key = (anchor, id(acts), id(store.index()), fit_v, id(store.daily()), id(store.sleep()))
     with store._lock:
         hit = store._memo.get("home")
     if hit and hit[0] == key:

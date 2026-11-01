@@ -301,15 +301,15 @@ function NoResults() {
   );
 }
 
-/** selected row: summary + actions under the map (the map zooms to its track) */
-function Preview({ id, row }: { id: string; row: SearchRow | undefined }) {
+/** selected row: summary + actions under the map (the map zooms to its track), or under the table when the map is hidden */
+function Preview({ id, row, showMap }: { id: string; row: SearchRow | undefined; showMap: boolean }) {
   const list = useApi<{ n: number; activities: Activity[] }>("/api/activities").data;   // memoised app rows (fit / track flags, load…)
   const a = list?.activities.find((x) => x.id === id);
   return (
     <div class="pane preview">
       <div class="head">
         <h2 class="clip" style={{ maxWidth: "calc(100% - 40px)" }} title={a?.name ?? row?.name ?? ""}>{a?.name ?? row?.name ?? id}</h2>
-        <div class="tools"><button class="x" title="Clear the selection (back to all results on the map)" onClick={() => setQuery({ sel: null })}>×</button></div>
+        <div class="tools"><button class="x" title={showMap ? "Clear the selection (back to all results on the map) · Esc" : "Close the preview · Esc"} onClick={() => setQuery({ sel: null })}>×</button></div>
       </div>
       {a ? <ActivityKV a={a} /> : <div class="empty">Loading…</div>}
       <div class="head" style={{ marginTop: "12px" }}>
@@ -342,14 +342,26 @@ function Results({ data, error, picked, togglePick, sel, showMap }: { data: Sear
   }, [rows]);
   const fit = selRow?.bbox && selRow.poly ? selRow.bbox : all ? core.whole : core.fit;
   const narrow = useNarrow();
+  // Esc clears the selection (closes the preview); not while typing in a field
+  useEffect(() => {
+    if (!sel) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key === "Escape" && !(t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) setQuery({ sel: null });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sel]);
   return (
     <div class="split">
       <div class="left">
         {error ? <div class="err pane">Could not search the activities: {error}</div> : data && !rows.length ? <NoResults /> :
           narrow && data ? <MobileList rows={rows} /> :
           <Table cols={cols} rows={rows} rowKey={(r) => r.id} highlight={hover} selected={sel} follow maxHeight="100%" defaultSort={["date", -1]} stickyCols={2}
-            onRow={(r) => (!showMap || r.id === sel ? navigate(`/activities/${r.id}`) : setQuery({ sel: r.id }))} onHover={(r) => setHover(r?.id ?? null)}
+            onRow={(r) => (r.id === sel ? navigate(`/activities/${r.id}`) : setQuery({ sel: r.id }))} onHover={(r) => setHover(r?.id ?? null)}
             empty={data ? "No activities match these filters." : "Loading…"} />}
+        {/* map hidden: the preview sits under the table (phones open on tap and never select) */}
+        {!showMap && sel && !narrow && <Preview key={sel} id={sel} row={selRow} showMap={false} />}
       </div>
       {showMap && <div class="right" style={{ width: "30%", minWidth: "400px" }}>
         <TracksMap tracks={tracks} highlight={hover ?? sel} onHover={setHover}
@@ -364,7 +376,7 @@ function Results({ data, error, picked, togglePick, sel, showMap }: { data: Sear
           </div>}
           {sel && selRow && !selRow.poly && <div class="msg">No GPS for the selected activity</div>}
         </TracksMap>
-        {sel && <Preview key={sel} id={sel} row={selRow} />}
+        {sel && <Preview key={sel} id={sel} row={selRow} showMap />}
       </div>}
     </div>
   );
@@ -543,7 +555,6 @@ export function ActivitiesPage() {
     const on = !showMap;
     if (on) localStorage.setItem(MAP_KEY, "1"); else localStorage.removeItem(MAP_KEY);
     setShowMap(on);
-    if (!on) setQuery({ sel: null });
   };
   const { query } = useLocation();
   const view = query.get("view") === "groups" ? "groups" : "results";
@@ -570,7 +581,7 @@ export function ActivitiesPage() {
     <main class="full">
       <PageHeader class="toolbar" title="Activities" sub={res.error ? "" : d ? `${d.n} activities, ${Math.round(d.km).toLocaleString("en-GB")} km` : "…"}
         about="Every workout you recorded: filter by words, sport, period, place or workout, then preview, open or compare."
-        tips={["Click a row to open the activity; with the map open, the first click previews it on the map", "Tick rows, then “Compare ticked”",
+        tips={["Click a row to preview it (on the map when it is open), click it again to open the activity; Esc closes the preview", "Tick rows, then “Compare ticked”",
           "Search words match name, date, place, route and workout (e.g. 6×1000)",
           "Groups: the places, routes and workouts left by the filters; click a row to show it on the map, click again (or “list →”) to list its activities"]}>
         <div class="seg">
@@ -587,7 +598,7 @@ export function ActivitiesPage() {
       </PageHeader>
       <SimpleBar query={query} opts={opts} meta={meta} advOpen={advOpen} />
       {advOpen && <AdvancedPanel query={query} opts={opts} />}
-      {view === "results" ? <Results data={d} error={res.error} picked={picked} togglePick={togglePick} sel={showMap ? sel : null} showMap={showMap} />
+      {view === "results" ? <Results data={d} error={res.error} picked={picked} togglePick={togglePick} sel={sel} showMap={showMap} />
         : <Groups query={query} fq={fq} rowsById={rowsById} />}
     </main>
   );

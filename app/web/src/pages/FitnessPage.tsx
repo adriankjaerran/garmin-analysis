@@ -140,7 +140,7 @@ export function FitnessPage() {
         <b>{pm(r.mean, r.sd)}</b>{r.key === "overall" ? " %" : ""}{r.conf === "low" ? <span class="muted">*</span> : ""}
       </span>),
       title: `smoothed shape today ± 1 sd (${doc.variants?.pace?.label ?? "performance only"}); * = low confidence. Hover a value for with-HR, unit, % of best and best` },
-    { key: "trend", label: "Trend", num: true, render: (r) => <span style={{ color: r.trend === null ? undefined : r.trend > 0.3 ? "var(--state-good)" : r.trend < -0.3 ? "var(--state-duplicate)" : undefined }}>{signed(r.trend)}</span>,
+    { key: "trend", label: "Trend", num: true, render: (r) => signed(r.trend),
       title: "current minus 90 days ago" },
     { key: "r5", label: "5k", num: true, render: (r) => r.key === "ski" ? <span class="muted" title="ski is on its own VDOT-equivalent scale; no running times">—</span> : raceT(r.r5) },
     { key: "r10", label: "10k", num: true, render: (r) => r.key === "ski" ? <span class="muted">—</span> : raceT(r.r10) },

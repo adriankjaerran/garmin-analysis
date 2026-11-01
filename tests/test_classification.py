@@ -127,5 +127,3 @@ def test_shape_staleness_and_prediction(client):
     o = d["disciplines"]["overall"]["current"]
     p = o["race_prediction"]
     assert p and abs(sum(p["weights"].values()) - 1) < 0.01 and o["race_equivalents_s"] == p["race_equivalents_s"]
-    h = client.get("/api/home").json()
-    assert h["fitness"]["overall"]["race_equivalents_s"]["10k"] == p["race_equivalents_s"]["10k"]

@@ -1,11 +1,9 @@
 // "Am I getting better?": workout progression and personal records.
-// - ProgressCard (Home): recurring interval workouts (/api/progress: latest avg rep pace, best, trend) and the
-//   current personal records (/api/records) with recent PRs marked.
 // - WorkoutProgress (activity page): this workout's progression (/api/progress/{id}) + record / route-rank chips.
 // - RecordsSection (Fitness page): every distance's record, the top 3 and the PR history (/api/records).
 import { useEffect } from "preact/hooks";
 import { useApi } from "../lib/api";
-import { daysBetween, dur, shortDate, speedText, speedVal, speedUnit, sportColor } from "../lib/format";
+import { daysBetween, dur, shortDate, speedText, speedVal, sportColor } from "../lib/format";
 import { Table, type Col } from "./Table";
 import { navigate } from "../lib/router";
 import "./progress.css";
@@ -44,43 +42,7 @@ export function ProgSpark({ pts, sport, cur, w = 120, h = 26 }: { pts: ProgPoint
   );
 }
 
-// ------------------------------------------------------------------ Home card
-export function ProgressCard({ anchor }: { anchor: string }) {
-  const pr = useApi<{ n: number; workouts: ProgWorkout[] }>("/api/progress?limit=6&min_n=2&days=365").data;
-  const rec = useApi<Records>("/api/records").data;
-  if (!pr && !rec) return null;
-  if (!pr?.workouts.length && !rec?.records.length) return null;
-  const cols: Col<ProgWorkout>[] = [
-    { key: "signature", label: "Workout", sort: (w) => w.signature, render: (w) => <span><span class="dot" style={{ background: sportColor(w.sport) }} />{w.signature}</span> },
-    { key: "last", label: "Last", render: (w) => <a href={`/activities/${w.current.id}`} onClick={(e) => e.stopPropagation()}
-      title={`${shortDate(w.current.date, anchor)}${w.current.hr ? ` · rep HR ${w.current.hr}` : ""}`}>
-      <b>{speedVal(w.sport, w.current.speed)}</b> <span class="muted">{shortDate(w.current.date, anchor)}</span></a>, sort: (w) => w.last },
-    { key: "best", label: "Best", sort: (w) => -w.best.speed, render: (w) => w.is_best ? <b>this is your best</b> :
-      <a href={`/activities/${w.best.id}`} onClick={(e) => e.stopPropagation()}>{speedVal(w.sport, w.best.speed)} <span class="muted">{shortDate(w.best.date, anchor)}</span></a> },
-    { key: "trend", label: "Trend", num: true, sort: (w) => w.trend?.vs_median_pct ?? null, title: "last vs the median of the 4 before (↗ > 1 % faster, ↘ > 1 % slower)",
-      render: (w) => <span class={trendCls(w.trend)} title={trendTip(w.trend)}>{w.trend ? `${w.trend.arrow} ${w.trend.vs_median_pct > 0 ? "+" : ""}${w.trend.vs_median_pct.toFixed(1)} %` : "—"}</span> },
-    { key: "spark", label: "Every time", sort: () => null, render: (w) => <ProgSpark pts={w.points.slice(-16)} sport={w.sport} /> },
-    { key: "n", label: "n", num: true, title: "times done" },
-  ];
-  return (
-    <section class="home-progress">
-      <div class="home-two">
-        {pr && pr.workouts.length > 0 && <div>
-          <div class="head"><h2>Progress</h2><span class="sub">interval workouts done more than once in the last year · avg rep pace ({speedUnit("run")} on foot)</span></div>
-          <Table cols={cols} rows={pr.workouts} rowKey={(w) => w.key} onRow={(w) => navigate(`/activities/${w.current.id}`)} stickyCols={1} />
-          <p class="note">Same rep structure, any rest or place. Avg rep pace = total rep distance / total rep time of the main reps. Ring = best, dot = last.</p>
-        </div>}
-        {rec && rec.records.length > 0 && <div>
-          <div class="head"><h2>Personal records</h2><span class="sub">fastest split in any run (GPS only)</span>
-            <div class="tools"><a href="/fitness#records">All records →</a></div></div>
-          <RecordsTable rec={rec} anchor={anchor} compact />
-        </div>}
-      </div>
-    </section>
-  );
-}
-
-function RecordsTable({ rec, anchor, compact }: { rec: Records; anchor: string; compact?: boolean }) {
+function RecordsTable({ rec, anchor }: { rec: Records; anchor: string }) {
   const cols: Col<DistRecord>[] = [
     { key: "label", label: "Distance", sort: (r) => r.dist_m },
     { key: "best", label: "Record", num: true, sort: (r) => r.best.time_s, render: (r) => <b>{dur(r.best.time_s)}</b> },
@@ -90,7 +52,7 @@ function RecordsTable({ rec, anchor, compact }: { rec: Records; anchor: string; 
       return <a href={`/activities/${r.best.id}`} onClick={(e) => e.stopPropagation()} title={[r.best.workout_label, r.best.place_name, r.best.name].filter(Boolean).join(" · ")}>
         {shortDate(r.best.date, anchor)}{fresh && <span class="muted"> new</span>}</a>; } },
   ];
-  if (!compact) cols.push(
+  cols.push(
     { key: "second", label: "2nd", num: true, sort: () => null, render: (r) => r.top[1] ? <a href={`/activities/${r.top[1].id}`} onClick={(e) => e.stopPropagation()} title={r.top[1].date}>{dur(r.top[1].time_s)}</a> : "—" },
     { key: "third", label: "3rd", num: true, sort: () => null, render: (r) => r.top[2] ? <a href={`/activities/${r.top[2].id}`} onClick={(e) => e.stopPropagation()} title={r.top[2].date}>{dur(r.top[2].time_s)}</a> : "—" },
     { key: "vdot", label: "VDOT", num: true, sort: (r) => r.best.vdot, render: (r) => r.best.vdot?.toFixed(1) ?? "—", title: "Daniels VDOT of the record (the race-shape scale of the Fitness chart)" },
@@ -103,7 +65,7 @@ function RecordsTable({ rec, anchor, compact }: { rec: Records; anchor: string; 
 // ------------------------------------------------------------------ Fitness page section
 export function RecordsSection({ anchor }: { anchor: string }) {
   const { data: rec } = useApi<Records>("/api/records");
-  // /fitness#records (Home "All records →"): scroll there once the section exists
+  // /fitness#records: scroll there once the section exists
   useEffect(() => { if (rec && location.hash === "#records") document.getElementById("records")?.scrollIntoView(); }, [rec]);
   if (!rec || !rec.records.length) return null;
   const rejected = rec.records.reduce((s, r) => s + r.n_rejected, 0);

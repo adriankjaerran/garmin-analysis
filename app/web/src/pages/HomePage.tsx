@@ -5,20 +5,16 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi, type Activity, type Day } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
 import { SPORT_LABEL, addDays, daysBetween, dur, hm, km, num, secs, shortDate, sportColor } from "../lib/format";
-import { mmss, type SearchRow } from "../lib/search";
+import { type SearchRow } from "../lib/search";
 import { Table, type Col } from "../components/Table";
 import { PageHeader } from "../components/PageHeader";
 import { DistCell, distSort, distStr, kmTotal, speedText, trustedKm, workoutText, workoutTip } from "../components/ActivityBits";
-import { ProgressCard } from "../components/ProgressCard";
 import { personName } from "../lib/people";
-import "../fitness.css";   // --disc-* tokens
 import "./home.css";
 
-interface Agg { n: number; km: number; s: number; climb: number; n_untrusted?: number }
+interface Agg { n: number; km: number; s: number; n_untrusted?: number }
 interface VolRow { sport: string; week: Agg; prev4: Agg; month: Agg; year30: Agg }
-interface Shape { label: string; unit: string; mean: number | null; sd: number | null; confidence?: string | null; pct_of_best?: number | null;
-  trend_90d: number | null; race_equivalents_s?: Record<string, number> | null; last_evidence?: { date: string; id: number; kind: string } | null;
-  date: string; weekly: number[] }
+interface Shape { label: string; unit: string; mean: number | null; sd: number | null; date: string; last_evidence_date: string | null }
 type HomeRow = SearchRow & { dur_s: number | null; type_label?: string | null; fit: boolean; track: boolean; swim?: Activity["swim"] };
 
 /** "6×1200" -> "6×1.2k", "1×1300 + 2×3000" -> "1×1.3k + 2×3k" (the training log on a phone: never clip digits) */
@@ -29,21 +25,12 @@ function SigTokens({ s }: { s: string }) {
   return <>{parts.map((p, i) => <span key={i}>{i > 0 && <><wbr />+</>}{p.split("×").map((q, j) => <span key={j}>{j > 0 && <>×<wbr /></>}{q}</span>)}</span>)}</>;
 }
 interface Home {
-  anchor: string; latest: string | null; periods: { week: [string, string]; month: [string, string]; log: [string, string] };
+  anchor: string; latest: string | null; periods: { month: [string, string]; log: [string, string] };
   latest_day: (Omit<Day, "hr"> & { summary_date: string | null; sleep_date: string | null }) | null; volume: VolRow[]; days: Record<string, string[]>; recent: HomeRow[];
   fitness: Record<string, Shape> | null;
 }
 
 // ------------------------------------------------------------------ small inline charts
-/** a line of weekly values (shape) */
-function LineSpark({ values, color, w = 72, h = 16 }: { values: number[]; color: string; w?: number; h?: number }) {
-  const v = values.filter((x) => x !== null && isFinite(x));
-  if (v.length < 2) return null;
-  const lo = Math.min(...v), hi = Math.max(...v), r = hi - lo || 1;
-  const pts = v.map((x, i) => `${((i / (v.length - 1)) * w).toFixed(1)},${(h - 1 - ((x - lo) / r) * (h - 2)).toFixed(1)}`).join(" ");
-  return <svg class="spark" width={w} height={h}><polyline points={pts} fill="none" stroke={color} stroke-width={1.5} /></svg>;
-}
-
 /** value vs typical: bar = value, tick = typical, both on the same scale */
 function VsBar({ v, typ, color }: { v: number; typ: number; color: string }) {
   const W = 48, m = Math.max(v, typ, 1e-9) * 1.05;
@@ -64,53 +51,28 @@ function pctDelta(v: number, typ: number) {
 }
 
 // ------------------------------------------------------------------ shape line
-const DISC_SHORT: Record<string, string> = { interval: "Interval", long: "Long", ski: "Ski", overall: "Overall" };
-const DISC_COLOR: Record<string, string> = { interval: "var(--disc-interval)", long: "var(--disc-long)", ski: "var(--disc-ski)", overall: "var(--disc-overall)" };
+const DISC_SHORT: Record<string, string> = { interval: "Interval", long: "Long", ski: "Ski" };
 
-/** a shape without a race / hard session for more than this many days is stale: greyed, "last evidence 12 mo ago" */
+/** a shape without a race / hard session for more than this many days is stale: muted, "last evidence 12 mo ago" in the tooltip */
 const STALE_DAYS = 90;
 /** "12 d" / "5 mo" / "2.5 y" */
 export const agoShort = (d: number) => d < 60 ? `${d} d` : d < 730 ? `${Math.round(d / 30.4)} mo` : `${(d / 365).toFixed(1).replace(/\.0$/, "")} y`;
 
+/** plain text: "Shape · Interval 52.8 · Long 58.4 · Ski 55.3", each value links to Fitness */
 function ShapeLine({ fit }: { fit: Record<string, Shape> }) {
-  // one race prediction: the interval + long shapes blended by precision (fitness.json overall.race_prediction),
-  // so a stale long shape (its sd grows every day without evidence) doesn't give a second, minutes-apart answer
-  const pred = fit.overall?.race_equivalents_s;
+  const items = Object.entries(fit).filter(([, s]) => s.mean !== null);
+  if (!items.length) return null;
   return (
-    <div class="home-shape">
-      <a class="lbl" href="/fitness" title="Current shape per discipline (Daniels VDOT scale) — open Fitness">Shape</a>
-      {Object.entries(fit).map(([k, s]) => {
-        const ov = k === "overall";
-        const t = s.trend_90d;
-        const eq = s.race_equivalents_s;
-        const ago = !ov && s.last_evidence ? daysBetween(s.last_evidence.date, s.date) : null;
-        const stale = !ov && (ago === null || ago > STALE_DAYS);
-        const tip = [s.label, ov ? `${num(s.mean, 1)} % of personal best` : `${num(s.mean, 1)} ± ${num(s.sd, 1)} ${s.unit}`,
-          s.pct_of_best ? `${num(s.pct_of_best, 0)} % of best` : "", t !== null ? `${t >= 0 ? "+" : ""}${num(t, 1)} in 90 days` : "",
-          !ov && eq ? `≈ 5k ${mmss(eq["5k"])}, 10k ${dur(eq["10k"])}` : "",
-          ov && pred ? `today ≈ 5k ${mmss(pred["5k"])}, 10k ${dur(pred["10k"])}, half ${dur(pred.half)} (interval + long shape blended by how certain each is)` : "",
-          s.last_evidence ? `last hard evidence ${s.last_evidence.date}` : "",
-          stale ? `no race or hard session for ${ago === null ? "ever" : `${ago} days`}: the value is carried forward and its uncertainty grows` : "",
-          s.confidence ? `confidence ${s.confidence}` : ""].filter(Boolean).join(" · ");
-        return (
-          <a key={k} class={"disc" + (stale ? " stale" : "")} href={`/fitness?d=${k === "overall" ? "interval,long,ski" : k}`} title={tip}
-            style={stale ? { opacity: 0.55 } : undefined}>
-            <span class="dot" style={{ background: DISC_COLOR[k] }} />
-            <span class="nm">{DISC_SHORT[k] ?? k}</span>
-            <b>{ov ? `${num(s.mean, 0)} %` : num(s.mean, 1)}</b>
-            {!ov && s.sd !== null && <span class="muted">±{num(s.sd, 1)}</span>}
-            {!ov && !stale && s.pct_of_best && <span class="muted">{num(s.pct_of_best, 0)} %</span>}
-            {stale ? <span class="muted">last evidence {ago === null ? "none" : `${agoShort(ago)} ago`}</span>
-              : t !== null && <span class={Math.abs(t) < 0.2 ? "muted" : t > 0 ? "up" : "down"}>{t > 0 ? "↑" : t < 0 ? "↓" : "→"}{num(Math.abs(t), 1)}</span>}
-            {!stale && <LineSpark values={s.weekly} color={DISC_COLOR[k]} />}
-          </a>
-        );
+    <p class="home-shape">
+      <a href="/fitness" title="Current shape per discipline (Daniels VDOT scale) — open Fitness">Shape</a>
+      {items.map(([k, s]) => {
+        const ago = s.last_evidence_date ? daysBetween(s.last_evidence_date, s.date) : null;
+        const stale = ago === null || ago > STALE_DAYS;
+        const tip = [`${s.label}: ${num(s.mean, 1)}${s.sd !== null ? ` ± ${num(s.sd, 1)}` : ""} ${s.unit}`,
+          stale ? `no race or hard session for ${ago === null ? "ever" : agoShort(ago)}: the value is carried forward` : `last hard evidence ${s.last_evidence_date}`].join(" · ");
+        return <span key={k}>{" · "}<a href={`/fitness?d=${k}`} title={tip} class={stale ? "muted" : undefined}>{DISC_SHORT[k] ?? k} {num(s.mean, 1)}</a></span>;
       })}
-      {pred && <a class="disc" href="/fitness" title={`One race prediction for today: your interval and long-distance shapes blended by how certain each is (a stale shape counts less) · 5k ${mmss(pred["5k"])} · 10k ${dur(pred["10k"])} · half ${dur(pred.half)}`}>
-        <span class="nm">Today</span><b>10k ≈ {dur(pred["10k"])}</b>
-      </a>}
-      <a class="more" href="/fitness">Fitness →</a>
-    </div>
+    </p>
   );
 }
 
@@ -191,7 +153,6 @@ function TrainingLog({ h, hover, setHover }: { h: Home; hover: string | null; se
                       <a key={id} href={`/activities/${id}`} class={"tl-act" + (hover === id ? " hl" : "")} onClick={(e) => e.stopPropagation()}
                         onMouseEnter={() => setHover(id)} onMouseLeave={() => setHover(null)}
                         title={`${workoutText(r)} · ${distStr(r, " km")} · ${dur(r.moving_s)}${r.place_name ? " · " + r.place_name : ""}${r.together ? ` · with ${r.together.with.map(personName).join(", ")}` : ""}`}>
-                        <span class="dot" style={{ background: sportColor(r.sport) }} />
                         {short ? <>
                           <span class="t full"><SigTokens s={short} /></span>
                           <span class="t short"><SigTokens s={compactSig(short)} /></span>
@@ -321,8 +282,6 @@ export function HomePage() {
           </div>
         </div>
       </section>
-
-      <ProgressCard anchor={h.anchor} />
 
       <section>
         <div class="head"><h2>Recent workouts</h2>

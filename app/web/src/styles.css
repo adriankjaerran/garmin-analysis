@@ -275,6 +275,7 @@ button.toggle.on { background: var(--accent-surface); border-color: var(--accent
 button.link { border: 0; background: none; color: var(--accent); padding: 0 var(--space-1); }
 button.link:hover { background: none; text-decoration: underline; }
 .split > .right > .preview { flex: none; border-top: 1px solid var(--hairline); }
+.split > .left > .preview { flex: none; border-top: 1px solid var(--hairline); max-height: 45%; overflow: auto; }   /* map hidden: preview under the table */
 .preview button.x { height: 24px; width: 24px; padding: 0; justify-content: center; color: var(--text-muted); }
 h2.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 nav.side .step.home { margin-bottom: var(--space-2); }

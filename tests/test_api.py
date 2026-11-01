@@ -43,7 +43,7 @@ SIX_K = "6×1000 · rest ~2:30"     # the Bislett 6×1000 same-workout key
     ("/api/fitness", {"disciplines", "sessions"}),
     ("/api/fitness?discipline=interval&hr=1", {"disciplines", "sessions"}),
     ("/api/fitness/rebuild", {"running"}),
-    ("/api/home", {"anchor", "latest", "latest_day", "volume", "days", "recent", "tracks", "fitness", "periods"}),
+    ("/api/home", {"anchor", "latest", "latest_day", "volume", "days", "recent", "fitness", "periods"}),
     ("/api/home?date=2025-06-15", {"anchor", "latest", "volume"}),
     ("/api/openapi.json", {"paths"}),
 ])
@@ -420,7 +420,9 @@ def test_home(client, activities):
     h = client.get(f"/api/home?date={anchor}").json()
     assert h["anchor"] == anchor and h["latest"] == anchor
     day = h["latest_day"]
-    assert day["date"] == anchor and "hr" not in day
+    assert day["date"] == anchor and not {"hr", "tracks", "prev_active", "next_active"} & set(day)
+    # only what the page reads
+    assert "tracks" not in h and set(h["periods"]) == {"month", "log"}
     assert {a["id"] for a in day["activities"]} == {a["id"] for a in activities if a["date"] == anchor}
     # volume: the "all" row counts every activity of the last 7 / 30 days
     a0 = dt.date.fromisoformat(anchor)
@@ -428,7 +430,7 @@ def test_home(client, activities):
     tot = next(v for v in h["volume"] if v["sport"] == "all")
     assert tot["week"]["n"] == sum(1 for a in activities if 0 <= age(a) < 7)
     assert tot["month"]["n"] == sum(1 for a in activities if 0 <= age(a) < 30)
-    assert len(tot["weekly_km"]) == 52 and tot["weekly_s"][-1] == tot["week"]["s"]
+    assert set(tot) == {"sport", "week", "prev4", "month", "year30"}
     assert sum(v["week"]["n"] for v in h["volume"] if v["sport"] != "all") == tot["week"]["n"]
     # training log: Monday-aligned 5 weeks, days inside it, every id a known activity of that day
     lo, hi = h["periods"]["log"]
@@ -436,17 +438,16 @@ def test_home(client, activities):
     by_id = {a["id"]: a for a in activities}
     for d, ids in h["days"].items():
         assert lo <= d <= anchor and all(by_id[i]["date"] == d for i in ids)
-    # recent workouts: newest first, with workout fields; tracks = the last 30 days with GPS
+    # recent workouts: newest first, with workout fields
     rec = h["recent"]
     assert len(rec) >= 15 and rec[0]["date"] == anchor
     assert all(k in rec[0] for k in ("signature", "rep_count", "rep_speed_ms", "family_label", "dur_s", "track"))
-    m0 = h["periods"]["month"][0]
-    assert {t["id"] for t in h["tracks"]} == {a["id"] for a in activities if m0 <= a["date"] <= anchor and a["track"]}
     if h["fitness"]:
-        assert {"interval", "overall"} <= set(h["fitness"]) and h["fitness"]["interval"]["mean"]
+        assert "interval" in h["fitness"] and "overall" not in h["fitness"] and h["fitness"]["interval"]["mean"]
+        assert set(h["fitness"]["interval"]) == {"label", "unit", "mean", "sd", "date", "last_evidence_date"}
     # an anchor before the data: nothing active, no latest day
     e = client.get("/api/home?date=2000-01-01").json()
-    assert e["latest"] is None and e["latest_day"] is None and e["recent"] == [] and e["tracks"] == []
+    assert e["latest"] is None and e["latest_day"] is None and e["recent"] == []
     assert client.get("/api/home?date=bad").status_code == 400
 
 
@@ -507,8 +508,7 @@ def test_home_volume_excludes_untrusted_km(client):
     h = client.get("/api/home").json()
     for r in h["volume"]:
         assert "n_untrusted" in r["week"] and "n_untrusted" in r["year30"]
-    run = next(r for r in h["volume"] if r["sport"] == "run")
-    assert len(run["weekly_km"]) == 52
+    assert any(r["sport"] == "run" for r in h["volume"])
 
 
 def test_records(client, activities):

@@ -84,14 +84,13 @@ function Landing() {
   return (
     <section>
       <div class="head"><h2 title="Click a row to compare it with its suggested set (same workout, same route, most similar), or paste ids above. Also: the Compare button on any activity page.">Pick a session</h2>
-        <input type="search" placeholder="Filter: 6×1000, Bislett, R3, 2025…" value={q} style={{ width: "260px" }}
+        <input type="search" placeholder="Filter: 6×1000, Bislett, Holmenkollen, 2025…" value={q} style={{ width: "260px" }}
           onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
         <span class="count" title={q ? undefined : "the 40 most recent runs and ski sessions"}>{rows.length}</span></div>
       <Table rows={rows} rowKey={(a) => a.id} onRow={(a) => navigate(`/compare?suggest=${a.id}`)} empty={acts ? "No activity matches." : "Loading…"} cols={[
         { key: "start", label: "Date", render: (a) => a.date },
         { key: "type", label: "Workout", render: (a) => shortWhat(a) },
         { key: "place", label: "Place", render: (a) => a.place_name ?? a.place ?? a.location ?? "—" },
-        { key: "route", label: "Route", render: (a) => <span title={a.route_name ?? ""}>{a.route ?? "—"}</span> },
         { key: "dist_km", label: "km", num: true, render: (a) => <DistCell a={a} />, sort: distSort },
         { key: "moving_s", label: "Moving", num: true, render: (a) => dur(a.moving_s) },
         { key: "hr", label: "HR", num: true, render: (a) => num(a.hr) },
