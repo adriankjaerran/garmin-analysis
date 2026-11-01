@@ -58,7 +58,7 @@ def list_sessions(request: Request,
                   place: str | None = None,
                   hidden: bool = Query(False, description="also the sessions hidden by the user")):
     """Together's list rows (newest first) + community fields (category, title, n_timed, guests, photo, kudos,
-    collective numbers, form deltas, records)."""
+    collective numbers, form deltas)."""
     return _run("list_sessions", category=category, person=person, date_from=date_from, date_to=date_to, q=q, near=near,
                             sport=sport, kind=kind, label=label, place=place, hidden=hidden,
                             viewer=request.scope.get("person"))
@@ -67,7 +67,7 @@ def list_sessions(request: Request,
 @router.get("/community/sessions/{gid}")
 def get_session(gid: str, request: Request):
     """Community layer of one session: meta (title, category, note, guests, photos, kudos), collective numbers, form
-    per participant, records set, members strip, neighbours. Standings / splits / replay: /api/together/{gid}."""
+    per participant, members strip, neighbours. Standings / splits / replay: /api/together/{gid}."""
     g = _gid(gid)
     r = _run("get_session", g, viewer=request.scope.get("person"))
     return {**r, "requested_gid": gid}
@@ -143,7 +143,7 @@ def photo(gid: str, file: str):
 
 @router.get("/community/club")
 def club(request: Request, date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to")):
-    """Club dashboard: totals, months, attendance (streaks, last seen), pairs, categories, records, highlights,
+    """Club dashboard: totals, months, attendance (streaks, last seen), pairs, categories, highlights,
     weekday × hour heatmap, places, guests, recent."""
     return _run("club", date_from=date_from, date_to=date_to, viewer=request.scope.get("person"))
 
@@ -166,7 +166,7 @@ def member(person: str, request: Request):
 @router.get("/community/wrapped/{year}")
 def wrapped(year: str, request: Request):
     """the yearly recap (Wrapped): totals vs the year before, top place, favourite category, biggest day, best form
-    jump, most loyal, closest finish, records, badges earned, a slide per member. `latest` = the newest year
+    jump, most loyal, closest finish, badges earned, a slide per member. `latest` = the newest year
     with a club session"""
     if year == "latest":
         r = _run("wrapped", "latest", viewer=request.scope.get("person"))

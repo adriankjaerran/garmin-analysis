@@ -21,15 +21,10 @@ export interface CsForm {
   text: string; flags?: string[]; z?: N; ref_sd?: N;
 }
 export interface CsNumbers { km: N; moving_s: N; dur_s: N; climb_m: N; kcal: N; reps: N; avg_hr: N }
-export interface CsRecord {
-  kind: "club_best" | "pb"; measure: "rep" | "avg" | "race"; dist_m: number; label: string; person: string; key?: string;
-  value_s: number; n?: number; prev_s: N; prev_person?: string | null; prev_gid?: string | null; prev_date?: string | null;
-  improvement_s: N; text: string;
-}
 export interface CsMember {
   key: string; person: string; display: PersonInfo; role: "full" | "partial" | "other"; activity_id: string; workout: string | null;
   type: string | null; has_fit: boolean; timed: boolean; form: CsForm | null; numbers: CsNumbers | null;
-  rank: N; reps_done: N; n_counted: N; of: N; avg_s: N; pace_s_km: N; records: CsRecord[];
+  rank: N; reps_done: N; n_counted: N; of: N; avg_s: N; pace_s_km: N;
   by_target: TargetAvg[] | null; best: { slot: number; label: string; result_s: number } | null;
 }
 export interface CsCollective {
@@ -40,7 +35,7 @@ export interface CsSession {
   workout: string; kind: string; label: string; label_text: string; people: Record<string, PersonInfo>;
   display_title: string; category_info: CsCategory; categories: CsCategory[]; meta: CsMeta;
   n_timed: number; n_guests: number; kudoed: boolean | null; collective: CsCollective;
-  form: Record<string, CsForm | null>; form_available: boolean; members: CsMember[]; records: CsRecord[];
+  form: Record<string, CsForm | null>; form_available: boolean; members: CsMember[];
   nav: { newer: string | null; older: string | null };
   same_place: { gid: string; date: string; workout: string; category: string; people: string[] }[];
   store_error: string | null;
@@ -306,8 +301,6 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
     else if (up.length) story.push(`${andList(up.map((f) => `${name(f.k)} (${signed(f.d)})`))} ran above current form.`);
     const jump = [...fs].sort((a, b) => b.d - a.d)[0];
     if (jump && jump.d >= 1 && fs.length > 1) hl.push({ id: "form", emoji: "🚀", title: "Biggest form jump", person: jump.k, value: `${name(jump.k)} · ${signed(jump.d)}`, sub: "vs their shape the day before" });
-    const rec = c.records.find((r) => r.kind === "club_best") ?? c.records[0];
-    if (rec) story.push(`${name(rec.key ?? rec.person)} set a ${rec.kind === "club_best" ? "club record" : "club PB"} (${rec.label}, ${rec.measure === "race" ? hms(rec.value_s) : t1(rec.value_s)}).`);
   }
   return { story, highlights: hl, people, sameTarget };
 }

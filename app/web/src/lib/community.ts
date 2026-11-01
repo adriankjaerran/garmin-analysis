@@ -19,7 +19,6 @@ export interface CGroup extends TGroup {
   n_timed: number; timed: string[]; n_members: number; guests: string[]; n_guests: number;
   photo: Photo | null; n_photos: number; kudos: string[]; n_kudos: number; kudoed: boolean | null; mine: boolean | null; user_hidden: boolean;
   collective: Collective; form: Record<string, N>; form_info?: Record<string, FormInfo | null>;
-  n_records: number; records_short: string[];
 }
 export interface CTotals { sessions: number; km: number; hours: number; reps: number; photos: number; guests: number }
 export interface CList {
@@ -35,8 +34,6 @@ export interface Attendance {
 }
 export interface ClubMonth { month: string; sessions: number; km: number; hours: number; reps: number; climb_m: number;
   members: string[]; n_members: number; by_category: Partial<Record<CatId, number>>; gids: string[] }
-export interface ClubRecord { measure: "race" | "avg" | "rep"; dist_m: number; label: string; value_s: number; text: string; person: string; gid: string; date: string;
-  n_efforts: number; by_person: Record<string, { value_s: number; gid: string; date: string }> }
 export interface Highlight { kind: string; gid: string; date: string; person: string | null; other?: string | null; value: number; unit: string; text: string }
 export interface Club {
   from: string | null; to: string | null; today: string; viewer: string | null; people: Record<string, PersonInfo>; form_available: boolean;
@@ -46,30 +43,29 @@ export interface Club {
   months: ClubMonth[]; attendance: Attendance[]; most_loyal: { person: string; sessions: number } | null;
   pairs: { a: string; b: string; sessions: number; last: string }[];
   pair_matrix: { people: string[]; n: number[][] };
-  categories: Category[]; records: ClubRecord[]; highlights: Highlight[];
+  categories: Category[]; highlights: Highlight[];
   heatmap: { weekdays: string[]; hours: number[]; n: number[][] };
   places: { id: string; name: string; sessions: number; last: string }[]; guests: { name: string; visits: number }[];
   company: Record<string, CompanyShort>; latest_badges: Badge[]; goal: Goal; goals: Goal[];
   goal_metrics: Goals["metrics"];
-  recent: { gid: string; date: string; title: string; category: CatId; people: string[]; km: number; records: number }[];
+  recent: { gid: string; date: string; title: string; category: CatId; people: string[]; km: number }[];
 }
 export interface MemberSession {
   gid: string; date: string; start_local: string; place: string | null; workout: string; group_workout: string; title: string | null; category: CatId;
   with: string[]; role: string; form: (FormInfo & { score: number; shape: number; delta: number; date?: string }) | null;
   numbers: { km: N; moving_s: N; dur_s: N; climb_m: N; kcal: N; reps: N; avg_hr: N } | null;
-  rank: N; of_people: N; reps_done: N; avg_s: N; pace_s_km: N; records: { text?: string; kind?: string }[]; n_photos: number; kudos: number;
+  rank: N; of_people: N; reps_done: N; avg_s: N; pace_s_km: N; n_photos: number; kudos: number;
 }
-export interface Effort { gid: string; date: string; measure: "race" | "avg" | "rep"; dist_m: number; label: string; value_s: number; n: number; rep?: string; dist_km?: number }
 export interface ShapeDisc { label: string; unit: string; personal_best: N; current: { date: string; mean: number; sd: number; confidence?: string; pct_of_best?: number } | null;
   weekly: { date: string; mean: number; sd: number }[] }
 export interface Member {
   person: string; display: PersonInfo; viewer: string | null; form_available: boolean;
-  totals: { sessions: number; km: number; hours: number; reps: number; climb_m: number; records: number; club_records_held: number;
+  totals: { sessions: number; km: number; hours: number; reps: number; climb_m: number;
     first: string | null; last: string | null; streak_weeks: number; best_streak_weeks: number; weeks_active: number; avg_form_delta: N };
   by_category: Partial<Record<CatId, number>>; sessions: MemberSession[];
   form_series: { date: string; gid: string; score: number; shape: number; delta: number; discipline: string; confidence?: string; text?: string; kind?: string }[];
   partners: { person: string; display: PersonInfo; sessions: number; last: string; gids: string[] }[];
-  best_sessions: MemberSession[]; personal_bests: Effort[];
+  best_sessions: MemberSession[];
   shape: { built: string; disciplines: Record<string, ShapeDisc> } | null;
   badges: Badges; company: Company;
 }
@@ -140,7 +136,6 @@ export function periods(years: string[]) {
     ...years.map((y) => ({ id: y, label: y, from: `${y}-01-01`, to: `${y}-12-31` })),
   ];
 }
-export const MEASURE_LABEL: Record<string, string> = { race: "Race", avg: "Avg rep", rep: "Best rep" };
 export const HIGHLIGHT: Record<string, { emoji: string; label: string }> = {
   closest_finish: { emoji: "🤏", label: "Closest finish" },
   form_jump: { emoji: "🚀", label: "Biggest form jump" },
@@ -149,7 +144,6 @@ export const HIGHLIGHT: Record<string, { emoji: string; label: string }> = {
   most_reps: { emoji: "🔁", label: "Most reps" },
   most_climb: { emoji: "⛰️", label: "Most climbing" },
   biggest_turnout: { emoji: "👥", label: "Biggest turnout" },
-  latest_club_record: { emoji: "🏆", label: "Latest club record" },
 };
 /** a period id -> {from, to, label}: "90d", "12m", "2025", or a month "2026-10" (the club chart links there) */
 export function resolvePeriod(id: string): { from: string; to: string; label: string } | null {
@@ -190,7 +184,7 @@ export interface WrappedSession { gid: string; date: string; title: string; plac
 export interface WrappedMember {
   person: string; display: PersonInfo; sessions: number; share: number; km: number; hours: number; reps: number; climb_m: number; top_place: string | null;
   favourite_category: CatId | null; partner: { person: string; sessions: number } | null; best_session: { gid: string; date: string; title: string; delta: number } | null;
-  avg_form_delta: N; records: number; badges: Badge[]; streak_weeks: number; company: CompanyShort;
+  avg_form_delta: N; badges: Badge[]; streak_weeks: number; company: CompanyShort;
 }
 export interface WrappedTotals { sessions: number; km: number; hours: number; reps: number; climb_m: number; kcal: number; members: number; places: number }
 export interface Wrapped {
@@ -202,7 +196,6 @@ export interface Wrapped {
   biggest_day: WrappedSession | null; longest: (WrappedSession & { minutes: number }) | null;
   form_jump: (WrappedSession & { person: string; delta: number; text: string }) | null;
   closest_finish: Highlight | null; most_loyal: { person: string; sessions: number; of: number; tied_with?: string[] } | null; top_pair: { a: string; b: string; sessions: number } | null;
-  records_set: { kind: string; text: string; person: string; gid: string; date: string }[]; records_standing: ClubRecord[];
   badges: Badge[];
   members: WrappedMember[];
 }

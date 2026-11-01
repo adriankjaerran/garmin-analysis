@@ -1,15 +1,14 @@
 // Community · Members: a card per member (/api/community/members) and a member's profile
 // (/api/community/members/<person>): totals, categories, form delta per session, shape trend, training partners
-// (sessions together), best sessions, club PBs and every session.
+// (sessions together), best sessions and every session.
 //   /community/members · /community/members/<person>
-import { useEffect, useMemo } from "preact/hooks";
+import { useEffect } from "preact/hooks";
 import { useApi } from "../lib/api";
 import { dur, isoLocal, shortDate } from "../lib/format";
 import { personColour, personName, setPeopleInfo, type PersonInfo } from "../lib/people";
 import { useTheme } from "../lib/theme";
-import { repTime } from "../lib/together";
 import { DISC_LABEL } from "../lib/fitness";
-import { ago, catVar, CATS, delta, hrs, kms, MEASURE_LABEL, plural, type Attendance, type Member, type MemberSession } from "../lib/community";
+import { ago, catVar, CATS, delta, hrs, kms, plural, type Attendance, type Member, type MemberSession } from "../lib/community";
 import { PageHeader } from "../components/PageHeader";
 import { Av, CatChip, FormChip, PersonLink, Stat } from "../components/CommunityBits";
 import { ClubFormChart, ClubShapeChart } from "../components/ClubCharts";
@@ -120,7 +119,7 @@ function SessionRow({ s }: { s: MemberSession }) {
       <span class="num">{n?.km ? `${n.km.toFixed(1)} km` : "—"}</span>
       <span class="num muted">{dur(n?.moving_s)}</span>
       <span class="num muted">{n?.avg_hr ? `${Math.round(n.avg_hr)} bpm` : ""}</span>
-      <span class="ex">{s.records.length > 0 && <span title={s.records.map((r) => r.text).join("\n")}>🏆</span>}{s.n_photos > 0 && <span>📷</span>}{s.kudos > 0 && <span class="kudos">♥{s.kudos}</span>}</span>
+      <span class="ex">{s.n_photos > 0 && <span>📷</span>}{s.kudos > 0 && <span class="kudos">♥{s.kudos}</span>}</span>
       <span class="go" aria-hidden="true">›</span>
     </a>
   );
@@ -133,12 +132,6 @@ export function MemberPage({ person }: { person: string }) {
   if (m) setPeopleInfo({ [m.person]: m.display });
   useEffect(() => { document.title = `Community · ${personName(person)}`; }, [person]);
   useTheme();
-  const pbs = useMemo(() => {
-    const out = new Map<string, Member["personal_bests"]>();
-    for (const e of m?.personal_bests ?? []) { const k = e.measure; out.set(k, [...(out.get(k) ?? []), e]); }
-    for (const v of out.values()) v.sort((a, b) => a.dist_m - b.dist_m);
-    return out;
-  }, [m]);
   if (error) return <main class="cm"><a class="cm-back" href="/community/members">‹ Members</a><h1>Member not found</h1><p class="note">{/^(404|no member)/.test(error) ? <>There is no club member “{person}”. <a href="/community/members">See all members →</a></> : error}</p></main>;
   if (!m) return <main class="cm"><a class="cm-back" href="/community/members">‹ Members</a><p class="muted">{loading ? "Loading…" : ""}</p></main>;
   const t = m.totals;
@@ -156,7 +149,6 @@ export function MemberPage({ person }: { person: string }) {
           <span class="muted">{t.first ? `Member since ${shortDate(t.first, "x")}` : ""}{t.last ? ` · last session ${shortDate(t.last, isoLocal())}` : ""}</span>
         </div>
         {t.streak_weeks > 0 && <span class="streak big" title="consecutive weeks with a club session">🔥 {t.streak_weeks}-week streak</span>}
-        {t.club_records_held > 0 && <span class="cm-badge rec big" title="club records held">🏆 {t.club_records_held} club records</span>}
       </div>
       <div class="cm-stats wide">
         <Stat v={t.sessions} label="sessions" />
@@ -215,26 +207,6 @@ export function MemberPage({ person }: { person: string }) {
                   <span class="muted small">{shortDate(s.date, isoLocal())} · {s.place}</span>
                   <span class="muted small">score {s.form!.score.toFixed(1)} vs {s.form!.shape.toFixed(1)}{s.with.length ? <> · with {s.with.map((p) => <Av p={p} size="xs" />)}</> : null}</span>
                 </a>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {m.personal_bests.length > 0 && (
-          <section class="cm-panel span2">
-            <div class="head"><h2>Club PBs</h2><span class="sub">fastest in community sessions</span></div>
-            <div class="cm-pbs">
-              {["race", "avg", "rep"].filter((k) => pbs.has(k)).map((k) => (
-                <div class="grp">
-                  <span class="lbl">{MEASURE_LABEL[k]}</span>
-                  <div class="list">
-                    {pbs.get(k)!.map((e) => (
-                      <a class="pb" href={`/community/${e.gid}`} title={`${shortDate(e.date, isoLocal())}${e.n > 1 ? ` · ${e.n} reps` : ""}`}>
-                        <span class="d">{e.label}</span><b>{k === "race" ? dur(e.value_s) : repTime(e.value_s)}</b><span class="muted small">{e.date.slice(0, 7)}</span>
-                      </a>
-                    ))}
-                  </div>
-                </div>
               ))}
             </div>
           </section>

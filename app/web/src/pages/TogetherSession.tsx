@@ -1,6 +1,6 @@
 // One club session (/community/<gid>; /api/together/<gid> + the club layer /api/community/sessions/<gid>). Top to
 // bottom: hero (photo / title / category / kudos / share), the story in words, who was there (member cards with
-// form), collective + records + last time here, then "How it went" (headline, tools, highlights); for intervals the
+// form), collective + last time here, then "How it went" (headline, tools, highlights); for intervals the
 // per-rep board (a row per rep, everyone who ran it fastest first; the wide table behind a toggle), the leaderboard
 // (average rep pace over each person's own reps), each person's rep times across the session and a rep close-up
 // (metres behind the rep's leader + the track with a dot per person), for continuous runs / races / hikes the gap over distance, distance apart, who led

@@ -66,9 +66,6 @@ main.wr { scroll-snap-type: y proximity; scroll-padding-top: var(--space-4); bac
 .wr-sess:hover { text-decoration: none; border-color: var(--t); }
 .wr-also { font-size: var(--fs-15); color: var(--text-muted); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .wr-also a b { color: var(--text); }
-.wr-recs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.wr-recs a { display: flex; align-items: center; gap: 8px; font-size: var(--fs-15); color: var(--text); padding: 6px 12px; border-radius: 12px; background: color-mix(in srgb, var(--t) 8%, var(--surface)); }
-.wr-recs a:hover { text-decoration: none; background: color-mix(in srgb, var(--t) 16%, var(--surface)); }
 .wr-badges { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
 .wr-badges a { display: grid; grid-template-columns: 44px 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 8px; border-radius: 14px; color: var(--text);
   background: var(--surface); border: 1px solid color-mix(in srgb, var(--t) 25%, var(--hairline)); }

@@ -2,7 +2,7 @@
 // Season totals on top, filters in the URL (category, people, period, words, near-misses, view).
 //   /community?cat=intervals,race&people=adrian&period=2026|12m|90d|2026-10&q=bislett&near=1&view=list
 // A card: cover photo (or a sketch of the members' tracks on the category colour), category, title, place / date,
-// members (+ guests), headline, collective km / hours / reps, form delta per member, kudos / photos / records.
+// members (+ guests), headline, collective km / hours / reps, form delta per member, kudos / photos.
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { qs, useApi } from "../lib/api";
 import { people as allPeople, currentPerson, setQuery, useLocation } from "../lib/router";
@@ -54,7 +54,6 @@ function Cover({ g, tracks }: { g: CGroup; tracks: Map<string, string> }) {
       </>}
       <span class="tl"><CatChip id={g.category} solid /></span>
       <span class="tr">
-        {g.n_records > 0 && <span class="cm-badge rec" title={g.records_short.join("\n")}>🏆 {g.n_records}</span>}
         {g.n_photos > 0 && <span class="cm-badge" title={`${g.n_photos} photo${g.n_photos === 1 ? "" : "s"}`}>📷 {g.n_photos}</span>}
       </span>
     </div>
@@ -140,7 +139,7 @@ function Row({ g, order }: { g: CGroup; order: string[] }) {
       <span class="forms">{forms.map((k) => <FormChip key={k} p={k} v={g.form[k]} info={g.form_info?.[k]} />)}</span>
       <span class="num">{kms(g.collective.km)}</span>
       <span class="num muted">{dur(g.collective.moving_s)}</span>
-      <span class="ex">{g.n_records > 0 && <span title={g.records_short.join("\n")}>🏆</span>}{g.n_photos > 0 && <span>📷</span>}<KudosButton g={g} compact /></span>
+      <span class="ex">{g.n_photos > 0 && <span>📷</span>}<KudosButton g={g} compact /></span>
       <span class="go" aria-hidden="true">›</span>
     </a>
   );
@@ -192,7 +191,7 @@ export function CommunityPage() {
           "Members = people with a watch file in the session; guests are added by hand on the session page",
           "+2.4 / −1.6 = the session's fitness score (VDOT scale) minus the member's shape the day before; grey = low confidence",
           "Categories are automatic (intervals, tempo, long, easy, race, other); change one on the session page",
-          "Cards show the cover photo, else a sketch of everyone's tracks; 🏆 = a club record or PB was set",
+          "Cards show the cover photo, else a sketch of everyone's tracks",
           "Click a month on the Club page's chart to see its sessions here",
         ]}>
         {goal && <GoalLink g={goal} />}

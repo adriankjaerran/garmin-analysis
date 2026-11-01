@@ -84,7 +84,8 @@ def test_session_patch_kudos_guests(client, cm, gid):
     r = client.get(f"/api/community/sessions/{gid}")
     assert r.status_code == 200, r.text[:300]
     s = r.json()
-    assert {"meta", "collective", "form", "records", "members", "nav"} <= set(s)
+    assert {"meta", "collective", "form", "members", "nav"} <= set(s)
+    assert "records" not in s and all("records" not in m for m in s["members"])   # no community records (2026-11-01)
     assert s["meta"]["category"] == s["meta"]["category_auto"] == "intervals"
     m = client.patch(f"/api/community/sessions/{gid}",
                      json={"title": "  Track night ", "category": "tempo", "note": "windy", "guests": ["Kari", "kari", "Ola"]}).json()
@@ -158,12 +159,12 @@ def test_club(client, cm):
     r = client.get("/api/community/club")
     assert r.status_code == 200, r.text[:300]
     c = r.json()
-    assert {"totals", "months", "attendance", "pairs", "pair_matrix", "categories", "records", "highlights",
+    assert {"totals", "months", "attendance", "pairs", "pair_matrix", "categories", "highlights",
             "heatmap", "places", "recent"} <= set(c)
     assert c["totals"]["sessions"] == sum(m["sessions"] for m in c["months"]) == sum(x["n"] for x in c["categories"])
     assert sum(map(sum, c["heatmap"]["n"])) == c["totals"]["sessions"]
     assert all(x["streak_weeks"] <= x["best_streak_weeks"] for x in c["attendance"])
-    assert c["records"] and all(r["value_s"] > 0 for r in c["records"])
+    assert "records" not in c and all(h["kind"] != "latest_club_record" for h in c["highlights"])
     n = c["pair_matrix"]["n"]
     assert all(n[i][j] == n[j][i] for i in range(len(n)) for j in range(len(n)))
     assert client.get("/api/community/club?from=2026-01-01").json()["totals"]["sessions"] <= c["totals"]["sessions"]
@@ -175,28 +176,16 @@ def test_members(client, cm):
     r = client.get(f"/api/community/members/{ms[0]['person']}")
     assert r.status_code == 200, r.text[:300]
     m = r.json()
-    assert {"totals", "sessions", "form_series", "partners", "best_sessions", "personal_bests", "shape"} <= set(m)
+    assert {"totals", "sessions", "form_series", "partners", "best_sessions", "shape"} <= set(m)
+    assert "personal_bests" not in m and "records" not in m["totals"] and "club_records_held" not in m["totals"]
     assert m["totals"]["sessions"] == ms[0]["sessions"] == len(m["sessions"])
     assert client.get("/api/community/members/nobody-here").status_code == 404
 
 
-def test_records_are_improvements(cm):
-    B = cm.base()
-    for gid, rs in B["records"].items():
-        for r in rs:
-            assert r["value_s"] < r["prev_s"] and r["kind"] in ("club_best", "pb")
-
-
-def test_session_records_synthetic(cm):
-    """club best / pb / first-effort logic on hand-made efforts"""
-    e = lambda gid, p, v: {"gid": gid, "date": gid, "person": p, "key": p, "measure": "rep", "dist_m": 400,  # noqa: E731
-                           "label": "400 m", "value_s": v, "n": 1}
-    B = {"order": ["g1", "g2", "g3", "g4"], "people": {},
-         "efforts": [e("g1", "a", 80), e("g1", "b", 85), e("g2", "b", 82), e("g3", "a", 79), e("g4", "b", 90)]}
-    r = cm.session_records(B)
-    assert "g1" not in r and "g4" not in r
-    assert [(x["kind"], x["person"], x["prev_s"]) for x in r["g2"]] == [("pb", "b", 85)]
-    assert [(x["kind"], x["person"], x["improvement_s"]) for x in r["g3"]] == [("club_best", "a", 1.0)]
+def test_no_record_badges(client):
+    ms = client.get("/api/community/members").json()["members"]
+    ids = {b["id"] for b in client.get(f"/api/community/members/{ms[0]['person']}").json()["badges"]["badges"]}
+    assert not ids & {"record_breaker", "club_record"} and "iron_lungs" in ids
 
 
 # ------------------------------------------------------------------ motivation: company, badges, wrapped, goals

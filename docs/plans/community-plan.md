@@ -114,9 +114,13 @@ one) next to each person. Also play the whole session. Speed control, scrub, key
    wins. Payload: `shared_slots`, `slots[].shared`, `rep_wins`, `rep_ties`, `gap_s`, `all_*` and the cumulative
    `gap_s` are gone; new `n_counted`, `n_partial`, `gap_s_km`, `by_target`, cumulative `{total_s, n}`.
 6. **"Last time here"** hides scores with confidence "none" ("score then unreliable"), as elsewhere.
+7. **No records** (removed 2026-11-01): club records / club PBs, the "Record breaker" / "Club record holder" badges
+   (26 badges), the latest-club-record highlight, Wrapped's records slide, the member page's club PBs / records held,
+   🏆 badges on sessions, the "Records set" panel and the story's record sentence. The records mentioned above are
+   history. Personal records (`/api/records`) stay.
 
 Judgment calls in that pass: suspect reps (e.g. adrian's 64.5 s 15th 400 m) count as reps done but stay out of the
 averages / best / fade (as the splits did); fade uses the main set (anchor slots) so a jog-in "rep" someone ran alone
 before the set (patrik's 250 m / 600 m at Frogner) doesn't read as "finished stronger" — those extra reps do count in
 his average. Records also count every rep (as decided), so detector "reps" like a 250 m stride / patrik's 600 m
-jog-in now hold club records at odd distances — open question: a way to mark such reps as warm-up? Screenshots `data/adrian/screenshots/2026-11-01/dec-*.png`.
+jog-in now hold club records at odd distances — open question: a way to mark such reps as warm-up? (Resolved: records removed 2026-11-01; warm-up / cool-down reps are marked `cell.warmup` and never count.) Screenshots `data/adrian/screenshots/2026-11-01/dec-*.png`.

@@ -1,5 +1,5 @@
 /* Community parts of the session page (components/CommunitySession*.tsx, TogetherSession.tsx): hero, note, story,
-   members, collective, records, last time here, "How it went" bar + highlights, replay invitation, splits, photos,
+   members, collective, last time here, "How it went" bar + highlights, replay invitation, splits, photos,
    share dialog. Person colours come inline as --pc. */
 
 /* ------------------------------------------------------------------ hero */
@@ -128,7 +128,7 @@
 .cs-guest-add { display: inline-flex; gap: var(--space-1); align-items: center; flex-wrap: wrap; }
 .cs-guest-add input { width: 220px; max-width: 60vw; }
 
-/* ------------------------------------------------------------------ collective + records + same place */
+/* ------------------------------------------------------------------ collective + same place */
 .cs-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--space-4); margin-top: var(--space-4); align-items: start; }
 .cs-grid:not(:has(.cs-side)) { grid-template-columns: minmax(0, 1fr); }
 .cs-side { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
@@ -140,12 +140,9 @@
 .cs-tiles b { font-size: 22px; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cs-tiles span { color: var(--text); font-size: var(--fs-12); }
 .cs-tiles small { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
-.cs-recs ul, .cs-same ul { list-style: none; margin: 0; padding: 0; }
-.cs-recs li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-2); padding: 6px 0; border-top: 1px solid var(--hairline); }
-.cs-recs li:first-child { border-top: 0; }
 .cs-rec-badge { display: inline-block; font-size: 11px; line-height: 18px; padding: 0 7px; border-radius: 9px; font-weight: var(--fw-semibold); white-space: nowrap;
   color: var(--state-version); background: color-mix(in srgb, var(--state-version) 15%, transparent); }
-.cs-rec-badge.pb { color: var(--accent); background: var(--accent-surface); }
+.cs-same ul { list-style: none; margin: 0; padding: 0; }
 .cs-same li a { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; padding: 5px 6px; margin: 0 -6px; border-radius: var(--radius-control); color: var(--text); }
 .cs-same li a:hover { background: var(--surface-hover); text-decoration: none; }
 .cs-sp-date { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }

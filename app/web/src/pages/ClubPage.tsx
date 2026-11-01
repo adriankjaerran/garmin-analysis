@@ -1,6 +1,6 @@
 // Community · Club: the club dashboard (/api/community/club?from=&to=). Totals (period + this year), the month chart,
 // highlights, the attendance leaderboard (sessions, share, streaks, last seen, avg form delta), pairs, category mix,
-// club records, a weekday × hour heatmap, places and the newest sessions.
+// a weekday × hour heatmap, places and the newest sessions.
 //   /community/club?period=2026|12m|90d
 import { useEffect, useMemo } from "preact/hooks";
 import { qs, useApi } from "../lib/api";
@@ -8,8 +8,7 @@ import { setQuery, useLocation } from "../lib/router";
 import { isoLocal, shortDate } from "../lib/format";
 import { personColour, personName, setPeopleInfo } from "../lib/people";
 import { useTheme } from "../lib/theme";
-import { repTime } from "../lib/together";
-import { ago, catVar, CATS, delta, HIGHLIGHT, hrs, kms, MEASURE_LABEL, periods, plural, resolvePeriod, type Club } from "../lib/community";
+import { ago, catVar, CATS, delta, HIGHLIGHT, hrs, kms, periods, plural, resolvePeriod, type Club } from "../lib/community";
 import { PageHeader } from "../components/PageHeader";
 import { Av, AvStack, CatChip, FormChip, PairCard, PersonLink, Stat } from "../components/CommunityBits";
 import { ClubMonthChart } from "../components/ClubCharts";
@@ -17,7 +16,6 @@ import { CompanyCard, GoalCard, LatestBadges } from "../components/ClubMotivatio
 import "./community.css";
 
 const MEDAL = ["🥇", "🥈", "🥉"];
-const recTime = (r: { measure: string; value_s: number }) => (r.measure === "race" ? repTime(r.value_s).replace(/\.\d$/, "") : repTime(r.value_s));
 
 function PeriodSelect({ period, years }: { period: string; years: string[] }) {
   const per = resolvePeriod(period);
@@ -85,12 +83,11 @@ export function ClubPage() {
   return (
     <main class="cm">
       <PageHeader title="Club" sub={t ? `${plural(t.sessions, "session")} · ${plural(t.members, "member")}${per ? ` · ${per.label}` : ""}` : loading ? "Loading…" : ""}
-        about="The running club at a glance: how much you run together, who turns up, the club records and the best moments."
+        about="The running club at a glance: how much you run together, who turns up and the best moments."
         tips={[
           "Streak = consecutive weeks with a club session; it stays alive while the last one is this or last week",
           "Avg form = the mean of a member's form deltas (session score minus shape the day before)",
-          "Club records only count community sessions (every full rep anyone ran there, races), not each member's solo training",
-          "Click a month in the chart to list its sessions; a highlight or record opens its session",
+          "Click a month in the chart to list its sessions; a highlight opens its session",
         ]}>
         <PeriodSelect period={period} years={years} />
       </PageHeader>
@@ -221,32 +218,6 @@ export function ClubPage() {
             <div class="cm-pairs">{c.pairs.slice(0, 4).map((p) => <PairCard key={p.a + p.b} a={p.a} b={p.b} viewer={c.viewer} sessions={p.sessions} last={p.last} />)}</div>
           </section>
 
-          <section class="cm-panel span2">
-            <div class="head"><h2>Club records</h2><span class="sub">fastest in a community session · {plural(c.records.length, "record")}</span></div>
-            {c.records.length ? (
-              <div class="tablewrap cm-tw">
-                <table class="cm-tbl">
-                  <thead><tr><th>Distance</th><th>Kind</th><th class="num">Time</th><th>Holder</th><th>Set</th><th>Everyone's best</th><th class="num">Efforts</th></tr></thead>
-                  <tbody>
-                    {[...c.records].sort((a, b) => (a.measure === "race" ? 0 : 1) - (b.measure === "race" ? 0 : 1) || a.dist_m - b.dist_m || a.measure.localeCompare(b.measure)).map((r) => (
-                      <tr>
-                        <td><b>{r.label}</b></td>
-                        <td class="muted">{MEASURE_LABEL[r.measure] ?? r.measure}</td>
-                        <td class="num"><b class="rec">🏆 {recTime(r)}</b></td>
-                        <td><PersonLink p={r.person} /></td>
-                        <td><a href={`/community/${r.gid}`}>{shortDate(r.date, isoLocal())}</a></td>
-                        <td class="small">{Object.entries(r.by_person).sort((a, b) => a[1].value_s - b[1].value_s).map(([p, v]) => (
-                          <a class="cm-pb" href={`/community/${v.gid}`} title={`${personName(p)} · ${shortDate(v.date, isoLocal())}`}><Av p={p} size="xs" />{recTime({ measure: r.measure, value_s: v.value_s })}</a>
-                        ))}</td>
-                        <td class="num muted">{r.n_efforts}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : <div class="empty">No records yet: a record needs a rep distance everyone ran, or a race.</div>}
-          </section>
-
           <section class="cm-panel">
             <div class="head"><h2>When we meet</h2><span class="sub">weekday × start hour</span></div>
             <Heatmap h={c.heatmap} />
@@ -275,7 +246,6 @@ export function ClubPage() {
                   <span class="muted">{shortDate(r.date, isoLocal())}</span>
                   <AvStack people={r.people} size="sm" />
                   <span class="num">{kms(r.km)}</span>
-                  {r.records > 0 && <span title="records set">🏆 {r.records}</span>}
                 </a>
               ))}
             </div>

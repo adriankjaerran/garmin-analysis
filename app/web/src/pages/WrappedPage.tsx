@@ -1,6 +1,6 @@
 // Community · Wrapped: the club's year as a scroll of big cards (/api/community/wrapped/<year | latest>), like
 // Spotify Wrapped: sessions, km, hours moving, the busiest month, top place, favourite category, biggest day,
-// best form jump, the closest rep, most loyal, records, badges, then one card per member.
+// best form jump, the closest rep, most loyal, badges, then one card per member.
 //   /community/wrapped · /community/wrapped/<year>
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -208,20 +208,6 @@ export function WrappedPage({ year }: { year: string | null }) {
               </>;
             })()}
             {w.top_pair && <div class="wr-also">Strongest pair: <Av p={w.top_pair.a} size="sm" /> {personName(w.top_pair.a)} & <Av p={w.top_pair.b} size="sm" /> {personName(w.top_pair.b)} · {plural(w.top_pair.sessions, "session")} together</div>}
-          </>}
-        </Slide>
-      )}
-
-      {(w.records_set.length > 0 || w.records_standing.length > 0) && (
-        <Slide tone="var(--cat-race)" kicker="Records">
-          {() => <>
-            <div class="wr-big small"><b>{w.records_standing.length || w.records_set.length}</b> {w.records_standing.length ? "club records set this year still stand" : "records set"}</div>
-            <ul class="wr-recs">
-              {(w.records_standing.length ? w.records_standing.map((r) => ({ gid: r.gid, person: r.person, text: `${r.label} ${r.measure === "race" ? "race" : r.measure === "avg" ? "average rep" : "best rep"} ${r.text}`, date: r.date }))
-                : w.records_set.map((r) => ({ gid: r.gid, person: r.person, text: r.text, date: r.date }))).slice(0, 8).map((r) => (
-                <li><a href={`/community/${r.gid}`}><span>🏆</span><Av p={r.person} size="sm" /><b>{r.text}</b><span class="muted"> · {shortDate(r.date, "x")}</span></a></li>
-              ))}
-            </ul>
           </>}
         </Slide>
       )}

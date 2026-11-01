@@ -1,17 +1,17 @@
 // Community part of a session page under the hero: "Who was there" (a card per member in their colour: role,
-// workout, rank, km, time, pace, reps, the form chip "+2.4 vs form", records set; links to the activity / Compare;
-// guests added by hand as chips), the collective panel ("Together you ran 17.9 km — that's …"), records set in the
-// session, "Last time here" and the other sessions at the same place; per member badges (best rep, faster recovery). Data: /api/community/sessions/{gid} (lib/communitySession.ts)
+// workout, rank, km, time, pace, reps, the form chip "+2.4 vs form"; links to the activity / Compare;
+// guests added by hand as chips), the collective panel ("Together you ran 17.9 km — that's …"),
+// "Last time here" and the other sessions at the same place; per member badges (best rep, faster recovery). Data: /api/community/sessions/{gid} (lib/communitySession.ts)
 // plus the together session already on the page (participants, leaderboard, race result).
 import { useState } from "preact/hooks";
 import { withPerson } from "../lib/router";
-import { dur, km, num, secs, shortDate, speedText } from "../lib/format";
+import { dur, km, num, shortDate, speedText } from "../lib/format";
 import { personColour, personName } from "../lib/people";
 import { useTheme } from "../lib/theme";
 import { MEDAL, paceText, repTime, type TSession } from "../lib/together";
 import {
   climbFun, distanceFun, hoursMin, patchSession, useCommunity,
-  type CsForm, type CsMember, type CsRecord, type CsSession, type Facts,
+  type CsForm, type CsMember, type CsSession, type Facts,
 } from "../lib/communitySession";
 import { Av } from "./CommunityBits";
 import { LastTimeHere } from "./CommunitySessionHighlights";
@@ -39,10 +39,6 @@ export function FormChip({ f, big }: { f: CsForm | null | undefined; big?: boole
       {unreliable ? <>? <small>score unreliable</small></> : <><b>{sign}{Math.abs(d).toFixed(1)}</b> <small>vs form</small></>}
     </span>
   );
-}
-
-function recordBadge(r: CsRecord) {
-  return r.kind === "club_best" ? "🏆 Club record" : "⭐ Club PB";
 }
 
 function MemberCard({ m, s, c, f }: { m: CsMember; s: TSession; c: CsSession; f: Facts }) {
@@ -100,9 +96,8 @@ function MemberCard({ m, s, c, f }: { m: CsMember; s: TSession; c: CsSession; f:
           {m.has_fit && <a href={withPerson(`/compare?suggest=${m.activity_id}`, m.person)} title={`${personName(m.key)}'s own similar sessions, in Compare`}>compare ↗</a>}
         </span>
       </div>
-      {(m.records.length > 0 || badges.length > 0) && (
+      {badges.length > 0 && (
         <div class="cs-m-recs">
-          {m.records.map((r, i) => <span key={i} class={"cs-rec-badge " + r.kind} title={r.text}>{recordBadge(r)} · {r.label}</span>)}
           {badges.map((b) => <span key={b.t} class="cs-rec-badge hl" title={b.tip}>{b.t}</span>)}
         </div>
       )}
@@ -173,27 +168,6 @@ function Collective({ c, s }: { c: CsSession; s: TSession }) {
   );
 }
 
-function Records({ c, base }: { c: CsSession; base: string }) {
-  if (!c.records.length) return null;
-  return (
-    <div class="card cs-recs">
-      <div class="head sm"><h2>Records set</h2><span class="sub">club records and club PBs from this session</span></div>
-      <ul>
-        {c.records.map((r, i) => (
-          <li key={i}>
-            <span class={"cs-rec-badge " + r.kind}>{recordBadge(r)}</span>
-            <span class="pn"><Av p={r.key ?? r.person} size="sm" /><b>{personName(r.key ?? r.person)}</b></span>
-            <span>{r.measure === "avg" ? "average rep" : r.measure === "race" ? "race" : "fastest rep"} {r.label}: <b>{r.measure === "race" ? dur(r.value_s) : repTime(r.value_s)}</b></span>
-            {r.improvement_s ? <span class="good small">{secs(r.improvement_s, 1)} faster</span> : null}
-            {r.prev_s ? <span class="muted small">than {r.prev_person && r.prev_person !== r.person ? `${personName(r.prev_person)}'s ` : "the old "}{r.measure === "race" ? dur(r.prev_s) : repTime(r.prev_s)}
-              {r.prev_gid ? <> (<a href={`${base}/${encodeURIComponent(r.prev_gid)}`}>{r.prev_date ? shortDate(r.prev_date, c.date) : "earlier"}</a>)</> : null}</span> : null}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function SamePlace({ c, base }: { c: CsSession; base: string }) {
   if (!c.same_place.length) return null;
   const emoji = (id: string) => c.categories.find((x) => x.id === id)?.emoji ?? "";
@@ -235,9 +209,8 @@ export function CommunitySessionMembers({ gid, s, f }: { gid: string; s: TSessio
       </section>
       <div class="cs-grid">
         <Collective c={c} s={s} />
-        {(c.records.length > 0 || c.same_place.length > 0) && (
+        {c.same_place.length > 0 && (
           <div class="cs-side">
-            <Records c={c} base={base} />
             <LastTimeHere c={c} base={base} />
             <SamePlace c={c} base={base} />
           </div>
