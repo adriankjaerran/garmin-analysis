@@ -28,7 +28,7 @@ interface CsMember {
   by_target: TargetAvg[] | null; best: { slot: number; label: string; result_s: number } | null;
 }
 interface CsCollective {
-  km: N; moving_s: N; hours: N; reps: N; climb_m: N; kcal: N; n_members: number; per_person?: Record<string, CsNumbers>;
+  km: N; moving_s: N; hours: N; reps: N; climb_m: N; kcal: N; n_members: number;
 }
 export interface CsSession {
   gid: string; requested_gid: string; viewer: string | null; date: string; start_local: string; place: TPlace | null;

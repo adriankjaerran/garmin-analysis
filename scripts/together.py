@@ -1527,7 +1527,7 @@ def _intervals(P):
             else:
                 ms = [c["dist_m"] for _, c in cs if c.get("dist_m")]
                 by_target.append({"kind": "time", "value": tg_[1], "text": cmp_mmss(tg_[1]), "n": len(cs),
-                                  "avg_m": _r(np.mean(ms), 0) if ms else None, "best_m": _r(max(ms), 0) if ms else None})
+                                  "avg_m": _r(np.mean(ms), 0) if ms else None})
         best = min(ok, key=lambda x: (_td(*x) or (1e9, 1))[0] / (_td(*x) or (1e9, 1))[1], default=None) if ok else None
         # fade: last 3 vs first 3 counted reps of the main set (the anchor's slots: a jog-in "rep" someone ran alone
         # before the set isn't its start), as pace (s/km); per rep when they share the set distance
@@ -1539,8 +1539,7 @@ def _intervals(P):
         fade_s = _r(np.mean([c["result_s"] for _, c in ms_[-3:]]) - np.mean([c["result_s"] for _, c in ms_[:3]]), 1) if len(ms_) >= 6 and same_m else None
         eff = [c["effort_pct"] for _, c in full if c.get("effort_pct") is not None]
         lb.append({"person": key, "reps_done": len(full), "n_counted": len(ok), "n_partial": sum(1 for _, c in mine if c["partial"]),
-                   "anchor_done": done, "extra_reps": len(mine) - done, "n_warmup": n_wu, "of": n_anchor, "n_slots": len(slots),
-                   "reps_ranked": sum(1 for i, c in full if slots[i]["order"]),
+                   "extra_reps": len(mine) - done, "n_warmup": n_wu, "of": n_anchor,
                    "total_s": _r(sum(t for t, _ in td), 1) if td else None,
                    "avg_s": _r(np.mean([c["result_s"] for _, c in ok]), 1) if ok and same_t and slots[ok[0][0]]["target"]
                    and slots[ok[0][0]]["target"][0] == "dist" else None,
@@ -1770,7 +1769,7 @@ def _continuous(g, P):
     R, why = _route_progress(g, P)
     if R is None:
         return why
-    act, a, b, a_ov, b_ov, race, ref, Gw, rp, prog = R
+    act, a, b, a_ov, b_ov, race, ref, Gw, _, prog = R
     t0 = _t0(P)
     lo = max(v[1][0] for v in prog.values())
     hi = min(v[1][-1] for v in prog.values())
@@ -1791,8 +1790,7 @@ def _continuous(g, P):
     def mc(t):
         return np.interp(t, tt_all, mclock)
     out = {"available": True, "reference": ref["key"], "window_s": [_r(a_ov - t0, 0), _r(b_ov - t0, 0)],
-           "ref_length_m": _r(rp["L"], 0), "clock": "elapsed" if race else "moving",
-           "stopped_s": None if race else _r(float(len(moving) - moving.sum()), 0)}
+           "clock": "elapsed" if race else "moving"}
     if hi - lo >= 500:
         xs = np.arange(math.ceil(lo / CONT_STEP_M) * CONT_STEP_M, hi, CONT_STEP_M)
         tx = {}
@@ -2011,18 +2009,12 @@ def headline(s) -> dict:
         lb = [x for x in iv["leaderboard"] if x["rank"] is not None]
         targets = {(t["kind"], t["value"]) for x in lb for t in x["by_target"]}
         parts = [g.get("workout") or "Intervals", mem]
-        fastest = None
+        best = None
         if len(targets) == 1 and next(iter(targets))[0] == "dist":
-            b = min(((t["best_s"], x["person"]) for x in lb for t in x["by_target"]), default=None)
-            if b:
-                fastest = {"kind": "rep", "value_s": b[0], "person": b[1]}
-                parts.append(f"fastest rep {_mmss1(b[0])}")
-        elif lb:
-            fastest = {"kind": "pace", "value_s_km": lb[0]["pace_s_km"], "person": lb[0]["person"]}
+            best = min((t["best_s"] for x in lb for t in x["by_target"]), default=None)
         reps = sum(x["reps_done"] for x in iv["leaderboard"])
-        if not fastest or fastest["kind"] != "rep":
-            parts.append(f"{reps} reps")
-        return {"kind": "intervals", "n_members": n_mem, "reps": reps, "fastest": fastest, "text": " · ".join(parts)}
+        parts.append(f"fastest rep {_mmss1(best)}" if best is not None else f"{reps} reps")
+        return {"kind": "intervals", "n_members": n_mem, "reps": reps, "text": " · ".join(parts)}
     c = s.get("continuous") or {}
     if g["label"] == "same_race" and (c.get("race") or c.get("finish")):
         f = c.get("race") or c["finish"]

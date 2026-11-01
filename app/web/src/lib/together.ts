@@ -14,7 +14,6 @@ interface TListParticipant {
 /** neutral one-liner: "15×400 · 2 members · fastest rep 1:15.6" (no win counts) */
 interface Headline {
   kind: "intervals" | "race" | "together" | "unverified"; text: string; n_members?: number; reps?: number;
-  fastest?: { kind: "rep"; value_s: number; person: string } | { kind: "pace"; value_s_km: number; person: string } | null;
   order?: string[]; with_pct?: number;
 }
 export interface TGroup {
@@ -42,11 +41,11 @@ export interface Cell {
 interface Standing { slot: number; label: string; partial: string[]; missing: string[];
   order: { person: string; result_s: number; rank: number; gap_s: number; gap_m: N; tie: boolean; tie_s: number }[] }
 /** per set distance (or set time) of one person's reps: count, average, best */
-export interface TargetAvg { kind: "dist" | "time"; value: number; text: string; n: number; avg_s?: N; best_s?: N; avg_m?: N; best_m?: N }
+export interface TargetAvg { kind: "dist" | "time"; value: number; text: string; n: number; avg_s?: N; best_s?: N; avg_m?: N }
 /** every rep a person ran counts; ranked by the distance-weighted pace over their own full reps (suspect ones left out) */
 interface LeaderRow {
-  rank: number | null; person: string; reps_done: number; n_counted: number; n_partial: number; anchor_done: number;
-  extra_reps: number; n_warmup?: number; of: number; n_slots: number; reps_ranked: number; total_s: N; avg_s: N; pace_s_km: N; gap_s_km: N;
+  rank: number | null; person: string; reps_done: number; n_counted: number; n_partial: number;
+  extra_reps: number; n_warmup?: number; of: number; total_s: N; avg_s: N; pace_s_km: N; gap_s_km: N;
   by_target: TargetAvg[]; suspect: string[]; best: { slot: number; label: string; result_s: number } | null;
   fade_s: N; fade_s_km: N; avg_effort_pct: N; effort_mode: string | null;
 }
@@ -66,8 +65,8 @@ export interface Intervals {
 }
 interface Apart { a: string; b: string; t_s: number[]; apart_m: N[]; with: boolean[]; with_pct: N; within_20m_pct: N; median_apart_m: N }
 interface Continuous {
-  available: boolean; why?: string | null; reference?: string; window_s?: [number, number]; ref_length_m?: number;
-  clock?: "moving" | "elapsed"; stopped_s?: N; split_at_m?: N;
+  available: boolean; why?: string | null; reference?: string; window_s?: [number, number];
+  clock?: "moving" | "elapsed"; split_at_m?: N;
   gap_over_distance?: { x_m: number[]; x0_route_m: number; people: Record<string, N[]>; flagged?: number } | null;
   led?: { from_m: number; to_m: number; person: string | null }[];
   km_splits?: { km: number; people: Record<string, { time_s: N; rank: N; gap_s: N }> }[];

@@ -26,9 +26,9 @@ export interface CList {
 }
 
 export interface Attendance {
-  person: string; display: PersonInfo; sessions: number; share: number; first_seen: string | null; last_seen: string | null; last_gid: string | null;
+  person: string; display: PersonInfo; sessions: number; share: number; last_gid: string | null;
   days_since: N; streak_weeks: number; best_streak_weeks: number; weeks_active: number; km: number; hours: number; reps: number;
-  by_category: Partial<Record<CatId, number>>; favourite_place: string | null; avg_form_delta: N; n_form: number;
+  by_category: Partial<Record<CatId, number>>; avg_form_delta: N; n_form: number;
   company?: CompanyShort;
 }
 export interface ClubMonth { month: string; sessions: number; km: number; hours: number; reps: number; climb_m: number;
@@ -37,13 +37,12 @@ interface Highlight { kind: string; gid: string; date: string; person: string | 
 export interface Club {
   from: string | null; to: string | null; today: string; viewer: string | null; people: Record<string, PersonInfo>; form_available: boolean;
   totals: { sessions: number; km: number; hours: number; reps: number; climb_m: number; kcal: number;
-    members: number; guests: number; guest_visits: number; photos: number; kudos: number; places: number; first: string | null; last: string | null;
+    members: number; guests: number; photos: number; kudos: number; places: number; first: string | null; last: string | null;
     this_year: { year: string; sessions: number; km: number; hours: number } };
   months: ClubMonth[]; attendance: Attendance[];
   categories: Category[]; highlights: Highlight[];
   places: { id: string; name: string; sessions: number; last: string }[]; guests: { name: string; visits: number }[];
   company: Record<string, CompanyShort>; goal: Goal; goals: Goal[];
-  goal_metrics: Goals["metrics"];
 }
 export interface MemberSession {
   gid: string; date: string; start_local: string; place: string | null; workout: string; group_workout: string; title: string | null; category: CatId;
@@ -139,19 +138,18 @@ export function resolvePeriod(id: string): { from: string; to: string; label: st
 }
 
 // ---- motivation: company effect, goals (docs/community.md "Motivation")
-interface CompanyPace { family: "short" | "medium" | "long"; label: string; diff_s_km: number; text: string; n_joint: number; n_solo: number; joint_s_km: number; solo_s_km: number;
+interface CompanyPace { family: "short" | "medium" | "long"; label: string; text: string; n_joint: number; n_solo: number; joint_s_km: number; solo_s_km: number;
   joint?: { gid: string; date: string; pace_s_km: number }[]; solo?: { activity_id: string; date: string; pace_s_km: number }[] }
 export interface CompanyShort { diff: N; verdict: "company" | "alone" | "even" | null; text: string | null; n_joint: number; n_solo: number; n_compared: number; n_joint_cmp?: number; n_solo_cmp?: number;
   joint_avg: N; solo_avg: N; thin: boolean; pace: CompanyPace[] }
 interface Company extends CompanyShort {
   person: string; window_days: number;
-  by_discipline: { discipline: string; n_joint: number; n_solo: number; joint_avg: N; solo_avg: N; diff: N }[];
   joint: { gid: string; date: string; delta: number; discipline: string; confidence?: string }[];
   solo: { activity_id: string; date: string; delta: number; discipline: string; confidence?: string; type?: string; name?: string }[];
 }
 type GoalMetric = "sessions" | "km" | "hours" | "reps" | "climb_m";
-export interface Goal { id: string; title: string; metric: GoalMetric; target: number; from: string; to: string; default?: boolean; unit: string; metric_label: string;
-  value: number; pct: number; expected: number; expected_pct: number; remaining: number; days: number; days_left: number;
+export interface Goal { id: string; title: string; metric: GoalMetric; target: number; from: string; to: string; default?: boolean; unit: string;
+  value: number; pct: number; days: number; days_left: number;
   status: "done" | "ahead" | "on_track" | "behind" | "ended" | "upcoming"; text: string; n_sessions: number; last_gid: string | null;
   by_member: { person: string; value: number }[] }
 export interface Goals { goal: Goal; goals: Goal[]; metrics: { id: GoalMetric; unit: string; label: string }[] }
