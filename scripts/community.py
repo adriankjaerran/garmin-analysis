@@ -732,7 +732,8 @@ def _meta(gid, e, B) -> dict:
 
 
 def _form_short(f):
-    return {k: (v or {}).get("delta") if v else None for k, v in f.items()}
+    """delta per member; None when there is no score or form_delta calls it unreliable (confidence "none")"""
+    return {k: v.get("delta") if v and v.get("confidence") != "none" else None for k, v in f.items()}
 
 
 def community_fields(gid, B, store, tdoc, viewer=None) -> dict:

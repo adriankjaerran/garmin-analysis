@@ -10,8 +10,10 @@ import { PlacesPage } from "./pages/PlacesPage";
 import { HomePage } from "./pages/HomePage";
 import { FitnessPage } from "./pages/FitnessPage";
 import { ComparePage } from "./pages/ComparePage";
-import { TogetherPage } from "./pages/TogetherPage";
 import { TogetherSession } from "./pages/TogetherSession";
+import { CommunityPage } from "./pages/CommunityPage";
+import { ClubPage } from "./pages/ClubPage";
+import { MemberPage, MembersPage } from "./pages/MemberPage";
 import { personColour, personName, setPeopleInfo, type PersonInfo } from "./lib/people";
 import { addDays, isoLocal } from "./lib/format";
 import { setPref, useTheme, useThemePref, type ThemePref } from "./lib/theme";
@@ -30,9 +32,19 @@ const ROUTES: { path: string; nav?: string; render: (p: Record<string, string>) 
   { path: "/search", nav: "activities", render: () => redirect("/activities") },
   { path: "/compare", nav: "compare", render: () => <ComparePage /> },
   { path: "/fitness", nav: "fitness", render: () => <FitnessPage /> },
-  { path: "/together", nav: "together", render: () => <TogetherPage /> },
-  { path: "/together/:gid", nav: "together", render: (p) => <TogetherSession gid={p.gid} /> },
+  // Community (the running club): sessions feed, club dashboard, members; a session = the Together session page
+  { path: "/community", nav: "community", render: () => <CommunityPage /> },
+  { path: "/community/club", nav: "club", render: () => <ClubPage /> },
+  { path: "/community/members", nav: "members", render: () => <MembersPage /> },
+  { path: "/community/members/:person", nav: "member", render: (p) => <MemberPage person={p.person} /> },
+  { path: "/community/:gid", nav: "community", render: (p) => <TogetherSession gid={p.gid} /> },
+  // Together became Community · Sessions
+  { path: "/together", nav: "community", render: () => redirect("/community") },
+  { path: "/together/:gid", nav: "community", render: (p) => redirect(`/community/${encodeURIComponent(p.gid)}`) },
 ];
+
+/** sections whose paths mean the same for every person (kept on a person switch): a date, a group, the club */
+const GLOBAL_SECTIONS = ["day", "together", "community"];
 
 /** replace the URL with `path` + the current query (after render, so the router picks it up) */
 function Redirect({ to }: { to: string }) {
@@ -50,11 +62,11 @@ const Avatar = ({ p }: { p: string }) => (
 interface TGroupLite { gid: string; participants: { person: string; activity_id: string; role: string }[] }
 
 /** Where a switch to `to` lands: the same section, but ids and filters are per person, so they are dropped — except
- *  /day/<date> and /together/<gid> (a date / a group mean the same for everyone) and an activity done together
+ *  /day/<date> and /community/… (a date / a group / the club mean the same for everyone) and an activity done together
  *  (/activities/<id> with `together`): that opens the other person's activity of the same Together group. */
 async function switchTarget(path: string, from: string, to: string): Promise<string> {
   const seg = path.split("/")[1] ?? "";
-  if (seg === "day" || seg === "together") return path;
+  if (GLOBAL_SECTIONS.includes(seg)) return path;
   const m = /^\/activities\/([^/]+)$/.exec(path);
   if (m) {
     try {
@@ -65,7 +77,7 @@ async function switchTarget(path: string, from: string, to: string): Promise<str
         const g = L.groups.find((x) => x.gid === gid);
         const p = g?.participants.find((x) => x.person === to && x.role !== "other") ?? g?.participants.find((x) => x.person === to);
         if (p) return `/activities/${p.activity_id}`;
-        if (g) return `/together/${gid}`;
+        if (g) return `/community/${gid}`;
       }
     } catch { /* fall back to the section */ }
   }
@@ -87,7 +99,7 @@ function PersonMenu({ person, path }: { person: string; path: string }) {
   }, [open]);
   const all = people();
   if (all.length < 2) return <div class="who"><Avatar p={person} />{personName(person)}</div>;
-  const simple = (p: string) => { const seg = path.split("/")[1] ?? ""; return withPerson(seg === "day" || seg === "together" ? path : seg ? "/" + seg : "/", p); };
+  const simple = (p: string) => { const seg = path.split("/")[1] ?? ""; return withPerson(GLOBAL_SECTIONS.includes(seg) ? path : seg ? "/" + seg : "/", p); };
   const go = async (e: MouseEvent, p: string) => {
     e.preventDefault();
     setOpen(false);
@@ -114,10 +126,10 @@ function PersonMenu({ person, path }: { person: string; path: string }) {
   );
 }
 
-/** sessions with this person in the last 30 days (the Together tab's badge) */
+/** club sessions with this person in the last 30 days (the Community · Sessions badge) */
 function useTogetherCount(person: string): number | null {
   const on = people().length > 1;
-  const r = useApi<{ n: number }>(on ? `/api/together?person=${encodeURIComponent(person)}&from=${addDays(isoLocal(), -29)}` : null);
+  const r = useApi<{ n: number }>(on ? `/api/community/sessions?person=${encodeURIComponent(person)}&from=${addDays(isoLocal(), -29)}` : null);
   return r.data?.n ?? null;
 }
 
@@ -129,9 +141,13 @@ function Nav({ current, meta, activityId, person, path }:
     </a>
   );
   const nTogether = useTogetherCount(person);
+  const club = people().length > 1;
+  const mm = /^\/community\/members\/([^/]+)$/.exec(path);
+  const memberName = mm ? personName(decodeURIComponent(mm[1])) : null;
   return (
     <nav class="side" style={{ "--person": personColour(person) } as any}>
       <PersonMenu person={person} path={path} />
+      {club && <span class="group" title={`${personName(person)}'s own training`}>Personal</span>}
       <a class={"step home" + (current === "home" ? " current" : "")} href="/" title="Home: your latest training at a glance">Home</a>
       <span class="step">Explore</span>
       {tab("activities", "/activities", "Activities")}
@@ -141,8 +157,14 @@ function Nav({ current, meta, activityId, person, path }:
       {tab("places", "/places", "Places & routes")}
       <span class="step">Analysis</span>
       {tab("compare", "/compare", "Compare")}
-      {people().length > 1 && tab("together", "/together", "Together", false, nTogether, `${nTogether ?? 0} sessions together in the last 30 days`)}
       {tab("fitness", "/fitness", "Fitness")}
+      {club && <>
+        <span class="group community" title="The running club: joint sessions, the club dashboard, members">Community</span>
+        {tab("community", "/community", "Sessions", false, nTogether, `${nTogether ?? 0} club sessions with you in the last 30 days`)}
+        {tab("club", "/community/club", "Club")}
+        {tab("members", "/community/members", "Members")}
+        {current === "member" && memberName && <a class="tab sub current" href={path}>{memberName}</a>}
+      </>}
       <div class="foot">
         {meta && (
           <div class="built">
