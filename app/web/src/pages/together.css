@@ -248,3 +248,8 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
   .tg-rb-row { grid-template-columns: 40px 1fr 24px; gap: 6px; }
   .tg-rb-chip .nm { display: none; }   /* the avatar's initials name them; the chip stays two-per-line */
 }
+
+/* warm-up / cool-down "reps" (run alone outside the main set, clearly easy): shown, not counted */
+.tg-rb-row.warmup { opacity: 0.55; }
+.tg-rb-row.warmup .tg-rb-lab b { color: var(--text-muted); font-weight: var(--fw-regular); font-style: italic; }
+.tg-tbl tr.warmup td { color: var(--text-muted); font-style: italic; }

@@ -620,7 +620,7 @@ def efforts(B) -> list[dict]:
                 by = defaultdict(list)
                 for sl, c in zip(iv["slots"], cells):
                     t = sl.get("target") or {}
-                    if not c or t.get("kind") != "dist" or c.get("partial") or c.get("suspect") \
+                    if not c or t.get("kind") != "dist" or c.get("partial") or c.get("suspect") or c.get("warmup") \
                             or c.get("method") in ("partial", "no_distance") or c.get("result_s") is None:
                         continue
                     by[int(t["value"])].append((c["result_s"], sl["label"]))

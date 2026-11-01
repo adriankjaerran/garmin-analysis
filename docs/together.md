@@ -173,6 +173,14 @@ earliest file start).
 - **Suspect reps** (`cell.suspect`: the reason): > 10 % faster than the person's median for the same set distance
   (≥ 3 such reps), e.g. adrian's 15th 400 m in 64.5 s (median 77.8 s): a short rep or a lap pressed early. Kept in
   `reps_done`, left out of the averages, best rep and fade; listed in `leaderboard[].suspect`.
+- **Warm-up / cool-down reps** (`cell.warmup` = `"warm-up" | "cool-down"`, `cell.warmup_reason`; `slot.warmup`;
+  labels `WU1`, `WU2` / `CD1`): the main set runs from the first to the last rep 2+ people ran. A rep only one person
+  ran outside it is a warm-up (before) / cool-down (after) when it was clearly easy for them: ≥ 8 % slower than their
+  median main-set pace **and** ≥ 8 effort points below their median main-set effort (pace alone without HR). Shown
+  greyed out, not counted anywhere: not in `reps_done`, averages, best, by_target, cumulative, replay totals, efforts.
+  `leaderboard[].n_warmup` counts them. 2026-10-06 Frogner: patrik's 250 m (5:06 /km, effort 56 %) and 600 m (5:08 /km,
+  71 %) vs his main reps (median ~4:13 /km, 94 %). Hard reps run alone stay reps (adrian's 400s 11–15 on 2026-10-20:
+  85–95 %).
 - **No "shared reps"** (2026-11-01): people may run separate reps from a common start or all together; every rep a
   person ran counts. **Leaderboard**, per person over their own full reps (suspect ones left out of the averages):
   `reps_done` (every full rep), `n_counted`, `n_partial`, `pace_s_km` = distance-weighted average rep pace (total time

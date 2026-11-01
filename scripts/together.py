@@ -51,7 +51,7 @@ SESS_CACHE = CDIR / "sessions.pkl"
 FORMAT_VERSION = 1
 PARAM_VERSION = 1                # detection rules / thresholds: bump -> every pair recomputed
 CACHE_VERSION = 1
-SESSION_VERSION = 1              # session engine output: bump -> every cached session rebuilt
+SESSION_VERSION = 2              # session engine output: bump -> every cached session rebuilt
 
 # ------------------------------------------------------------------ detection thresholds (docs/together.md)
 PRE_MARGIN_S = 600     # index candidates: time windows overlap (with this margin)
@@ -97,6 +97,8 @@ FULL_TOL = 0.08        # a rep within +-8 % of the set distance is the full rep 
 PARTIAL = 0.92         # shorter than 92 % of the set distance: partial (shown, not ranked)
 MERGE_PACE = 0.7       # a split rep is merged only if the stretch to the set distance was run at >= 70 % of rep speed
 TIME_TOL = 0.15        # time-target reps (0:45): own duration within +-15 % of the set time
+WARM_SLOW = 0.08       # warm-up / cool-down: a rep only one person ran, outside the main set (before the first / after the
+WARM_EFFORT = 8        # last rep 2+ ran), >= 8 % slower than the person's main-set reps and >= 8 effort points below them
 SUSPECT_FAST = 0.10    # a rep > 10 % faster than the person's median for the same set distance: implausible (flagged)
 TIE_MIN_S = 1.0        # dead heat: |gap| <= max(1 s, half the coarser recording interval)
 NICE_M = (100, 150, 200, 250, 300, 400, 500, 600, 800, 1000, 1200, 1500, 1600, 2000, 2500, 3000, 4000, 5000)
@@ -1432,13 +1434,14 @@ def _intervals(g, P):
                 best = max(c["dist_m"] for c in ok)
                 for c in ok:
                     c["result_s"] = _r(tv * best / c["dist_m"], 1)
+    _mark_warmup(slots, byk)
     # implausible reps: > SUSPECT_FAST faster than the person's median for the same set distance (a lap pressed early,
     # a short detected rep): flagged, kept in totals, left out of best rep and fade
     by_t = {}
     for s in slots:
         if s["target"] and s["target"][0] == "dist":
             for key, c in s["res"].items():
-                if c["result_s"] and not c["partial"]:
+                if c["result_s"] and not c["partial"] and not c.get("warmup"):
                     by_t.setdefault((key, s["target"]), []).append(c)
     for (key, tg_), cs in by_t.items():
         med = float(np.median([c["result_s"] for c in cs])) if len(cs) >= 3 else None
@@ -1447,9 +1450,13 @@ def _intervals(g, P):
                 c["suspect"] = (f"{c['result_s']:.1f} s is {100 * (1 - c['result_s'] / med):.0f} % faster than "
                                 f"{key.split('#')[0]}'s median {med:.1f} s for {tg_[1]} m: probably a short rep or a lap pressed early")
     # labels: anchor reps 1..n, extras "k+1" after anchor rep k
-    k = j = 0
+    k = j = w = 0
     for s in slots:
-        if s["anchor"]:
+        if all(c.get("warmup") for c in s["res"].values()):
+            w += 1
+            kind_ = next(iter(s["res"].values()))["warmup"]
+            s["label"] = ("WU" if kind_ == "warm-up" else "CD") + str(w)
+        elif s["anchor"]:
             k, j = k + 1, 0
             s["label"] = str(k)
         else:
@@ -1460,7 +1467,8 @@ def _intervals(g, P):
     standings = []
     for i, s in enumerate(slots):
         res = s["res"]
-        ranked = sorted(((c["result_s"], key) for key, c in res.items() if c["result_s"] is not None and byk[key]["role"] != "other"))
+        ranked = sorted(((c["result_s"], key) for key, c in res.items() if c["result_s"] is not None and byk[key]["role"] != "other"
+                         and not c.get("warmup")))
         order = []
         if len(ranked) >= 2:   # a rep only one person ran isn't a race
             win = ranked[0][0]
@@ -1497,7 +1505,8 @@ def _intervals(g, P):
         return (c["time_s"], c["dist_m"]) if c.get("dist_m") and c.get("time_s") else None
     for p in act:
         key = p["key"]
-        mine = [(i, s["res"][key]) for i, s in enumerate(slots) if key in s["res"]]
+        n_wu = sum(1 for s in slots if s["res"].get(key, {}).get("warmup"))
+        mine = [(i, s["res"][key]) for i, s in enumerate(slots) if key in s["res"] and not s["res"][key].get("warmup")]
         done = sum(1 for i, c in mine if slots[i]["anchor"])
         full = [(i, c) for i, c in mine if c["result_s"] is not None and not c["partial"]]   # every full rep
         ok = [(i, c) for i, c in full if not c.get("suspect")]                               # counted in averages
@@ -1530,7 +1539,7 @@ def _intervals(g, P):
         fade_s = _r(np.mean([c["result_s"] for _, c in ms_[-3:]]) - np.mean([c["result_s"] for _, c in ms_[:3]]), 1) if len(ms_) >= 6 and same_m else None
         eff = [c["effort_pct"] for _, c in full if c.get("effort_pct") is not None]
         lb.append({"person": key, "reps_done": len(full), "n_counted": len(ok), "n_partial": sum(1 for _, c in mine if c["partial"]),
-                   "anchor_done": done, "extra_reps": len(mine) - done, "of": n_anchor, "n_slots": len(slots),
+                   "anchor_done": done, "extra_reps": len(mine) - done, "n_warmup": n_wu, "of": n_anchor, "n_slots": len(slots),
                    "reps_ranked": sum(1 for i, c in full if slots[i]["order"]),
                    "total_s": _r(sum(t for t, _ in td), 1) if td else None,
                    "avg_s": _r(np.mean([c["result_s"] for _, c in ok]), 1) if ok and same_t and slots[ok[0][0]]["target"]
@@ -1554,7 +1563,7 @@ def _intervals(g, P):
     for i in cslots:
         for k_ in keys:
             c = slots[i]["res"].get(k_)
-            if c and c["result_s"] is not None and not c["partial"]:
+            if c and c["result_s"] is not None and not c["partial"] and not c.get("warmup"):
                 tot[k_] += c["time_s"] if slots[i]["target"] and slots[i]["target"][0] == "time" else c["result_s"]
                 cnt[k_] += 1
                 cum[k_].append({"total_s": _r(tot[k_], 1), "n": cnt[k_]})
@@ -1591,7 +1600,9 @@ def _intervals(g, P):
         kind, tv = s["target"] or (None, None)
         sl.append({"slot": i, "label": s["label"], "anchor": s["anchor"], "owner": s["owner"],
                    "target": {"kind": kind, "value": tv, "text": (f"{tv} m" if kind == "dist" else cmp_mmss(tv)) if tv else None},
-                   "start_s": _r(s["clock"] - _t0(P), 1), "n_people": len(s["res"])})
+                   "start_s": _r(s["clock"] - _t0(P), 1), "n_people": len(s["res"]),
+                   "warmup": next((c["warmup"] for c in s["res"].values() if c.get("warmup")), None)
+                   if all(c.get("warmup") for c in s["res"].values()) else None})
     t0 = _t0(P)
     reps = {k_: [_cell_out(slots[i]["res"].get(k_), t0) for i in range(len(slots))] for k_ in keys}
     return {"anchor": anchor["key"], "slots": sl, "reps": reps, "standings": standings,
@@ -1602,6 +1613,49 @@ def _intervals(g, P):
 
 def cmp_mmss(s):
     return sg.mmss(s) if s is not None else None
+
+
+def _pace_of(s, c):
+    """s/km of a full rep (set distance: result over the set distance; set time: time over own metres), else None"""
+    t = s["target"]
+    if not t or c.get("partial") or c.get("result_s") is None:
+        return None
+    if t[0] == "dist":
+        return 1000 * c["result_s"] / t[1]
+    return 1000 * c["time_s"] / c["dist_m"] if c.get("dist_m") and c.get("time_s") else None
+
+
+def _mark_warmup(slots, byk):
+    """Warm-up / cool-down "reps" (in place: cell["warmup"] = "warm-up" | "cool-down", cell["warmup_reason"]).
+    The main set is the span from the first to the last rep two or more people ran. A rep only one person ran
+    outside it is a warm-up (before) / cool-down (after) when it was clearly easy for them: >= WARM_SLOW slower than
+    their median main-set pace and >= WARM_EFFORT effort points below their median main-set effort (when there is
+    HR; without HR the pace rule alone). Hard reps someone ran alone before / after the others stay reps."""
+    def runners(s):
+        return [k for k, c in s["res"].items() if byk[k]["role"] != "other" and c.get("result_s") is not None]
+    multi = [i for i, s in enumerate(slots) if len(runners(s)) >= 2]
+    if not multi:
+        return
+    lo, hi = multi[0], multi[-1]
+    for i, s in enumerate(slots):
+        if lo <= i <= hi or len(s["res"]) != 1:
+            continue
+        key, c = next(iter(s["res"].items()))
+        main = [(slots[j], slots[j]["res"][key]) for j in range(lo, hi + 1) if key in slots[j]["res"]]
+        paces = [x for x in (_pace_of(s2, c2) for s2, c2 in main) if x]
+        pc = _pace_of(s, c) or (1000 * c["own_time_s"] / c["own_dist_m"] if c.get("own_dist_m") and c.get("own_time_s") else None)
+        if not paces or not pc:
+            continue
+        ref = float(np.median(paces))
+        slow = pc / ref - 1
+        effs = [c2["effort_pct"] for _, c2 in main if c2.get("effort_pct") is not None]
+        e_ref = float(np.median(effs)) if effs else None
+        drop = e_ref - c["effort_pct"] if e_ref is not None and c.get("effort_pct") is not None else None
+        if slow >= WARM_SLOW and (drop is None or drop >= WARM_EFFORT):
+            c["warmup"] = "warm-up" if i < lo else "cool-down"
+            c["warmup_reason"] = (f"alone {'before' if i < lo else 'after'} the main set, {100 * slow:.0f} % slower than "
+                                  f"{key.split('#')[0]}'s main reps" + (f", effort {c['effort_pct']} % vs {e_ref:.0f} %"
+                                                                       if drop is not None else ""))
 
 
 def _cell_out(c, t0):

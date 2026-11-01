@@ -125,13 +125,30 @@ def test_replay_segments_and_passes(client):
     f = client.get("/api/together/2026-10-06_1911_Frogner-stadion/replay").json()
     r2 = next(x for x in f["segments"] if x["label"] == "2")
     assert r2["passes"]["own"] == []
-    # patrik ran two extra reps before rep 1 (only he ran them): the totals so far are each person's own, not ranked
-    assert r2["moves"] is None and r2["total"]["adrian"]["rank"] is None and r2["total"]["patrik"]["n"] == 4
+    # patrik's two easy "reps" before rep 1 (only he ran them) are his warm-up: not in the totals, so after rep 2 both
+    # have 2 reps and the totals so far are ranked again
+    assert [x["label"] for x in f["segments"][:2]] == ["WU1", "WU2"] and f["segments"][0]["total"] is None
+    assert r2["moves"] == [] and r2["total"]["patrik"]["n"] == 2 and r2["total"]["adrian"]["rank"] == 1
     assert all(p["t_s"] >= f["segments"][p["seg"]]["start_s"] for p in f["passes"])
     # continuous: per km along the shared route, route_m per person
     lier = client.get("/api/together/2023-05-07_1200_Lier-1/replay").json()
     assert lier["segment_kind"] == "km" and len(lier["segments"]) == 10
     assert all("route_m" in v for v in lier["people"].values())
+
+
+def test_warmup_reps(client):
+    """a rep only one person ran, outside the main set, clearly easy for them (slower and lower effort than their main
+    reps) is a warm-up: shown, not counted. Hard reps someone ran alone after the others stopped still count."""
+    f = client.get("/api/together/2026-10-06_1911_Frogner-stadion").json()["intervals"]
+    wu = [sl for sl in f["slots"] if sl["warmup"]]
+    assert [(sl["label"], sl["target"]["value"], sl["warmup"]) for sl in wu] == [("WU1", 250, "warm-up"), ("WU2", 600, "warm-up")]
+    assert all(c["warmup"] == "warm-up" and "effort" in c["warmup_reason"] for c in f["reps"]["patrik"][:2])
+    p = next(x for x in f["leaderboard"] if x["person"] == "patrik")
+    assert p["reps_done"] == 5 and p["n_warmup"] == 2 and p["extra_reps"] == 0
+    assert {t["value"] for t in p["by_target"]} == {900, 1800}
+    b = client.get(f"/api/together/{B400}").json()["intervals"]
+    assert not any(sl["warmup"] for sl in b["slots"])                      # adrian's reps 11-15 alone: hard, they count
+    assert next(x for x in b["leaderboard"] if x["person"] == "adrian")["reps_done"] == 15
 
 
 def test_passes_hysteresis():

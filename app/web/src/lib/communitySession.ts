@@ -221,7 +221,7 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
   let sameTarget = false;
   if (iv && !g.no_track) {
     // every rep a person ran counts (no "reps everyone ran" subset)
-    const full = (k: string) => iv.slots.map((sl) => ({ sl, c: iv.reps[k]?.[sl.slot] })).filter((x) => x.c && !x.c.partial && !x.c.suspect && x.c.result_s);
+    const full = (k: string) => iv.slots.map((sl) => ({ sl, c: iv.reps[k]?.[sl.slot] })).filter((x) => x.c && !x.c.partial && !x.c.suspect && !x.c.warmup && x.c.result_s);
     const tg = new Set(members.flatMap((p) => full(p.key).map((x) => x.sl.target?.text)));
     const anyFull = members.find((p) => full(p.key).length)?.key;
     const t0 = anyFull ? full(anyFull)[0].sl.target : null;

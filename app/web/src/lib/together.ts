@@ -34,10 +34,10 @@ export interface TParticipant {
   shape: { score: number; discipline: string; kind: string } | null;
 }
 export interface Slot { slot: number; label: string; anchor: boolean; owner: string; target: { kind: "dist" | "time"; value: number; text: string } | null;
-  start_s: number; n_people: number }
+  start_s: number; n_people: number; warmup?: "warm-up" | "cool-down" | null }
 export interface Cell {
   source: "detector" | "onset"; method: string; partial: boolean; result_s: N; time_s: N; dist_m: N; own_time_s: N; own_dist_m: N;
-  start_s: number; clock_start_s: number; scale: N; rank: N; gap_s: N; tie: boolean; tie_s?: number; suspect?: string;
+  start_s: number; clock_start_s: number; scale: N; rank: N; gap_s: N; tie: boolean; tie_s?: number; suspect?: string; warmup?: "warm-up" | "cool-down"; warmup_reason?: string;
   hr: N; hr_peak: N; hr_start: N; effort_pct: N; effort_mode: string | null;
 }
 export interface Standing { slot: number; label: string; partial: string[]; missing: string[];
@@ -47,7 +47,7 @@ export interface TargetAvg { kind: "dist" | "time"; value: number; text: string;
 /** every rep a person ran counts; ranked by the distance-weighted pace over their own full reps (suspect ones left out) */
 export interface LeaderRow {
   rank: number | null; person: string; reps_done: number; n_counted: number; n_partial: number; anchor_done: number;
-  extra_reps: number; of: number; n_slots: number; reps_ranked: number; total_s: N; avg_s: N; pace_s_km: N; gap_s_km: N;
+  extra_reps: number; n_warmup?: number; of: number; n_slots: number; reps_ranked: number; total_s: N; avg_s: N; pace_s_km: N; gap_s_km: N;
   by_target: TargetAvg[]; suspect: string[]; best: { slot: number; label: string; result_s: number } | null;
   fade_s: N; fade_s_km: N; avg_effort_pct: N; effort_mode: string | null;
 }

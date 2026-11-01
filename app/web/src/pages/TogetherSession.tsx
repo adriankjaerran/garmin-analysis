@@ -11,7 +11,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi } from "../lib/api";
 import { people as allPeople, currentPerson, setQuery, useLocation, withPerson } from "../lib/router";
-import { cssVar, dur, km, secs, shortDate, speedLabel, speedText } from "../lib/format";
+import { cssVar, dur, km, repLabel, secs, shortDate, speedLabel, speedText } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { mapColour, personColour, personInfo, personName, setPeopleInfo } from "../lib/people";
 import {
@@ -37,7 +37,7 @@ const behindTick = (v: number) => (v > -0.5 ? (v > 0.5 ? "" : "level") : `${secs
 const behindTickM = (v: number) => (v > -0.5 ? (v > 0.5 ? "" : "level") : `${Math.round(-v)} m behind`);
 const neg = (v: N) => (v === null ? null : -v);
 /** rep label: "Rep 3" (room) / "R3" (compact); extra slots "3+1" -> "R3+1" */
-const rl = (l: string, compact = true) => (compact ? `R${l}` : `Rep ${l}`);
+const rl = (l: string, compact = true) => repLabel(l, compact);
 
 /** the last non-null value at or before index i (a line freezes at its finish) */
 function lastAt(v: N[], i: number): N {
@@ -208,7 +208,7 @@ function RepBoard({ iv, sel, onSel, viewer }: { iv: Intervals; sel: string | nul
         const shown = many ? chips.filter((x, i) => i < top || x.k === viewer) : chips;
         const medals = st.order.length >= 2;
         return (
-          <div key={sl.slot} role="listitem" class={"tg-rb-row" + (sel === sl.label ? " selected" : "") + (cu?.available ? " clickable" : "") + (!sl.anchor ? " extra" : "")}
+          <div key={sl.slot} role="listitem" class={"tg-rb-row" + (sel === sl.label ? " selected" : "") + (cu?.available ? " clickable" : "") + (!sl.anchor ? " extra" : "") + (sl.warmup ? " warmup" : "")}
             onClick={cu?.available ? () => onSel(sl.label) : undefined} title={cu?.available ? `${rl(sl.label, false)}: show the close-up` : undefined}>
             <div class="tg-rb-lab"><b>{rl(sl.label)}</b><span class="muted">{sl.target?.text ?? ""}</span></div>
             <div class="tg-rb-chips">
@@ -216,7 +216,7 @@ function RepBoard({ iv, sel, onSel, viewer }: { iv: Intervals; sel: string | nul
                 const gap = o && o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? `−${Math.round(o.gap_m)} m` : `+${secs(o.gap_s, 1)}`) : null;
                 const tip = [personName(k), cellMain(c, timeSlot), o ? (o.tie ? `dead heat (within ${o.tie_s} s)` : o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : behind(o.gap_s)) + " the fastest" : "fastest") : null,
                   c.partial ? `partial: ${dur(c.own_time_s)} for ${Math.round(c.own_dist_m ?? 0)} m, not ranked` : null,
-                  !o && !c.partial ? "only one person ran this rep" : null,
+                  c.warmup ? `${c.warmup}: ${c.warmup_reason ?? ""} (not counted)` : !o && !c.partial ? "only one person ran this rep" : null,
                   c.suspect ? `⚠ suspect: ${c.suspect}` : null, c.source === "onset" ? "from the speed step" : null,
                   c.effort_pct ? `peak HR ${c.effort_pct} %` : null].filter(Boolean).join(" · ");
                 return (
@@ -284,7 +284,7 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
               const ranked = st.order.length > 0;
               const cu = iv.rep_closeups.find((c) => c.slot === sl.label);
               return (
-                <tr key={sl.slot} class={(sel === sl.label ? "selected " : "") + (cu?.available ? "clickable " : "") + (!sl.anchor ? "extra" : "")}
+                <tr key={sl.slot} class={(sel === sl.label ? "selected " : "") + (cu?.available ? "clickable " : "") + (!sl.anchor ? "extra" : "") + (sl.warmup ? " warmup" : "")}
                   onClick={cu?.available ? () => onSel(sl.label) : undefined} title={!ranked ? "Not ranked: only one person has a full result" : ""}>
                   <td class="rl">{rl(sl.label)}</td>
                   <td class="muted">{sl.target?.text ?? ""}</td>
@@ -328,7 +328,7 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
 function RepTrend({ s, iv, sel }: { s: TSession; iv: Intervals; sel: string | null }) {
   const theme = useTheme();
   const keys = Object.keys(iv.reps);
-  const full = (c: Cell | null | undefined) => !!c && !c.partial && !c.suspect && c.result_s !== null;   // suspect: probably short
+  const full = (c: Cell | null | undefined) => !!c && !c.partial && !c.suspect && !c.warmup && c.result_s !== null;   // suspect: probably short; warm-ups not counted
   const tg = new Set(iv.slots.filter((sl) => keys.some((k) => full(iv.reps[k][sl.slot]))).map((sl) => sl.target?.text));
   const one = tg.size === 1 && iv.slots.find((sl) => keys.some((k) => full(iv.reps[k][sl.slot])))?.target?.kind === "dist";
   const val = (sl: Intervals["slots"][number], c: Cell | null | undefined): N => {

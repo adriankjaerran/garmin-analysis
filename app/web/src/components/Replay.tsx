@@ -8,7 +8,7 @@
 // Play / pause, speeds, a scrub bar with rep / pass / finish markers, keys: space, ← → (rep), shift ← → (5 s),
 // 1–9 / 0 (rep 1–10), W (whole session). Data: /api/together/<gid>/replay (segments, passes; docs/together.md).
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { dur } from "../lib/format";
+import { dur, repLabel } from "../lib/format";
 import { mapColour, personColour, personInfo, personName } from "../lib/people";
 import { setQuery, useLocation } from "../lib/router";
 import { useTheme } from "../lib/theme";
@@ -135,9 +135,9 @@ function SoFar({ s, t, w0 }: { s: TSession; t: number; w0: number }) {
           <thead><tr><th>Rep</th><th>Fastest</th><th class="num">Time</th><th class="num">Next</th></tr></thead>
           <tbody>{ranked.map((st) => {
             const w = st.order[0], n2 = st.order[1];
-            if (!isDone(st.slot)) return <tr key={st.slot} class="todo"><td>R{st.label}</td><td colSpan={3} class="muted">—</td></tr>;
+            if (!isDone(st.slot)) return <tr key={st.slot} class="todo"><td>{repLabel(st.label, true)}</td><td colSpan={3} class="muted">—</td></tr>;
             return (
-              <tr key={st.slot}><td>R{st.label}</td>
+              <tr key={st.slot}><td>{repLabel(st.label, true)}</td>
                 <td><i class="sw" style={{ background: personColour(w.person) }} />{w.tie ? "dead heat" : personInfo(w.person).name}</td>
                 <td class="num">{repTime(w.result_s)}</td><td class="num muted">{n2 ? behind(n2.gap_s) : ""}</td></tr>
             );
@@ -160,7 +160,7 @@ function SoFar({ s, t, w0 }: { s: TSession; t: number; w0: number }) {
 }
 
 const ord = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? "st" : n % 10 === 2 && n % 100 !== 12 ? "nd" : n % 10 === 3 && n % 100 !== 13 ? "rd" : "th"}`;
-const segShort = (g: Segment) => (g.kind === "km" ? `km ${g.label}` : `R${g.label}`);
+const segShort = (g: Segment) => (g.kind === "km" ? `km ${g.label}` : repLabel(g.label, true));
 /** "+9.1 s", "+2:04.4" */
 const plus = (v: number) => `+${repTime(v)}`;
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));

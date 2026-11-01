@@ -112,6 +112,11 @@ export function gapText(v: number | null | undefined, unit: "s" | "m" = "s", d =
   return `${mag} ${v > 0 ? "behind" : "ahead"}`;
 }
 /** "Rep 3" (room) / "R3" (compact); never a bare number */
-export const repLabel = (n: number | string, compact = false) => (compact ? `R${n}` : `Rep ${n}`);
+/** rep label: "R3" / "Rep 3"; warm-up / cool-down slots ("WU1" / "CD1") -> "WU1" / "Warm-up 1" */
+export const repLabel = (n: number | string, compact = false) => {
+  const m = /^(WU|CD)(\d+)$/.exec(String(n));
+  if (m) return compact ? String(n) : `${m[1] === "WU" ? "Warm-up" : "Cool-down"} ${m[2]}`;
+  return compact ? `R${n}` : `Rep ${n}`;
+};
 /** "Sat 31 Oct 2026" (dayLabel's ISO form is for ids and inputs) */
 export const longDate = (date: string) => `${shortDate(date)} ${date.slice(0, 4)}`;

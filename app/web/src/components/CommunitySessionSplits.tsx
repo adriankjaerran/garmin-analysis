@@ -2,7 +2,7 @@
 // peak in the tooltip), every rep each person ran (also the ones only they ran), the fastest of each rep marked,
 // and an average row. Continuous runs / races / hikes already have "Splits per km" on the page.
 import { useMemo } from "preact/hooks";
-import { speedVal, speedUnit } from "../lib/format";
+import { repLabel, speedVal, speedUnit } from "../lib/format";
 import { personColour, personName } from "../lib/people";
 import { useTheme } from "../lib/theme";
 import { repTime, type Cell, type TSession } from "../lib/together";
@@ -60,8 +60,8 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
           </thead>
           <tbody>
             {rows.map(({ sl, timeSlot, cells, best }) => (
-              <tr key={sl.slot} class={!sl.anchor ? "extra" : ""}>
-                <td class="rl">R{sl.label}</td>
+              <tr key={sl.slot} class={(!sl.anchor ? "extra" : "") + (sl.warmup ? " warmup" : "")} title={sl.warmup ? `${sl.warmup}: not counted` : undefined}>
+                <td class="rl">{repLabel(sl.label, true)}</td>
                 <td class="muted set">{sl.target?.text ?? ""}</td>
                 {keys.map((k, i) => {
                   const v = cells[k];
