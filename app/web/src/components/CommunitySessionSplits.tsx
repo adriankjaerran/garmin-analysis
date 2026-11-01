@@ -10,7 +10,8 @@ import { Av } from "./CommunityBits";
 import "../pages/community-session.css";
 
 type N = number | null;
-const tOf = (c: Cell | null | undefined): N => (c ? (c.partial ? c.own_time_s ?? c.time_s : c.result_s ?? c.time_s ?? c.own_time_s) : null);
+/** time run: partial -> own time; a set-time rep -> the set time (result_s is a ranking equivalent there) */
+const tOf = (c: Cell | null | undefined, timeSlot = false): N => (c ? (c.partial ? c.own_time_s ?? c.time_s : timeSlot ? c.time_s : c.result_s ?? c.time_s ?? c.own_time_s) : null);
 const dOf = (c: Cell | null | undefined): N => (c ? (c.partial ? c.own_dist_m : c.dist_m ?? c.own_dist_m) : null);
 
 export function CommunitySessionSplits({ s }: { s: TSession }) {
@@ -24,7 +25,7 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
       const timeSlot = sl.target?.kind === "time";
       const cells = Object.fromEntries(keys.map((k) => {
         const c = iv.reps[k][sl.slot];
-        const t = tOf(c), d = dOf(c);
+        const t = tOf(c, timeSlot), d = dOf(c);
         return [k, c && t ? { c, t, d, ms: d && t ? d / t : null } : null];
       }));
       // fastest: the shortest time over a set distance, the longest distance in a set time
@@ -40,12 +41,12 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
   }, [iv, theme]);
   if (!iv || !rows.length || !keys.length) return null;
   const many = keys.length > 3;
+  // the Avg row = the leaderboard's numbers (every full rep the person ran, suspect ones left out), so they agree
   const avg = (k: string) => {
     const xs = rows.map((r) => r.cells[k]).filter((v): v is NonNullable<typeof v> => !!v && !v.c.suspect && !v.c.partial);
-    const t = xs.reduce((a, v) => a + v.t, 0), d = xs.reduce((a, v) => a + (v.d ?? 0), 0);
+    const lb = iv!.leaderboard.find((l) => l.person === k);
     const hrs = xs.map((v) => v.c.hr).filter((h): h is number => !!h);
-    const sameT = new Set(rows.filter((r) => r.cells[k]).map((r) => r.sl.target?.text)).size === 1;
-    return { n: xs.length, t: xs.length && sameT ? t / xs.length : null, ms: d && t ? d / t : null, hr: hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null };
+    return { n: lb?.n_counted ?? xs.length, t: lb?.avg_s ?? null, ms: lb?.pace_s_km ? 1000 / lb.pace_s_km : null, hr: hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null };
   };
   return (
     <section class="cs-splits">
@@ -84,7 +85,7 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
               <td><b>Avg</b></td><td class="set" />
               {keys.map((k, i) => {
                 const a = avg(k);
-                return [<td key={k + "t"} class={"num" + (i > 0 ? " sep" : "")} title={`${a.n} full reps`}><b>{a.t ? repTime(a.t) : `${a.n} reps`}</b></td>,
+                return [<td key={k + "t"} class={"num" + (i > 0 ? " sep" : "")} title={`${a.n} full reps (suspect ones left out) · the same numbers as the leaderboard`}><b>{a.t ? repTime(a.t) : `${a.n} reps`}</b></td>,
                   <td key={k + "p"} class="num"><b>{speedVal(sport, a.ms)}</b></td>, <td key={k + "h"} class="num muted">{a.hr ? Math.round(a.hr) : "—"}</td>];
               })}
             </tr>

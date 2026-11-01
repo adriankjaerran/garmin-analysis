@@ -1,14 +1,14 @@
 // Small shared pieces of the Community pages: avatars (Av), category chips, form-delta chips, stat tiles, the
-// head-to-head card, a debounced search box and a tile-free route sketch (SVG of the members' tracks).
+// pair card (sessions together), a debounced search box and a tile-free route sketch (SVG of the members' tracks).
 import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { get } from "../lib/api";
 import { setQuery } from "../lib/router";
 import { decodePolyline } from "../lib/geo";
+import { isoLocal, shortDate } from "../lib/format";
 import { mapColour, personColour, personInfo, personName } from "../lib/people";
 import { useTheme } from "../lib/theme";
 import { catInfo, catVar, delta, deltaCls, type FormInfo } from "../lib/community";
-import type { H2H } from "../lib/together";
 
 type N = number | null;
 
@@ -70,31 +70,19 @@ export const Stat = ({ v, label, sub, accent, title }: { v: ComponentChildren; l
   </div>
 );
 
-/** one pair's head-to-head, viewer first */
-export function PairCard({ h, viewer, sessions }: { h: H2H; viewer: string | null; sessions?: number }) {
-  const flip = viewer === h.b;
-  const [a, b] = flip ? [h.b, h.a] : [h.a, h.b];
-  const gap = h.mean_gap_s === null ? null : flip ? -h.mean_gap_s : h.mean_gap_s;
-  const wa = h.rep_wins[a] ?? 0, wb = h.rep_wins[b] ?? 0;
-  const sa = h.session_wins[a] ?? 0, sb = h.session_wins[b] ?? 0;
-  const tot = wa + wb + (h.rep_ties || 0);
+/** a pair of members: how often they trained together (no score), viewer first */
+export function PairCard({ a: a0, b: b0, viewer, sessions, last }: { a: string; b: string; viewer: string | null; sessions: number; last?: string | null }) {
+  const [a, b] = viewer === b0 ? [b0, a0] : [a0, b0];
   return (
     <div class="cm-pair">
       <div class="top">
         <PersonLink p={a} size="lg" />
-        <b class="score" title="Shared reps won">{h.shared_reps ? <>{wa}<span class="dash">–</span>{wb}</> : "—"}</b>
+        <b class="score" title="Sessions together">{sessions}</b>
         <span class="rt"><PersonLink p={b} size="lg" /></span>
       </div>
-      {tot > 0 && (
-        <div class="bar" aria-hidden="true">
-          <i style={{ flex: wa, background: personColour(a) }} />{h.rep_ties ? <i class="tie" style={{ flex: h.rep_ties }} /> : null}<i style={{ flex: wb, background: personColour(b) }} />
-        </div>
-      )}
       <div class="sub">
-        <span>{h.shared_reps ? `reps won of ${h.shared_reps} shared${h.rep_ties ? ` · ${h.rep_ties} tied` : ""}` : "no shared reps yet"}</span>
-        {h.interval_sessions > 0 && <span>interval sessions {sa}–{sb}</span>}
-        {gap !== null && h.shared_reps > 0 && <span>{personName(gap >= 0 ? a : b)} {Math.abs(gap).toFixed(1)} s/rep faster</span>}
-        <span>{sessions ?? h.sessions} sessions together</span>
+        <span>{sessions === 1 ? "session" : "sessions"} together</span>
+        {last && <span>last {shortDate(last, isoLocal())}</span>}
       </div>
     </div>
   );

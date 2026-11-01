@@ -13,7 +13,7 @@ import { ago, catVar, CATS, delta, HIGHLIGHT, hrs, kms, MEASURE_LABEL, periods, 
 import { PageHeader } from "../components/PageHeader";
 import { Av, AvStack, CatChip, FormChip, PairCard, PersonLink, Stat } from "../components/CommunityBits";
 import { ClubMonthChart } from "../components/ClubCharts";
-import { CompanyCard, GoalCard, LatestBadges, RivalryCard } from "../components/ClubMotivation";
+import { CompanyCard, GoalCard, LatestBadges } from "../components/ClubMotivation";
 import "./community.css";
 
 const MEDAL = ["🥇", "🥈", "🥉"];
@@ -89,7 +89,7 @@ export function ClubPage() {
         tips={[
           "Streak = consecutive weeks with a club session; it stays alive while the last one is this or last week",
           "Avg form = the mean of a member's form deltas (session score minus shape the day before)",
-          "Club records only count community sessions (shared reps everyone ran, races), not each member's solo training",
+          "Club records only count community sessions (every full rep anyone ran there, races), not each member's solo training",
           "Click a month in the chart to list its sessions; a highlight or record opens its session",
         ]}>
         <PeriodSelect period={period} years={years} />
@@ -103,7 +103,6 @@ export function ClubPage() {
             <div class="cm-stats">
               <Stat v={Math.round(t.km).toLocaleString("en-GB")} label="km" sub="all members" />
               <Stat v={t.hours.toFixed(t.hours >= 100 ? 0 : 1)} label="hours" sub="moving" />
-              <Stat v={t.person_hours_shared.toFixed(0)} label="person-hours" sub="out there together" title={`${t.person_hours_together.toFixed(1)} person-hours side by side (within ~50 m)`} />
               <Stat v={t.reps} label="reps" />
               <Stat v={t.climb_m.toLocaleString("en-GB")} label="m climbed" />
               <Stat v={t.places} label="places" />
@@ -138,13 +137,6 @@ export function ClubPage() {
               <div class="head"><h2>Faster together than alone?</h2><span class="sub">form delta in club sessions vs solo sessions of the same kind (±60 days){per ? ` · ${per.label}` : ""}</span></div>
               <div class="cc-grid">{c.attendance.filter((a) => c.company[a.person]).map((a) => <CompanyCard p={a.person} c={c.company[a.person]} />)}</div>
               <div class="cc-note">Form delta = the session's score minus the shape the day before (VDOT points). Rep pace compares interval sessions with reps of similar length (short &lt; 600 m, medium, long ≥ 1.4 km) within ±90 days.</div>
-            </section>
-          )}
-
-          {c.rivalry.length > 0 && (
-            <section class="cm-panel span2">
-              <div class="head"><h2>Rivalry</h2><span class="sub">head-to-head over time: shared reps and races</span></div>
-              <div class="cr-list">{c.rivalry.slice(0, 6).map((r) => <RivalryCard key={r.a + r.b} r={r} viewer={c.viewer} />)}</div>
             </section>
           )}
 
@@ -226,7 +218,7 @@ export function ClubPage() {
                 ))}</tbody>
               </table>
             )}
-            <div class="cm-pairs">{c.pairs.slice(0, 4).map((p) => <PairCard key={p.a + p.b} h={p.h2h} viewer={c.viewer} sessions={p.sessions} />)}</div>
+            <div class="cm-pairs">{c.pairs.slice(0, 4).map((p) => <PairCard key={p.a + p.b} a={p.a} b={p.b} viewer={c.viewer} sessions={p.sessions} last={p.last} />)}</div>
           </section>
 
           <section class="cm-panel span2">

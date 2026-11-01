@@ -166,7 +166,7 @@ def member(person: str, request: Request):
 @router.get("/community/wrapped/{year}")
 def wrapped(year: str, request: Request):
     """the yearly recap (Wrapped): totals vs the year before, top place, favourite category, biggest day, best form
-    jump, most loyal, closest finish, records, badges earned, rivalry, a slide per member. `latest` = the newest year
+    jump, most loyal, closest finish, records, badges earned, a slide per member. `latest` = the newest year
     with a club session"""
     if year == "latest":
         r = _run("wrapped", "latest", viewer=request.scope.get("person"))
@@ -194,20 +194,6 @@ def badges(request: Request):
         return f()
 
 
-@router.get("/community/rivalry")
-def rivalry(date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to")):
-    """head-to-head per pair over time: sessions with shared reps / the same race, cumulative rep wins, gap trend"""
-    def f():
-        cm = _cm()
-        tdoc = cm.tg.load()
-        B = cm.base(tdoc)
-        store = cm.load_store()
-        return {"people": B["people"], "rivalry": cm.rivalries(B, store, tdoc, cm._visible(B, store, tdoc, date_from, date_to))}
-    _doc()
-    with _LOCK:
-        return f()
-
-
 @router.get("/community/goals")
 def goals():
     """the club goals with progress; `goal` = the primary one (default "12 sessions this <season>" until one is saved)"""
@@ -217,7 +203,7 @@ def goals():
 @router.post("/community/goals")
 def add_goal(body: dict = Body(..., examples=[{"title": "500 km together in 2026", "metric": "km", "target": 500,
                                                "from": "2026-01-01", "to": "2026-12-31"}])):
-    """new goal {title?, metric: sessions|km|hours|person_hours|reps|climb_m, target, from, to} -> goals payload"""
+    """new goal {title?, metric: sessions|km|hours|reps|climb_m, target, from, to} -> goals payload"""
     try:
         _cm().add_goal(body)
     except ValueError as e:

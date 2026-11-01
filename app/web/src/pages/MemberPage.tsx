@@ -1,6 +1,6 @@
 // Community · Members: a card per member (/api/community/members) and a member's profile
-// (/api/community/members/<person>): totals, categories, form delta per session, shape trend, partners with
-// head-to-head, best sessions, club PBs and every session.
+// (/api/community/members/<person>): totals, categories, form delta per session, shape trend, training partners
+// (sessions together), best sessions, club PBs and every session.
 //   /community/members · /community/members/<person>
 import { useEffect, useMemo } from "preact/hooks";
 import { useApi } from "../lib/api";
@@ -11,9 +11,9 @@ import { repTime } from "../lib/together";
 import { DISC_LABEL } from "../lib/fitness";
 import { ago, catVar, CATS, delta, hrs, kms, MEASURE_LABEL, plural, type Attendance, type Member, type MemberSession } from "../lib/community";
 import { PageHeader } from "../components/PageHeader";
-import { Av, CatChip, FormChip, PairCard, PersonLink, Stat } from "../components/CommunityBits";
+import { Av, CatChip, FormChip, PersonLink, Stat } from "../components/CommunityBits";
 import { ClubFormChart, ClubShapeChart } from "../components/ClubCharts";
-import { BadgeGrid, CompanyCard, RivalryCard } from "../components/ClubMotivation";
+import { BadgeGrid, CompanyCard } from "../components/ClubMotivation";
 import "./community.css";
 
 const CatBars = ({ by, total }: { by: Attendance["by_category"]; total: number }) => (
@@ -115,7 +115,7 @@ function SessionRow({ s }: { s: MemberSession }) {
       <span class="c"><CatChip id={s.category} /></span>
       <span class="w"><b>{s.title ?? s.group_workout}</b><span class="muted">{s.place ?? ""}{s.workout && s.workout !== s.group_workout ? ` · own: ${s.workout}` : ""}</span></span>
       <span class="with">{s.with.map((p) => <Av key={p} p={p} size="sm" />)}</span>
-      <span class="rk">{s.rank && s.of_people ? (s.rank === 1 ? "🥇" : `${s.rank}/${s.of_people}`) : ""}{s.rep_wins ? <span class="muted small"> {s.rep_wins} rep wins</span> : null}</span>
+      <span class="rk">{s.rank && s.of_people ? (s.rank === 1 ? "🥇" : `${s.rank}/${s.of_people}`) : ""}</span>
       <span class="f"><FormChip v={s.form?.delta ?? null} info={s.form} />{s.form && <span class="muted small"> {s.form.score.toFixed(1)}</span>}</span>
       <span class="num">{n?.km ? `${n.km.toFixed(1)} km` : "—"}</span>
       <span class="num muted">{dur(n?.moving_s)}</span>
@@ -164,7 +164,6 @@ export function MemberPage({ person }: { person: string }) {
         <Stat v={t.hours.toFixed(1)} label="hours" />
         <Stat v={t.reps} label="reps" />
         <Stat v={t.climb_m.toLocaleString("en-GB")} label="m climbed" />
-        <Stat v={Math.round(t.min_together / 60)} label="hours together" title="time on the move with someone (sum over the sessions)" />
         <Stat v={<FormChip v={t.avg_form_delta} showNone />} label="avg form" sub={fs.length ? `${avgUp} of ${fs.length} above form` : ""} />
         <Stat v={`${t.best_streak_weeks} wk`} label="best streak" sub={`${t.weeks_active} active weeks`} />
       </div>
@@ -179,12 +178,6 @@ export function MemberPage({ person }: { person: string }) {
           <div class="head"><h2>Faster together than alone?</h2><span class="sub">club vs solo sessions of the same kind, ±{m.company.window_days} days</span></div>
           <CompanyCard p={m.person} c={m.company} full />
           <div class="cc-note">Each dot = one session's form delta (score − shape the day before); the bar = the average over the sessions that have a partner to compare with (same kind, within 60 days). Together = club sessions, alone = {personName(m.person)}'s own sessions of the same discipline near a club one. Click a dot to open it.</div>
-        </section>
-
-        <section class="cm-panel">
-          <div class="head"><h2>Rivalry</h2><span class="sub">head-to-head over time</span></div>
-          {m.rivalry.length ? <div class="cr-list one">{m.rivalry.map((r) => <RivalryCard key={r.a + r.b} r={r} viewer={m.person} />)}</div>
-            : <div class="empty">No shared reps or races yet.</div>}
         </section>
 
         <section class="cm-panel">
@@ -206,7 +199,6 @@ export function MemberPage({ person }: { person: string }) {
           {m.partners.length ? m.partners.map((p) => (
             <div class="cm-partner">
               <div class="row"><PersonLink p={p.person} size="lg" /><span class="muted">{plural(p.sessions, "session")} together · last {shortDate(p.last, isoLocal())}</span></div>
-              <PairCard h={p.h2h} viewer={m.person} sessions={p.sessions} />
             </div>
           )) : <div class="empty">No partners yet.</div>}
         </section>

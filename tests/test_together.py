@@ -35,15 +35,15 @@ def test_list_under_any_prefix(client, prefix):
     r = client.get(prefix + "/together")
     assert r.status_code == 200, r.text[:300]
     d = r.json()
-    assert {"n", "groups", "h2h", "people", "viewer"} <= set(d)
+    assert {"n", "groups", "people", "viewer"} <= set(d) and "h2h" not in d
     assert d["viewer"] == (prefix.split("/")[2] if prefix != "/api" else None)
     assert B400 in _gids(r) and NEAR not in _gids(r)   # near-misses hidden by default
     row = next(g for g in d["groups"] if g["gid"] == B400)
     assert row["label"] == "same_workout" and row["kind"] == "intervals" and set(row["people"]) == {"adrian", "patrik"}
-    assert row["headline"]["winner"] == "adrian" and row["headline"]["rep_wins"] == {"adrian": 10, "patrik": 0}
+    # a neutral headline: workout · members · fastest rep, no win counts
+    h = row["headline"]
+    assert h["text"] == "15×400 · 2 members · fastest rep 1:15.6" and "winner" not in h and "rep_wins" not in h
     assert {(p["person"], p["reps_done"], p["of"]) for p in row["participants"]} == {("adrian", 15, 15), ("patrik", 10, 15)}
-    h = next(x for x in d["h2h"] if {x["a"], x["b"]} == {"adrian", "patrik"})
-    assert h["shared_reps"] >= 10 and h["sessions"] >= h["interval_sessions"] >= 1
 
 
 def test_list_filters(client):
@@ -62,16 +62,15 @@ def test_session_intervals(client):
     s = r.json()
     assert s["viewer"] == "patrik" and s["kind"] == "intervals"
     iv = s["intervals"]
-    assert len(iv["slots"]) == 15 and len(iv["shared_slots"]) == 10
+    assert len(iv["slots"]) == 15 and "shared_slots" not in iv and all("shared" not in sl for sl in iv["slots"])
     assert all(sl["target"] == {"kind": "dist", "value": 400, "text": "400 m"} for sl in iv["slots"])
     lb = {x["person"]: x for x in iv["leaderboard"]}
-    assert lb["adrian"]["rank"] == 1 and lb["adrian"]["rep_wins"] == 10
-    # totals over the shared reps = sum of the per-rep results; cumulative ends at the total gap
-    for p, x in lb.items():
-        tot = sum(iv["reps"][p][i]["result_s"] for i in iv["shared_slots"])
-        assert abs(tot - x["total_s"]) < 1.0
-    assert abs(iv["cumulative"]["people"]["patrik"][-1]["gap_s"] - lb["patrik"]["gap_s"]) < 0.2
-    assert 60 < lb["patrik"]["gap_s"] < 100       # 14:10.7 vs 12:52.3
+    assert lb["adrian"]["rank"] == 1 and lb["patrik"]["rank"] == 2
+    assert not {"rep_wins", "rep_ties", "gap_s", "all_n"} & set(lb["adrian"])
+    # each person's own time so far: every full rep, also the ones only they ran (patrik stops after 10)
+    cu = iv["cumulative"]["people"]
+    assert len(cu["adrian"]) == 15 and cu["adrian"][-1]["n"] == 15 and cu["patrik"][9]["n"] == 10 and cu["patrik"][10] is None
+    assert cu["adrian"][-1]["total_s"] == pytest.approx(sum(c["result_s"] for c in iv["reps"]["adrian"]), abs=0.5)
     for st in iv["standings"]:
         o = st["order"]
         assert not o or (o[0]["rank"] == 1 and o[0]["gap_s"] == 0 and all(a["result_s"] <= b["result_s"] for a, b in itertools.pairwise(o)))
@@ -115,16 +114,19 @@ def test_replay_segments_and_passes(client):
     assert d["segment_kind"] == "rep" and len(d["segments"]) == 15
     s1 = d["segments"][0]
     assert set(s1["people"]) == {"adrian", "patrik"} and s1["target_m"] == 400
-    assert s1["total"]["adrian"]["rank"] == 1 and s1["moves"] == []          # adrian leads after every rep
+    assert s1["total"]["adrian"]["rank"] == 1 and s1["moves"] == []          # same reps so far: ranked, adrian ahead
     assert d["segments"][9]["total"]["patrik"]["gap_s"] == pytest.approx(78.4, abs=0.2)
-    assert d["segments"][10]["total"] is None and len(d["segments"][10]["people"]) == 1
+    # rep 11 only adrian ran: his own time so far (11 reps), not a race
+    t11 = d["segments"][10]["total"]
+    assert set(t11) == {"adrian"} and t11["adrian"]["n"] == 11 and len(d["segments"][10]["people"]) == 1
     assert d["passes"] == []                                                  # adrian ahead in every rep
     # 2026-10-06 (3 × 1800 + 2 × 900): adrian's GPS measured his 1800s at 1744-1762 m; the rep ends at his lap press
     # (6:43 for rep 2), not 46 m further into the walking recovery (9:48, which let patrik "pass" him at 1780 m)
     f = client.get("/api/together/2026-10-06_1911_Frogner-stadion/replay").json()
     r2 = next(x for x in f["segments"] if x["label"] == "2")
-    assert r2["passes"]["own"] == [] and r2["moves"] == []
-    assert r2["total"]["adrian"]["rank"] == 1
+    assert r2["passes"]["own"] == []
+    # patrik ran two extra reps before rep 1 (only he ran them): the totals so far are each person's own, not ranked
+    assert r2["moves"] is None and r2["total"]["adrian"]["rank"] is None and r2["total"]["patrik"]["n"] == 4
     assert all(p["t_s"] >= f["segments"][p["seg"]]["start_s"] for p in f["passes"])
     # continuous: per km along the shared route, route_m per person
     lier = client.get("/api/together/2023-05-07_1200_Lier-1/replay").json()
@@ -157,13 +159,40 @@ def test_activity_rows_link_to_group(client):
     assert client.get("/api/activities/24874084265").json()["activity"]["together"] is None   # near-miss: no link
 
 
-def test_leaderboard_all_reps_and_suspect(client):
-    lb = {x["person"]: x for x in client.get(f"/api/together/{B400}").json()["intervals"]["leaderboard"]}
-    a = lb["adrian"]
-    assert a["all_n"] == 15 and a["all_total_s"] > a["total_s"] + 4 * 60   # all 15 reps, not the 10 shared ones
-    assert "15" in a["suspect"] and a["best"]["label"] != "15"            # 64.5 s for 400 m: flagged, not "best"
-    assert 150 < a["pace_s_km"] < 260 and a["all_pace_s_km"]
-    assert lb["patrik"]["all_total_s"] == lb["patrik"]["total_s"]
+def test_leaderboard_every_rep_counts(client):
+    """no "reps everyone ran" subset: adrian's 15 and patrik's 10 reps all count; ranked by the distance-weighted pace
+    over each person's own full reps (suspect ones left out of the averages); the splits' Avg is the same number"""
+    iv = client.get(f"/api/together/{B400}").json()["intervals"]
+    lb = {x["person"]: x for x in iv["leaderboard"]}
+    a, p = lb["adrian"], lb["patrik"]
+    assert a["reps_done"] == 15 and p["reps_done"] == 10
+    assert "15" in a["suspect"] and a["n_counted"] == 14 and a["best"]["label"] != "15"   # 64.5 s for 400 m: flagged
+    for x in (a, p):
+        cells = [c for c in iv["reps"][x["person"]] if c and not c["partial"] and c["result_s"] and not c.get("suspect")]
+        assert len(cells) == x["n_counted"]
+        avg = sum(c["result_s"] for c in cells) / len(cells)
+        assert x["avg_s"] == pytest.approx(avg, abs=0.06)                                   # = the splits' Avg row
+        assert x["pace_s_km"] == pytest.approx(1000 * sum(c["result_s"] for c in cells) / (400 * len(cells)), abs=0.06)
+        assert x["by_target"] == [{"kind": "dist", "value": 400, "text": "400 m", "n": len(cells), "avg_s": x["avg_s"],
+                                   "best_s": min(c["result_s"] for c in cells)}]
+    assert a["pace_s_km"] < p["pace_s_km"] and a["gap_s_km"] == 0 and p["gap_s_km"] == pytest.approx(p["pace_s_km"] - a["pace_s_km"], abs=0.11)
+    # adrian's reps 11-14 (only he ran them) are in his average: it differs from the first 10 alone
+    first10 = sum(c["result_s"] for c in iv["reps"]["adrian"][:10]) / 10
+    assert abs(a["avg_s"] - first10) > 0.1
+
+
+def test_every_rep_ranked_among_whoever_ran_it():
+    """Frogner 2026-10-06: a slot two or more people ran is ranked among them; a slot one person ran stays unranked; the leaderboard
+    ranks by own pace even when people ran different reps"""
+    import together as tg
+    s = tg.session("2026-10-06_1911_Frogner-stadion")
+    iv = s["intervals"]
+    for st in iv["standings"]:
+        ran = [k for k, cells in iv["reps"].items() if cells[st["slot"]] and cells[st["slot"]]["result_s"] is not None]
+        assert len(st["order"]) == (len(ran) if len(ran) >= 2 else 0)
+    paces = [x["pace_s_km"] for x in iv["leaderboard"] if x["rank"] is not None]
+    assert paces == sorted(paces) and [x["rank"] for x in iv["leaderboard"] if x["rank"]] == list(range(1, len(paces) + 1))
+    assert "fastest rep" not in s["headline"]["text"] and s["headline"]["text"].startswith(s["group"]["workout"])
 
 
 def test_hike_group_sport_place_and_gap():

@@ -50,9 +50,11 @@ function rows(s: TSession, c: CsSession): Row[] {
   const out = c.members.filter((m) => m.role !== "other").map((m): Row => {
     const lb = lbOf(m.key), race = raceOf(m.key), n = m.numbers;
     let main = "", sub = "";
-    if (lb && lb.total_s !== null) {
-      main = repTime(lb.total_s);
-      sub = [`${lb.reps_done}/${lb.of} reps`, lb.avg_s ? `avg ${repTime(lb.avg_s)}` : null, lb.pace_s_km ? speedText(sport, 1000 / lb.pace_s_km) : null].filter(Boolean).join(" · ");
+    if (lb && lb.pace_s_km !== null) {
+      // every rep they ran: the average rep (one set distance) or the average rep pace
+      main = lb.avg_s ? repTime(lb.avg_s) : speedText(sport, 1000 / lb.pace_s_km);
+      sub = [`${lb.reps_done} reps`, lb.avg_s ? "avg rep" : "avg rep pace", lb.avg_s ? speedText(sport, 1000 / lb.pace_s_km) : null,
+        lb.best ? `best ${repTime(lb.best.result_s)}` : null].filter(Boolean).join(" · ");
     } else if (race) {
       main = hms(race.time_s);
       sub = [race.dist_km ? `${race.dist_km.toFixed(2)} km` : null, race.dist_km ? speedText(sport, (race.dist_km * 1000) / race.time_s) : null].filter(Boolean).join(" · ");
@@ -61,7 +63,7 @@ function rows(s: TSession, c: CsSession): Row[] {
       sub = [n?.km ? `${n.km.toFixed(1)} km` : null, n?.km && n?.moving_s ? speedText(sport, (n.km * 1000) / n.moving_s) : null].filter(Boolean).join(" · ");
     }
     const d = m.form && m.form.confidence !== "none" ? m.form.delta : null;
-    const ranked = s.intervals ? s.intervals.leaderboard.filter((l) => l.total_s !== null).length > 1 : (s.continuous?.race?.length ?? 0) > 1;
+    const ranked = s.intervals ? s.intervals.leaderboard.filter((l) => l.rank !== null).length > 1 : (s.continuous?.race?.length ?? 0) > 1;
     return { key: m.key, rank: ranked ? m.rank ?? race?.rank ?? null : null, workout: m.workout ?? "", main, sub, delta: d ?? null, low: m.form?.confidence === "low" };
   });
   return out.sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
@@ -138,7 +140,9 @@ export async function drawShareCard(s: TSession, c: CsSession, facts: Facts, rep
   const title = c.meta.title || c.display_title || s.group.workout;
   const tl = wrap(x, title, W - 2 * L, 2);
   const place = c.place?.name ?? s.group.place?.name;
-  const hl = s.headline?.text && s.headline.kind !== "unverified" ? s.headline.text.split(" · ").slice(0, 2).join(" · ") : "";
+  // the neutral headline without what the card already says (the workout as title, the member count in the footer)
+  const hl = s.headline?.text && s.headline.kind !== "unverified"
+    ? s.headline.text.split(" · ").filter((p) => p !== title && p !== s.group.workout && !/^\d+ members?$/.test(p)).slice(0, 2).join(" · ") : "";
   let y = TOP - 40 - (hl ? 56 : 0) - 50 - (tl.length - 1) * 92;
   x.fillStyle = "#fff";
   for (const t of tl) { x.fillText(t, L, y); y += 92; }
@@ -147,7 +151,7 @@ export async function drawShareCard(s: TSession, c: CsSession, facts: Facts, rep
   x.fillText(fit(x, [longDate(c.date), place ? `📍 ${place}` : null].filter(Boolean).join("  ·  "), W - 2 * L), L, y);
   if (hl) {
     y += 56; x.font = f(700, 38); x.fillStyle = "#fff";
-    x.fillText(fit(x, `${s.headline.kind === "race" ? "🏁" : s.headline.kind === "intervals" ? "🏆" : "👥"} ${hl}`, W - 2 * L), L, y);
+    x.fillText(fit(x, `${s.headline.kind === "race" ? "🏁" : s.headline.kind === "intervals" ? "⚡" : "👥"} ${hl}`, W - 2 * L), L, y);
   }
   x.shadowBlur = 0; x.shadowColor = "transparent";
 

@@ -7,7 +7,7 @@ current form, and records. Plus a club dashboard and member profiles. Spec and d
 `/api/together/{gid}` (+ `/replay`).
 
 ```
-uv run scripts/community.py list            # sessions: category, members + guests, km, hours, person-min together, form, records
+uv run scripts/community.py list            # sessions: category, members + guests, km, hours, form, records
 uv run scripts/community.py categories      # the automatic category of every group, with the reason
 uv run scripts/community.py club | member <person> | show <gid>    # JSON (trimmed)
 ```
@@ -19,7 +19,7 @@ cm.list_sessions(category=, person=, date_from=, date_to=, q=, near=, hidden=, v
 cm.get_session(gid); cm.club(date_from=, date_to=); cm.members(); cm.member(person)
 cm.patch(gid, {...}); cm.kudos(gid, person, on=True); cm.add_photo(gid, bytes, filename, by); cm.delete_photo(gid, id)
 cm.auto_category(group) -> (category, reason)
-cm.company_effect(B, store, tdoc, person); cm.badges_for(B, store, tdoc, person); cm.rivalries(B, store, tdoc, gids=None)
+cm.company_effect(B, store, tdoc, person); cm.badges_for(B, store, tdoc, person)
 cm.wrapped(year | "latest"); cm.goals(); cm.patch_goal(id, {...}); cm.add_goal({...}); cm.delete_goal(id)
 ```
 
@@ -51,7 +51,7 @@ Six: `intervals` ⚡, `tempo` 🔥, `long` 🛣️, `easy` 🌿, `race` 🏁, `o
 `category_reason`); a manual `category` in community.json wins (`category_manual: true`). Rules, first match:
 
 1. **race**: group kind `race` / label `same_race`.
-2. **intervals**: group kind `intervals` (≥ 2 shared reps; ski intervals too).
+2. **intervals**: group kind `intervals` (detection found ≥ 2 reps started together; ski intervals too).
 3. **other**: the group sport isn't run (hike, bike, ski, swim, other): hikes, rides, ski tours. Together's group sport
    is the majority over typed members, so a hike one person logged as "Run" is a hike.
 4. **intervals**: every member logged an interval type (`intervals_*`, `ski_intervals`) with ≥ 2 reps (the near-miss
@@ -69,16 +69,15 @@ On today's data: 6 intervals (incl. the hidden 2026-10-27 near-miss), 3 easy, 1 
 - **Members / `n_timed`**: distinct people with a watch file in the group (role `other` = near-miss partner left out);
   `timed` = their participant keys (`patrik#2` for a 2nd file). Guests are names without a watch file (`n_guests`).
 - **Collective** (sum over the members): `km` (detected distance), `moving_s` (groups.json moving time, else the
-  index's movingDuration), `reps` (all full reps each ran: leaderboard `all_n`, else the own detector's count),
-  `reps_shared` (shared slots × people), `climb_m` (index elevationGain), `kcal`, `person_min_together` (per member the
-  longest "with each other" time with anyone, from detection's `with_s`) and `person_min_shared` (per member the
-  longest time overlap). Unverified groups (no track on one side) use the overlap for both: `together_estimated: true`.
-  `per_person` has the same per participant key (+ `avg_hr`, `dur_s`, `with_min`, `shared_min`).
+  index's movingDuration), `reps` (every full rep each ran: leaderboard `reps_done`, else the own detector's count),
+  `climb_m` (index elevationGain), `kcal`. `per_person` has the same per participant key (+ `avg_hr`, `dur_s`).
+  There is no "together time" (person-minutes side by side / overlapping): removed 2026-11-01.
 - **Form**: `form_delta(person, activity_id)` per participant (role `other` → null). Lists carry `form: {key: delta}`
   and `form_info: {key: {delta, text, confidence, discipline, score, shape}}`; sessions / members the full dict.
-- **Efforts** (for records): per group and person, the best rep and the average rep (≥ 2 reps) per set distance — only
-  **ranked** cells (shared slots with a result for everyone), not partial, not suspect (together's rules) — and each
-  race result within ±5 % of 5k / 10k / half / marathon.
+- **Efforts** (for records): per group and person, the best rep and the average rep (≥ 2 reps) per set distance — every
+  full rep the person ran (also the ones only they ran: no "shared reps" since 2026-11-01), not partial, not suspect
+  (together's rules) — and each race result within ±5 % of 5k / 10k / half / marathon. A short extra "rep" the detector
+  found (a stride, a jog-in) can therefore set a record at an odd distance (250 m, 600 m).
 - **Records set in a session**: an effort that beats every earlier effort (by group start) for the same measure and
   distance is a `club_best`; else, beating the person's own earlier ones a `pb` ("club PB": within community sessions,
   not the person's all-time PB). The first effort at a distance is no record (nobody to beat). On today's data
@@ -105,31 +104,26 @@ community sessions (not near-misses, not user-hidden), oldest first.
   3:19 /km together vs 3:22 alone.
 
 ### Badges (`BADGES`, `badges_for`)
-30 badges in groups attendance / places / time / effort / form / rivalry / records / social: first session, 5 / 10 /
+28 badges in groups attendance / places / time / effort / form / records / social: first session, 5 / 10 /
 25 sessions, 3- and 8-week streak, comeback (90+ days away), loyal partner (10 with one person), track rat (5 on a
 track: own type `intervals_track` or a place named Bislett / stadion / track), explorer (5 places), globetrotter
 (3 regions ≥ 300 km apart), early bird (start < 08:00), night owl (≥ 20:00), winter warrior (Dec–Feb), hill goat
 (500 m climb in one session), rep machine (20 reps), century (100 km), long haul (500 km), a day out there (24 h
-moving), all-rounder (4 categories), race day, beat your form (+2), day of days (+4), rep winner (10 shared reps won),
-photo finish (a shared rep / race within 1 s), record breaker (a club record or club PB), club record holder (holds
+moving), all-rounder (4 categories), race day, beat your form (+2), day of days (+4), record breaker (a club record or club PB), club record holder (holds
 one now), iron lungs (the club's longest single session by moving time — exactly one holder), kudos magnet (5 kudos
 from others), shutterbug (a session with photos). Earned = the first session where the running value reached the
 target (date + gid + detail, e.g. "+2.9 vs form"); holder badges while held (else "held by Adrian: 4:03 h").
 Locked ones carry `value` / `target` / `progress` (0..1).
 
-### Rivalry (`duels`, `rivalries`)
-Per pair and session: every shared rep both have a result for (together's tie rule: |gap| ≤ max(1 s, tie_s)) — or,
-without intervals, the same race result. Per session `wins`, `ties`, `mean_gap_s` (b − a, positive = a faster),
-`gap_s_km` (gap ÷ the slot's set distance), `closest_s`; over time `cum_wins`. Trend over the gap per km (else per
-rep): mean of the first third vs the last third of the sessions → `closing` ("Patrik is closing in: gap 30 → 17
-s/km"), `pulling_away`, `turned` (the faster one changed), `steady`. Rep wins from reps match together's
-head-to-head exactly (tested); races are added on top — so a rivalry score (27–0) can be one more than the
-head-to-head card's reps (26–0); `races`, `race_wins`, `race_ties` give the split, shown as "shared reps 26–0 · race
-1–0 · 6 sessions · 1 tied rep".
+### No rivalry (2026-11-01)
+The club decided against rivalry: no head-to-head scores, rivalry timelines, win counts, "rep winner" / "photo finish"
+badges or win-count headlines (`duels`, `rivalries`, `/api/community/rivalry` and together's `head_to_head` are gone).
+Results stay: each rep is ranked among whoever ran it (medals per rep), the session leaderboard orders by average rep
+pace, races by finish time.
 
 ### Goals
-`goals` in community.json (list; id, title, metric `sessions | km | hours | person_hours | reps | climb_m`, target
-> 0, from ≤ to; unknown keys kept, invalid entries ignored). Progress over the visible sessions in the period: value,
+`goals` in community.json (list; id, title, metric `sessions | km | hours | reps | climb_m`, target
+> 0, from ≤ to; unknown keys kept, invalid entries — also the removed `person_hours` metric — ignored). Progress over the visible sessions in the period: value,
 pct, `expected` (target × elapsed share of the period), status `done | ahead (≥ 110 % of expected) | on_track
 (≥ 90 %) | behind | ended | upcoming`, days left, `by_member` (person-level: sessions attended / own km / …). The
 primary `goal` = the first running one, else the one ending last; none stored → a suggested default
@@ -152,8 +146,8 @@ words in gid, date, place, workout, people, title, note, guests, category; `near
 ```
 {n, viewer, built, people: {id: {name, initials, colour, colour_dark, auto}},
  categories: [{id: "intervals", label: "Intervals", emoji: "⚡", description, n: 5}, ...],
- totals: {sessions: 17, km: 357.3, hours: 45.7, person_hours_together: 43.0, reps: 68, photos: 0, guests: 0},
- h2h: [...as /api/together], form_available: true, store_error: null, compute_ms,
+ totals: {sessions: 17, km: 357.3, hours: 45.7, reps: 68, photos: 0, guests: 0},
+ form_available: true, store_error: null, compute_ms,
  groups: [{gid, date, start_local, start_utc, sport, sports, kind, label, label_text, score, hidden, place, workout,
            people, n_people, no_track, participants: [...], headline: {...},          # together's row
            category: "intervals", category_auto: "intervals", category_manual: false,
@@ -162,8 +156,7 @@ words in gid, date, place, workout, people, title, note, guests, category; `near
            photo: {thumb, url, w, h} | null /* cover, else the first */, n_photos: 0,
            kudos: ["patrik"], n_kudos: 1, kudoed: true | false | null /* no viewer */, mine: true | null,
            user_hidden: false,
-           collective: {km: 17.9, moving_s: 5805, hours: 1.61, reps: 25, reps_shared: 20, climb_m: 27, kcal: 1538,
-                        person_min_together: 38, person_min_shared: 111, together_estimated: false, n_members: 2},
+           collective: {km: 17.9, moving_s: 5805, hours: 1.61, reps: 25, climb_m: 27, kcal: 1538, n_members: 2},
            form: {adrian: 2.4, patrik: 2.9},
            form_info: {adrian: {delta: 2.4, text: "+2.4 vs form", confidence: "high", discipline: "interval", score: 54.9, shape: 52.5}},
            n_records: 1, records_short: ["Club record: Adrian's fastest rep 400 m 1:15.6 (2.1 s under Patrik's 1:17.7)"]}]}
@@ -177,10 +170,10 @@ words in gid, date, place, workout, people, title, note, guests, category; `near
         photos: [{id, url: "/api/community/photos/<gid>/<id>.jpg", thumb: ".../<id>_t.jpg", by, at, taken, name, w, h}],
         cover, kudos: ["patrik"], hidden},
  n_timed, n_guests, kudoed,
- collective: {...as in the list, per_person: {key: {km, moving_s, dur_s, climb_m, kcal, reps, avg_hr, with_min, shared_min}}},
+ collective: {...as in the list, per_person: {key: {km, moving_s, dur_s, climb_m, kcal, reps, avg_hr}}},
  form: {key: {score, shape, delta, discipline, kind, confidence, text, …} | null}, form_available,
  members: [{key, person, display, role, activity_id, workout, type, has_fit, timed, form, numbers /* per_person */,
-            rank, rep_wins, reps_done, of, avg_s, pace_s_km /* intervals leaderboard */, records: [...]}],
+            rank, reps_done, n_counted, of, avg_s, pace_s_km, by_target, best /* intervals leaderboard */, records: [...]}],
  records: [{kind: "club_best" | "pb", measure: "rep" | "avg" | "race", dist_m: 3000, label: "3 km", person, key,
             value_s: 691.0, n /* reps behind it */, prev_s, prev_person?, prev_gid, prev_date, improvement_s, text}],
  headline: {...together's}, nav: {newer: gid | null, older: gid | null} /* visible groups, list order */,
@@ -209,21 +202,23 @@ Any name ≤ 40 chars is accepted (guests can give kudos too).
 Over the visible sessions (not together's near-misses, not user-hidden) in the period.
 ```
 {from, to, today, viewer, people, form_available, store_error, compute_ms,
- totals: {sessions, km, hours, person_hours_together, person_hours_shared, reps, climb_m, kcal, members, guests,
+ totals: {sessions, km, hours, reps, climb_m, kcal, members, guests,
           guest_visits, photos, kudos, places, first, last, this_year: {year, sessions, km, hours, most_loyal: {person, sessions} | null}},
- months: [{month: "2026-10", sessions, km, hours, person_hours_together, reps, climb_m, members: [..], n_members,
+ months: [{month: "2026-10", sessions, km, hours, reps, climb_m, members: [..], n_members,
            by_category: {intervals: 3}, gids: [..]}]          /* every month first..last, zeros included */,
  attendance: [{person, display, sessions, share /* of all sessions */, first_seen, last_seen, last_gid, days_since,
                streak_weeks /* consecutive weeks with a session, alive if the last is this or last week */,
                best_streak_weeks, weeks_active, km, hours, reps, by_category, favourite_place, avg_form_delta, n_form}],
  most_loyal: {person, sessions} | null (the period's single top attender; null on a tie),
- pairs: [{a, b, sessions, last, h2h: {...together's head-to-head}}],
+ pairs: [{a, b, sessions, last}]   /* sessions together, no score */,
  pair_matrix: {people: [ids], n: [[sessions together; diagonal = own sessions]]},
  categories: [{id, label, emoji, description, n, km, hours}],
  records: [{measure: race | avg | rep, dist_m, label: "10k" | "400 m", value_s, text: "39:08" | "1:04.5",
             person, gid, date, n_efforts, by_person: {person: {value_s, gid, date}}}],
  highlights: [{kind: closest_finish | form_jump | longest_session | most_km | most_reps | most_climb |
-               biggest_turnout (≥ 3) | latest_club_record, gid, date, person, other?, value, unit, text}],
+               biggest_turnout (≥ 3) | latest_club_record, gid, date, person, other?, value, unit, text}]
+             /* closest_finish = the rep (any rep ≥ 2 ran) / race with the smallest gap between the first two, worded
+                neutrally: "Rep 4: Adrian and Patrik 1.4 s apart" */,
  heatmap: {weekdays: ["Mon", …], hours: [0..23], n: [7 × 24 counts by local start]},
  places: [{id, name, sessions, last}], guests: [{name, visits}],
  recent: [{gid, date, title, category, people, km, records}]   /* 8 newest */}
@@ -234,13 +229,13 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
 ### `GET /api/community/members/{person}` (404 if not a member and not a known person)
 ```
 {person, display, viewer, form_available, compute_ms,
- totals: {sessions, km, hours, reps, climb_m, min_together, records /* set in sessions */, club_records_held, first,
+ totals: {sessions, km, hours, reps, climb_m, records /* set in sessions */, club_records_held, first,
           last, streak_weeks, best_streak_weeks, weeks_active, avg_form_delta},
  by_category: {intervals: 5, …},
  sessions: [{gid, date, start_local, place, workout /* own */, group_workout, title, category, with: [people], role,
-             form, numbers, rank, of_people, rep_wins, avg_s, pace_s_km, records, n_photos, kudos}]   /* newest first */,
+             form, numbers, rank, of_people, reps_done, avg_s, pace_s_km, records, n_photos, kudos}]   /* newest first */,
  form_series: [{date, gid, score, shape, delta, discipline, …}]     /* oldest first, sessions with a delta */,
- partners: [{person, display, sessions, last, gids, rep_wins, rep_losses, rep_ties, h2h}],
+ partners: [{person, display, sessions, last, gids}],
  best_sessions: [≤ 5 sessions by form delta, confidence ≠ none],
  personal_bests: [efforts: {gid, date, measure, dist_m, label, value_s, n}],
  shape: {built, disciplines: {interval | long | ski: {label, unit, personal_best, current: {...fitness.json},
@@ -250,33 +245,28 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
 ### Motivation endpoints
 - `/api/community/club` adds `company: {person: {diff, verdict, text, n_joint, n_solo, n_compared, n_joint_cmp, n_solo_cmp, joint_avg, solo_avg,
   thin, pace: [{family, label, diff_s_km, text, n_joint, n_solo, joint_s_km, solo_s_km}]}}` (over the period when
-  `from` / `to` are given), `rivalry: [...]` (over the period), `latest_badges` (10 newest, all members, `person` +
+  `from` / `to` are given), `latest_badges` (10 newest, all members, `person` +
   badge), `goal`, `goals`, `goal_metrics`; each `attendance` row (and `/members` rows) gets `company` and
   `badges: {earned, total, latest: [4 × {id, emoji, name, date, gid}], next: {id, emoji, name, progress, value, target, unit}}`.
 - `/api/community/sessions` adds `goal` (the primary goal with progress, for the Sessions header).
 - `/api/community/members/{person}` adds `badges: {person, earned, total, badges: [{id, emoji, name, description,
   group, earned, date, gid, value, target, progress, unit, detail}]}` (earned newest first, then locked by progress),
   `company` (as above + `window_days`, `by_discipline`, `joint: [{gid, date, delta, discipline}]`,
-  `solo: [{activity_id, date, delta, discipline, type, name}]`, pace `joint` / `solo` lists) and `rivalry` (the
-  member's pairs).
+  `solo: [{activity_id, date, delta, discipline, type, name}]`, pace `joint` / `solo` lists).
 - `GET /api/community/badges` → `{people, badges: {person: badges}, latest (20), definitions}`.
-- `GET /api/community/rivalry?from=&to=` → `{people, rivalry: [{a, b, sessions, reps, wins, ties, races, race_wins, race_ties, mean_gap_s_km,
-  mean_gap_s, leader, trend: {kind, text, early, late, unit, leader_now, window} | null, headline,
-  timeline: [{gid, date, kind: reps | race, title, n, wins, ties, mean_gap_s, gap_s_km, closest_s, cum_wins, cum_ties}]}]}`.
 - `GET /api/community/goals` → `{goal, goals: [{id, title, metric, target, from, to, default?, unit, metric_label,
   value, pct, expected, expected_pct, remaining, days, days_left, status, text, n_sessions, last_gid,
   by_member: [{person, value}]}], metrics: [{id, unit, label}]}`; `POST /api/community/goals` `{title?, metric,
   target, from, to}`; `PATCH /api/community/goals/{id}` (any of those; `default` materialises the suggestion);
   `DELETE /api/community/goals/{id}` — all return the goals payload; bad values / unknown fields → 422, unknown id → 404.
 - `GET /api/community/wrapped/{year | latest}` (404 for a year without sessions, 422 for a bad year) →
-  `{year, years, people, totals: {sessions, km, hours, person_hours_together, reps, climb_m, kcal, members, places},
+  `{year, years, people, totals: {sessions, km, hours, reps, climb_m, kcal, members, places},
   previous (the year before | null), first, last, top_place: {name, sessions, others}, favourite_category: {…, n, mix},
-  months: [12 × {month, sessions, km}], busiest_month, biggest_day (most km), longest (+ minutes together),
+  months: [12 × {month, sessions, km}], busiest_month, biggest_day (most km), longest (+ minutes: the session's length),
   form_jump (+ person, delta, text), closest_finish, most_loyal: {person, sessions, of, tied_with: [person]}, top_pair: {a, b, sessions},
   records_set, records_standing (club records set this year that still stand), badges (earned this year),
-  rivalry, members: [{person, sessions, share, km, hours, reps, climb_m, top_place, favourite_category, partner,
-  best_session, avg_form_delta, records, badges, streak_weeks, company (this year), rivalry: [{other, won, lost,
-  ties, trend}]}]}`.
+  members: [{person, sessions, share, km, hours, reps, climb_m, top_place, favourite_category, partner,
+  best_session, avg_form_delta, records, badges, streak_weeks, company (this year)}]}`.
 
 ## Tests
 `tests/test_community.py` (skips without data): list / filters / categories, PATCH + kudos + guests + hidden, photo
@@ -284,13 +274,12 @@ upload (resize, thumbnail, dedupe, PNG with alpha, cover, delete, path traversal
 community.json, club invariants (totals = months = categories = heatmap, symmetric pair matrix), members, records.
 community.json and the photo folder are monkeypatched to a temp dir; the test fails if the real file's mtime changes.
 Motivation: company effect (no joint activity counted as solo), rep families, badges (order, progress, earned →
-own session, one iron-lungs holder), rivalry = together's head-to-head, Wrapped totals = the club for that year,
+own session, one iron-lungs holder), no rivalry / together time / win badges (`test_no_rivalry_or_together_time`), Wrapped totals = the club for that year,
 goals (default, PATCH default, POST / DELETE, 422 / 404, km goal = club km, goals survive session edits, statuses).
 
 ## Limits / next
 - Records are club records over community sessions only (no all-time PBs from each person's own training).
-- Rep efforts need a ranked cell (everyone has a result in the slot): a rep only one person ran never counts.
-- "Person-minutes together" uses detection's with-each-other time, which is low for interval sessions (speeds differ
-  in the reps and the breaks): `person_min_shared` (time overlap) is the "we were there together" number.
+- Every detected full rep is a record attempt, so strides / jog-ins the detector calls reps can hold records at odd
+  distances (2026-11: 250 m 58.2 s, 600 m 3:05.0); there is no way yet to mark a rep as "not part of the workout".
 - Form deltas come from `scripts/form_delta.py`; an implausible delta there (e.g. a session where one member ran reps
   alone after the joint easy part) shows up as the club's "biggest form jump".

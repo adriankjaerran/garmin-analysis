@@ -11,10 +11,11 @@ export interface TListParticipant {
   n_reps: number | null; dist_km: number | null; dur_s: number | null; together: TogetherSpan | null;
   reps_done?: number; of?: number;
 }
+/** neutral one-liner: "15×400 · 2 members · fastest rep 1:15.6" (no win counts) */
 export interface Headline {
-  kind: "intervals" | "race" | "together" | "unverified"; text: string; winner?: string;
-  rep_wins?: Record<string, number>; rep_ties?: number; shared_reps?: number; avg_gap_s_per_rep?: number;
-  max_gap_s?: number; closest?: { label: string; gap_s: number } | null; order?: string[]; with_pct?: number;
+  kind: "intervals" | "race" | "together" | "unverified"; text: string; n_members?: number; reps?: number;
+  fastest?: { kind: "rep"; value_s: number; person: string } | { kind: "pace"; value_s_km: number; person: string } | null;
+  order?: string[]; with_pct?: number;
 }
 export interface TGroup {
   gid: string; date: string; start_local: string; start_utc: string; sport: string; sports: string[];
@@ -22,11 +23,7 @@ export interface TGroup {
   place: TPlace | null; workout: string; people: string[]; n_people: number;
   participants: TListParticipant[]; headline: Headline;
 }
-export interface H2H {
-  a: string; b: string; sessions: number; interval_sessions: number; shared_reps: number;
-  rep_wins: Record<string, number>; rep_ties: number; session_wins: Record<string, number>; mean_gap_s: number | null;
-}
-export interface TList { n: number; viewer: string | null; built: string; people: Record<string, PersonInfo>; h2h: H2H[]; groups: TGroup[] }
+export interface TList { n: number; viewer: string | null; built: string; people: Record<string, PersonInfo>; groups: TGroup[] }
 
 export interface TParticipant {
   key: string; person: string; activity_id: string; role: "full" | "partial" | "other"; anchor: boolean; name: string;
@@ -37,7 +34,7 @@ export interface TParticipant {
   shape: { score: number; discipline: string; kind: string } | null;
 }
 export interface Slot { slot: number; label: string; anchor: boolean; owner: string; target: { kind: "dist" | "time"; value: number; text: string } | null;
-  start_s: number; n_people: number; shared: boolean }
+  start_s: number; n_people: number }
 export interface Cell {
   source: "detector" | "onset"; method: string; partial: boolean; result_s: N; time_s: N; dist_m: N; own_time_s: N; own_dist_m: N;
   start_s: number; clock_start_s: number; scale: N; rank: N; gap_s: N; tie: boolean; tie_s?: number; suspect?: string;
@@ -45,9 +42,13 @@ export interface Cell {
 }
 export interface Standing { slot: number; label: string; partial: string[]; missing: string[];
   order: { person: string; result_s: number; rank: number; gap_s: number; gap_m: N; tie: boolean; tie_s: number }[] }
+/** per set distance (or set time) of one person's reps: count, average, best */
+export interface TargetAvg { kind: "dist" | "time"; value: number; text: string; n: number; avg_s?: N; best_s?: N; avg_m?: N; best_m?: N }
+/** every rep a person ran counts; ranked by the distance-weighted pace over their own full reps (suspect ones left out) */
 export interface LeaderRow {
-  rank: number; person: string; total_s: N; avg_s: N; gap_s: N; reps_done: number; extra_reps: number; of: number; n_slots: number;
-  reps_ranked: number; all_n: number; all_total_s: N; all_avg_s: N; all_pace_s_km: N; pace_s_km: N; suspect: string[]; rep_wins: number; rep_ties: number; best: { slot: number; label: string; result_s: number } | null;
+  rank: number | null; person: string; reps_done: number; n_counted: number; n_partial: number; anchor_done: number;
+  extra_reps: number; of: number; n_slots: number; reps_ranked: number; total_s: N; avg_s: N; pace_s_km: N; gap_s_km: N;
+  by_target: TargetAvg[]; suspect: string[]; best: { slot: number; label: string; result_s: number } | null;
   fade_s: N; fade_s_km: N; avg_effort_pct: N; effort_mode: string | null;
 }
 export interface Break {
@@ -57,9 +58,10 @@ export interface Break {
 export interface CloseAlign { x0: number; n: number; people: Record<string, { d_m: N[]; behind_m: N[]; start_delta_s: number }> }
 export interface Closeup { slot: string; available: boolean; leader?: string; target_m?: number; own?: CloseAlign; clock?: CloseAlign }
 export interface Intervals {
-  anchor: string; gps_scale: Record<string, number>; shared_slots: number[]; slots: Slot[];
+  anchor: string; gps_scale: Record<string, number>; slots: Slot[];
   reps: Record<string, (Cell | null)[]>; standings: Standing[]; leaderboard: LeaderRow[];
-  cumulative: { slots: number[]; labels: string[]; people: Record<string, ({ total_s: number; gap_s: number } | null)[]> };
+  /** each person's own time run so far after each slot (null: no full rep in that slot) */
+  cumulative: { slots: number[]; labels: string[]; people: Record<string, ({ total_s: number; n: number } | null)[]> };
   breaks: Record<string, Break[]>; recovered_faster: { after_slot: number; after_label: string; person: string }[];
   rep_closeups: Closeup[];
 }

@@ -1,5 +1,5 @@
 // Community · Sessions: the club's joint workouts as a card feed grouped by month (/api/community/sessions).
-// Season totals + head-to-head on top, filters in the URL (category, people, period, words, near-misses, view).
+// Season totals on top, filters in the URL (category, people, period, words, near-misses, view).
 //   /community?cat=intervals,race&people=adrian&period=2026|12m|90d|2026-10&q=bislett&near=1&view=list
 // A card: cover photo (or a sketch of the members' tracks on the category colour), category, title, place / date,
 // members (+ guests), headline, collective km / hours / reps, form delta per member, kudos / photos / records.
@@ -7,11 +7,11 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { qs, useApi } from "../lib/api";
 import { people as allPeople, currentPerson, setQuery, useLocation } from "../lib/router";
 import { dur, isoLocal, shortDate } from "../lib/format";
-import { personColour, personName, setPeopleInfo } from "../lib/people";
+import { personName, setPeopleInfo } from "../lib/people";
 import { placeText } from "../lib/together";
 import { byMonth, catInfo, catVar, CATS, hrs, kms, monthLabel, periods, plural, resolvePeriod, type Category, type CGroup, type CList } from "../lib/community";
 import { PageHeader } from "../components/PageHeader";
-import { Av, CatChip, FormChip, PairCard, RouteSketch, SearchBox, Stat, usePeopleTracks } from "../components/CommunityBits";
+import { Av, CatChip, FormChip, RouteSketch, SearchBox, Stat, usePeopleTracks } from "../components/CommunityBits";
 import { kudosOverride, toggleKudos } from "../lib/communitySession";
 import { GoalLink } from "../components/ClubMotivation";
 import "./community.css";
@@ -20,11 +20,13 @@ function Headline({ g }: { g: CGroup }) {
   const h = g.headline;
   if (!h?.text) return null;
   if (h.kind === "unverified" || g.no_track) return <span class="muted">{h.text}</span>;
-  const parts = h.text.split(" · ");
+  // the card already shows the workout and the member count: only the rest of the neutral headline
+  const parts = h.text.split(" · ").filter((x) => x !== g.workout && x !== g.display_title && !/^\d+ (members?|reps)$/.test(x));
+  if (!parts.length) return null;
   const lead = h.kind === "intervals" || h.kind === "race" ? parts.shift() : null;
   return (
     <span class="cm-hl" title={h.text}>
-      {lead && <b style={{ color: h.winner ? personColour(h.winner) : undefined }}>{h.kind === "race" ? "🏁 " : ""}{lead}</b>}
+      {lead && <b>{h.kind === "race" ? "🏁 " : "⚡ "}{lead}</b>}
       {parts.length > 0 && <span class="muted">{lead ? " · " : ""}{parts.join(" · ")}</span>}
     </span>
   );
@@ -88,7 +90,6 @@ function Card({ g, tracks, order }: { g: CGroup; tracks: Map<string, string>; or
           <span title="Collective moving time"><b>{hrs(col.hours)}</b></span>
           {col.reps > 0 && <span title="Reps run (all members)"><b>{col.reps}</b> reps</span>}
           {col.climb_m >= 150 && <span title="Metres climbed (all members)"><b>{col.climb_m.toLocaleString("en-GB")}</b> m ↑</span>}
-          {col.person_min_shared > 0 && <span class="muted" title="Person-minutes on the move at the same time (sum over the members)">{Math.round(col.person_min_shared)} person-min</span>}
         </div>
         <div class="foot">
           <span class="forms">{forms.map((k) => <FormChip key={k} p={k} v={g.form[k]} info={g.form_info?.[k]} />)}</span>
@@ -208,12 +209,10 @@ export function CommunityPage() {
             <Stat v={t.sessions} label="sessions" />
             <Stat v={Math.round(t.km).toLocaleString("en-GB")} label="km" sub="all members" />
             <Stat v={t.hours.toFixed(t.hours >= 100 ? 0 : 1)} label="hours" sub="moving" />
-            <Stat v={t.person_hours_together.toFixed(1)} label="person-hours" sub="side by side" title="Sum over the members of the time spent side by side with someone" />
             {t.reps > 0 && <Stat v={t.reps} label="reps" />}
             {t.photos > 0 && <Stat v={t.photos} label="photos" />}
             {t.guests > 0 && <Stat v={t.guests} label="guest visits" />}
           </div>
-          {(data?.h2h ?? []).slice(0, 2).map((h) => <PairCard key={h.a + h.b} h={h} viewer={viewer} />)}
         </div>
       )}
 

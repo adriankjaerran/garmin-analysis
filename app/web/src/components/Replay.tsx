@@ -1,9 +1,9 @@
 // Race replay for a Together session: everyone's dot running on the map, two modes.
 // - Rep / km mode (a chip per rep, or per km along the shared route for continuous runs): every circle starts at
 //   their own start of that rep ("Own start") or at their real clock time ("Clock", the session page's toggle) and
-//   they run it on one clock; live order with metres behind the leader, rep time, total time so far; a passes feed
-//   ("R4 · 210 m: Patrik passes Adrian", from the server's along-track crossings with hysteresis) and the overall
-//   rank changes at the finish; a finish card with the ranking; auto-advance to the next rep.
+//   they run it on one clock; live order with metres behind the leader, rep time, each person's own time so far; a
+//   passes feed ("R4 · 210 m: Patrik passes Adrian", from the server's along-track crossings with hysteresis) and
+//   overall rank changes (only while everyone ran the same reps); a finish card with the rep's order; auto-advance.
 // - Whole session: the group clock from the first to the last rep (or the joint stretch), "reps only" skips breaks.
 // Play / pause, speeds, a scrub bar with rep / pass / finish markers, keys: space, ← → (rep), shift ← → (5 s),
 // 1–9 / 0 (rep 1–10), W (whole session). Data: /api/together/<gid>/replay (segments, passes; docs/together.md).
@@ -22,7 +22,8 @@ interface SegPerson { start_s: number; time_s: number; scale: number; partial: b
 interface Segment {
   i: number; kind: "rep" | "km"; slot: number; label: string; title: string; target_m: N; from_m?: number;
   start_s: number; end_s: number; people: Record<string, SegPerson>; passes: { own: SegPass[]; clock: SegPass[] };
-  total: Record<string, { total_s: number; gap_s: number; rank: number }> | null;
+  /** each person's own time so far (reps: rank / gap only while everyone in it ran the same reps) */
+  total: Record<string, { total_s: number; gap_s: N; rank: N; n?: number }> | null;
   moves: { person: string; from_rank: number; to_rank: number }[] | null;
 }
 /** the replay payload with the segment fields (docs/together.md) */
@@ -91,7 +92,7 @@ function standingsAt(s: TSession, r: RX, t: number): Board {
       title: next ? `Break · Rep ${next.label} in ${dur(next.start_s - t)}` : prev ? "Finished" : "Warm-up",
       cols: prev ? [`Rep ${prev.label}`, "Gap"] : [],
       rows: prev ? prev.order.map((o) => ({ key: o.person, hr: hrOf(o.person),
-        cells: [repTime(o.result_s), o.rank === 1 && !o.tie ? "won" : o.tie ? "dead heat" : behind(o.gap_s)] }))
+        cells: [repTime(o.result_s), o.rank === 1 && !o.tie ? "fastest" : o.tie ? "dead heat" : behind(o.gap_s)] }))
         : keys.map((k) => ({ key: k, cells: [], hr: hrOf(k) })),
     };
   }
@@ -120,7 +121,7 @@ function standingsAt(s: TSession, r: RX, t: number): Board {
 function SoFar({ s, t, w0 }: { s: TSession; t: number; w0: number }) {
   const iv = s.intervals;
   if (iv) {
-    // every ranked rep: the finished ones with winner / time / the next person's gap, the rest still to come
+    // every ranked rep: the finished ones with the fastest / time / the next person's gap, the rest still to come
     const isDone = (slot: number) => {
       const cells = Object.values(iv.reps).map((c) => c[slot]).filter(Boolean);
       return cells.length > 0 && cells.every((c) => t > c!.clock_start_s + (c!.own_time_s ?? c!.time_s ?? 0));
@@ -131,7 +132,7 @@ function SoFar({ s, t, w0 }: { s: TSession; t: number; w0: number }) {
       <div class="tg-sofar">
         <div class="tg-live-h">Reps so far</div>
         <table class="tg-tbl sofar">
-          <thead><tr><th>Rep</th><th>Winner</th><th class="num">Time</th><th class="num">Next</th></tr></thead>
+          <thead><tr><th>Rep</th><th>Fastest</th><th class="num">Time</th><th class="num">Next</th></tr></thead>
           <tbody>{ranked.map((st) => {
             const w = st.order[0], n2 = st.order[1];
             if (!isDone(st.slot)) return <tr key={st.slot} class="todo"><td>R{st.label}</td><td colSpan={3} class="muted">—</td></tr>;
@@ -230,7 +231,8 @@ const movesOf = (g: Segment): Feed[] => (g.moves ?? []).filter((m) => m.to_rank 
 function FinishCard({ g, ax, whole }: { g: Segment; ax: Axis; whole?: boolean }) {
   const rows = Object.entries(g.people).map(([k, c]) => ({ k, c, fx: ax.off[k] + c.time_s }))
     .sort((a, b) => (a.c.partial ? 1 : 0) - (b.c.partial ? 1 : 0) || a.fx - b.fx);
-  const tot = g.total ? Object.entries(g.total).sort((a, b) => a[1].rank - b[1].rank) : [];
+  const tot = g.total ? Object.entries(g.total).sort((a, b) => (a[1].rank ?? 0) - (b[1].rank ?? 0) || a[1].total_s - b[1].total_s) : [];
+  const ranked = tot.every(([, v]) => v.rank !== null);
   const ups = (g.moves ?? []).filter((m) => m.to_rank < m.from_rank);
   return (
     <div class={"overlay tg-flash" + (whole ? " small" : "")} role="status">
@@ -241,8 +243,8 @@ function FinishCard({ g, ax, whole }: { g: Segment; ax: Axis; whole?: boolean })
           <span class="g muted">{n === 0 || x.c.partial ? "" : plus(x.fx - rows[0].fx)}</span></li>
       ))}</ol>
       {tot.length > 1 && (
-        <div class="tot"><span class="muted">Total after {segShort(g)}</span>{tot.map(([k, v]) => (
-          <span key={k}><i class="sw" style={{ background: personColour(k) }} />{personInfo(k).initials} <b>{repTime(v.total_s)}</b>{v.rank > 1 ? <span class="muted"> {plus(v.gap_s)}</span> : ""}</span>
+        <div class="tot"><span class="muted">{ranked ? `Total after ${segShort(g)}` : `Own time so far (after ${segShort(g)})`}</span>{tot.map(([k, v]) => (
+          <span key={k}><i class="sw" style={{ background: personColour(k) }} />{personInfo(k).initials} <b>{repTime(v.total_s)}</b>{ranked && (v.rank ?? 1) > 1 && v.gap_s !== null ? <span class="muted"> {plus(v.gap_s)}</span> : !ranked && v.n ? <span class="muted"> · {v.n} reps</span> : ""}</span>
         ))}</div>
       )}
       {ups.map((m) => <div key={m.person} class="up">▲ {personName(m.person)} moves up to {ord(m.to_rank)} overall</div>)}
@@ -472,7 +474,7 @@ export function ReplayPanel({ s, r: r0, hr, startRep, onClose }: { s: TSession; 
             <table class="tg-tbl live">
               <thead><tr><th></th><th>Person</th><th class="num" title="Metres behind the leader along the track (after the finish: time behind the first finisher)">Behind</th>
                 <th class="num" title={`Time in this ${repLabel}`}>{kmMode ? "Km" : "Rep"}</th>
-                <th class="num" title={kmMode ? "Time since the first km started" : "Total time so far: the shared reps up to and including this one"}>Total</th>{hr && <th class="num">HR</th>}</tr></thead>
+                <th class="num" title={kmMode ? "Time since the first km started" : "Each person's own time so far: their reps up to and including this one"}>Total</th>{hr && <th class="num">HR</th>}</tr></thead>
               <tbody>{(() => {
                 const rows = segRows(r, g, ax, pos, prevTots[sel!] ?? {});
                 const lead = Math.max(0, ...rows.map((x) => x.d ?? 0));

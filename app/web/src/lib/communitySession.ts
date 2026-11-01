@@ -6,7 +6,7 @@ import { useEffect, useState } from "preact/hooks";
 import { apiUrl } from "./api";
 import { currentPerson } from "./router";
 import type { PersonInfo } from "./people";
-import type { TPlace, TSession } from "./together";
+import type { TPlace, TSession, TargetAvg } from "./together";
 
 type N = number | null;
 
@@ -20,7 +20,7 @@ export interface CsForm {
   score: N; shape: N; delta: N; discipline: string | null; kind?: string | null; confidence: "high" | "medium" | "low" | "none" | string;
   text: string; flags?: string[]; z?: N; ref_sd?: N;
 }
-export interface CsNumbers { km: N; moving_s: N; dur_s: N; climb_m: N; kcal: N; reps: N; avg_hr: N; with_min: N; shared_min: N }
+export interface CsNumbers { km: N; moving_s: N; dur_s: N; climb_m: N; kcal: N; reps: N; avg_hr: N }
 export interface CsRecord {
   kind: "club_best" | "pb"; measure: "rep" | "avg" | "race"; dist_m: number; label: string; person: string; key?: string;
   value_s: number; n?: number; prev_s: N; prev_person?: string | null; prev_gid?: string | null; prev_date?: string | null;
@@ -29,11 +29,11 @@ export interface CsRecord {
 export interface CsMember {
   key: string; person: string; display: PersonInfo; role: "full" | "partial" | "other"; activity_id: string; workout: string | null;
   type: string | null; has_fit: boolean; timed: boolean; form: CsForm | null; numbers: CsNumbers | null;
-  rank: N; rep_wins: N; reps_done: N; of: N; avg_s: N; pace_s_km: N; records: CsRecord[];
+  rank: N; reps_done: N; n_counted: N; of: N; avg_s: N; pace_s_km: N; records: CsRecord[];
+  by_target: TargetAvg[] | null; best: { slot: number; label: string; result_s: number } | null;
 }
 export interface CsCollective {
-  km: N; moving_s: N; hours: N; reps: N; reps_shared: N; climb_m: N; kcal: N; person_min_together: N; person_min_shared: N;
-  together_estimated: boolean; n_members: number; per_person?: Record<string, CsNumbers>;
+  km: N; moving_s: N; hours: N; reps: N; climb_m: N; kcal: N; n_members: number; per_person?: Record<string, CsNumbers>;
 }
 export interface CsSession {
   gid: string; requested_gid: string; viewer: string | null; date: string; start_local: string; place: TPlace | null;
@@ -220,24 +220,27 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
 
   let sameTarget = false;
   if (iv && !g.no_track) {
-    const shared = iv.shared_slots;
-    sameTarget = shared.length >= 3 && new Set(shared.map((i) => iv.slots[i].target?.text)).size === 1 && iv.slots[shared[0]].target?.kind === "dist";
-    const h = s.headline;
-    const n = h.shared_reps ?? shared.length;
-    if (h.winner && h.rep_wins && n > 1) {
-      const w = h.rep_wins[h.winner] ?? 0;
-      const others = Object.entries(h.rep_wins).filter(([k]) => k !== h.winner).map(([, v]) => v);
-      const score = [w, ...others].join("–");
-      story.push(`${name(h.winner)} took ${w === n ? `all ${n}` : `${w} of the ${n}`} shared reps (${score})${h.avg_gap_s_per_rep ? `, ${h.avg_gap_s_per_rep.toFixed(1)} s faster per rep on average` : ""}${h.closest ? `; Rep ${h.closest.label} was the closest at ${h.closest.gap_s.toFixed(1)} s` : ""}.`);
-    }
-    // rep of the day: the closest ranked rep
-    if (h.closest && n >= 3) {
-      const sl = iv.slots.find((x) => x.label === h.closest!.label);
-      const st = sl ? iv.standings[sl.slot] : null;
-      if (st && st.order.length >= 2) {
-        const [a, b] = st.order;
-        hl.push({ id: "closest", emoji: "🎯", title: "Rep of the day", person: a.person, rep: h.closest.label,
-          value: `Rep ${h.closest.label} · ${h.closest.gap_s.toFixed(1)} s`, sub: `${name(a.person)} ${t1(a.result_s)} vs ${name(b.person)} ${t1(b.result_s)}${sl?.target ? ` (${sl.target.text})` : ""}` });
+    // every rep a person ran counts (no "reps everyone ran" subset)
+    const full = (k: string) => iv.slots.map((sl) => ({ sl, c: iv.reps[k]?.[sl.slot] })).filter((x) => x.c && !x.c.partial && !x.c.suspect && x.c.result_s);
+    const tg = new Set(members.flatMap((p) => full(p.key).map((x) => x.sl.target?.text)));
+    const anyFull = members.find((p) => full(p.key).length)?.key;
+    const t0 = anyFull ? full(anyFull)[0].sl.target : null;
+    sameTarget = tg.size === 1 && t0?.kind === "dist" && iv.slots.length >= 3;
+    const done = iv.leaderboard.filter((l) => l.reps_done > 0 && people[l.person]);
+    const nReps = done.reduce((a, l) => a + l.reps_done, 0);
+    if (done.length > 4) story.push(`${done.length} members ran ${nReps} reps between them.`);
+    else if (done.length > 1 && new Set(done.map((l) => l.reps_done)).size === 1) story.push(`${done.length === 2 ? "Both" : "Everyone"} ran ${done[0].reps_done} reps.`);
+    else if (done.length > 1) story.push(`${andList(done.map((l, i) => `${name(l.person)} ${i === 0 ? `ran ${done[0].reps_done} reps` : l.reps_done}`))}.`);
+    // rep of the day: the closest rep anyone ran together
+    const cl = closestRep(iv);
+    if (cl) {
+      const st = iv.standings[cl.slot];
+      const [a, b] = st.order;
+      const sl = iv.slots[cl.slot];
+      if (iv.standings.filter((x) => x.order.length >= 2).length >= 3) {
+        hl.push({ id: "closest", emoji: "🎯", title: "Rep of the day", person: null, rep: cl.label,
+          value: `Rep ${cl.label} · ${cl.gap_s.toFixed(1)} s`, sub: `apart: ${name(a.person)} ${t1(a.result_s)} · ${name(b.person)} ${t1(b.result_s)}${sl?.target ? ` (${sl.target.text})` : ""}` });
+        story.push(`Rep ${cl.label} was the closest: ${cl.gap_s.toFixed(1)} s between the first two.`);
       }
     }
     for (const l of iv.leaderboard) {
@@ -247,14 +250,14 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
       const f = l.fade_s ?? null;
       if (f !== null) pf.strongFinish = f;
       if (sameTarget) {
-        const xs = shared.map((i) => iv.reps[l.person]?.[i]).filter((x) => x && !x.partial && !x.suspect && x.result_s).map((x) => x!.result_s!);
+        const xs = full(l.person).map((x) => x.c!.result_s!);
         if (xs.length >= 4) pf.even = sd(xs);
       }
     }
     if (sameTarget) {
       const best = iv.leaderboard.filter((l) => l.best).sort((a, b) => a.best!.result_s - b.best!.result_s)[0];
       if (best?.best) hl.push({ id: "fastest", emoji: "🏎️", title: "Fastest rep", person: best.person, rep: best.best.label,
-        value: `${name(best.person)} · ${t1(best.best.result_s)}`, sub: `Rep ${best.best.label}, ${iv.slots[shared[0]].target!.text}` });
+        value: `${name(best.person)} · ${t1(best.best.result_s)}`, sub: `Rep ${best.best.label}, ${t0!.text}` });
     }
     // recovery: who's HR dropped more, per break
     const rf = iv.recovered_faster;
@@ -273,13 +276,14 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
       sub: "the last 3 reps vs the first 3, per rep" });
     const even = Object.entries(people).filter(([, v]) => v.even !== null).sort((a, b) => a[1].even! - b[1].even!)[0];
     if (even && members.length > 1) hl.push({ id: "even", emoji: "🎚️", title: "Most even", person: even[0], value: `${name(even[0])} · ±${even[1].even!.toFixed(1)} s`,
-      sub: "the smallest spread of the shared rep times" });
+      sub: "the smallest spread of their rep times" });
   } else if (cont?.available) {
     const race = cont.race ?? [];
     if (race.length >= 2) {
-      const [a, b] = race;
-      story.push(`${name(a.person)} won in ${hms(a.time_s)}, ${name(b.person)} ${hms(b.gap_s)} behind${race.length > 2 ? `, then ${andList(race.slice(2).map((r) => name(r.person)))}` : ""}.`);
-      hl.push({ id: "winner", emoji: "🏁", title: "Winner", person: a.person, value: `${name(a.person)} · ${hms(a.time_s)}`, sub: `${hms(b.gap_s)} ahead of ${name(b.person)}` });
+      const [a] = race;
+      story.push(race.length > 4 ? `${race.length} members finished, from ${hms(a.time_s)} to ${hms(race[race.length - 1].time_s)}.`
+        : `${andList(race.map((r, i) => `${name(r.person)} ${i === 0 ? "finished in " : ""}${hms(r.time_s)}`))}.`);
+      hl.push({ id: "winner", emoji: "🏁", title: "First across the line", person: a.person, value: `${name(a.person)} · ${hms(a.time_s)}`, sub: `${race.length} finishers` });
     }
     const ap = cont.apart?.[0];
     if (ap?.with_pct && ap.with_pct >= 20) {
@@ -308,6 +312,12 @@ export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Fac
   return { story, highlights: hl, people, sameTarget };
 }
 /** "39:08" / "1:02:10" / "45 s" */
+/** the slot with the smallest gap between the first two (any rep two or more people ran) */
+export function closestRep(iv: NonNullable<TSession["intervals"]>): { slot: number; label: string; gap_s: number } | null {
+  let out: { slot: number; label: string; gap_s: number } | null = null;
+  for (const st of iv.standings) if (st.order.length >= 2 && (!out || st.order[1].gap_s < out.gap_s)) out = { slot: st.slot, label: st.label, gap_s: st.order[1].gap_s };
+  return out;
+}
 export function hms(s: number): string {
   s = Math.round(s);
   if (s < 60) return `${s} s`;

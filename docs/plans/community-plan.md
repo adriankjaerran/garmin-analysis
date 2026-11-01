@@ -19,7 +19,7 @@ standings, replay already exist. Community = Together, upgraded and made club-sh
 | 3 | User data | `data/community.json` (hand-editable, written by the API): per gid `{title, category, note, photos, guests, hidden, kudos}`. Photos in `data/_community/photos/<gid>/` (jpg/png/webp/heic ≤ 15 MB; a ≤ 1600 px jpg + a 480 px thumbnail are stored). Everything stays local. |
 | 4 | "Members there" | Members with a watch file in the group (`n_timed`); manually added guests (no watch file) are listed separately ("+2 guests"). |
 | 5 | Form score | Per participant: the session's performance on the fitness (VDOT) scale minus their shape on the day before → "+2.1" (better than current form) / "−1.3". `null` when the session has no score (easy, hike). `scripts/form_delta.py`. |
-| 6 | Collective numbers | Sum over members: km, moving time, reps, metres climbed; "together time" (person-minutes side by side); a club total for the season. |
+| 6 | Collective numbers | Sum over members: km, moving time, reps, metres climbed; a club total for the season. (No "together time": dropped 2026-11-01.) |
 
 ## API (new; `app/server/routers/community.py` on top of `scripts/community.py`)
 All work unprefixed and under `/api/<person>/…`.
@@ -27,7 +27,7 @@ All work unprefixed and under `/api/<person>/…`.
 GET  /api/community/sessions?category=&person=&from=&to=&q=&near=1
      -> {n, people, categories: [{id, label, emoji, n}], groups: [<together list row> + community fields]}
         community fields per row: {category, category_auto, title, note, n_timed, guests: [...], n_guests,
-        photo: {thumb, url} | null, n_photos, kudos, collective: {km, moving_s, reps, climb_m, person_min_together},
+        photo: {thumb, url} | null, n_photos, kudos, collective: {km, moving_s, reps, climb_m},
         form: {person: delta | null}}
 GET  /api/community/sessions/{gid}  -> {gid, meta: {title, category, category_auto, note, guests, photos: [{id, url, thumb, by, at}], kudos},
                                         collective: {...}, form: {person key: {score, shape, delta, discipline} | null},
@@ -37,7 +37,7 @@ POST  /api/community/sessions/{gid}/photos  multipart file=  (?by=person)       
 DELETE /api/community/sessions/{gid}/photos/{photo_id}
 POST  /api/community/sessions/{gid}/kudos  body {person}  -> {kudos}
 GET   /api/community/photos/{gid}/{file}   (served image)
-GET   /api/community/club?from=&to=   -> club dashboard: totals (sessions, km, hours, person-hours together),
+GET   /api/community/club?from=&to=   -> club dashboard: totals (sessions, km, hours, reps),
         per month series, attendance per member (sessions, streak in weeks, last seen), pairs matrix (sessions together),
         category mix, records (club bests per standard rep / route), "most loyal", weekday / hour heatmap,
         recent highlights (closest finish, biggest form jump, longest session).
@@ -53,7 +53,7 @@ one) next to each person. Also play the whole session. Speed control, scrub, key
 ## Pages
 - **Community · Sessions** `/community`: cards (photo or mini map, category chip, title / workout, place, date, member
   avatars, "3 members · +1 guest", headline, collective km / time), filters (category chips, people, period, search),
-  group by month. Head-to-head strip stays.
+  group by month. (Head-to-head strip removed 2026-11-01.)
 - **Session** `/community/<gid>`: hero (photo / map, title editable, category select, note), members strip with form
   deltas ("+2.1"), collective panel, records set, then the existing standings / splits / replay. Photo gallery +
   upload. Kudos.
@@ -89,14 +89,34 @@ one) next to each person. Also play the whole session. Speed control, scrub, key
 - `fitness_eval.json` NaN → null (writer + router guard; tests); `data/patrik/fitness_eval.json` regenerated.
 - Unknown member page: a proper message with a link back.
 
-### Open questions for the user
-1. **Rivalry score**: count races in the rivalry score (27–0, now explained) or show reps only (26–0, same as the
-   head-to-head card) with races beside it?
-2. **Members without a watch file** (Patrik in 7 hikes of July 2023) count as attending: 17 sessions / 100 % for
-   both. Keep, or count only timed members for attendance, streaks and badges?
-3. **Person-hours**: Sessions shows "43.0 person-hours side by side", Club "64 person-hours out there together" (two
-   different measures). Keep both or pick one name everywhere?
-4. **Emoji**: happy with ⚡ intervals / 🏎️ fastest rep, or prefer another set?
-5. **Splits "Avg" row** averages all reps a person ran (suspect reps left out), the leaderboard's avg only the shared
-   reps (1:17.6 vs 1:17.2 for the same person): label it, or align them?
-6. "Last time here" uses scores the fitness model marks unreliable (Patrik 44.8 on 15 Oct): hide those?
+### Decisions resolved (2026-11-01, from the user)
+1. **No rivalry.** Removed: the Sessions head-to-head strip, Club rivalry timeline + head-to-head pair cards (pair cards
+   now just "n sessions together · last …"), rivalry on member profiles (partners keep sessions together), Wrapped's
+   rivalry slide and per-member head-to-head, win-count headlines (now neutral: "15×400 · 2 members · fastest rep
+   1:15.6", mixed sets "… · 12 reps", races "10.1 km · 2 members · 39:08–43:26"), the leaderboard's wins column, the
+   "Rep winner" / "Photo finish" badges (28 badges), `/api/community/rivalry`, `duels` / `rivalries`, together's
+   `head_to_head` and the list's `h2h`. Kept: medals / order per rep and race results; "closest finish" worded neutrally
+   ("Rep 4: Adrian and Patrik 1.4 s apart"; Wrapped "Neck and neck").
+2. **Attendance**: members without a watch file keep counting as attending (no change).
+3. **No together time**: person-hours / person-minutes (side by side or overlapping) removed from the Sessions strip
+   and cards, Club totals and months, the collective panel, Wrapped, goals (`person_hours` metric gone) and member
+   totals ("hours together"). Collective moving time stays.
+4. **Emoji** unchanged. **Per-rep board** = the primary interval results view (`RepBoard` in TogetherSession.tsx): a row
+   per rep (label + set distance), everyone who ran it as a chip fastest first (🥇🥈🥉 top 3 when ≥ 2 ran it, time,
+   +gap to the rep's fastest), 8 chips then "+k", initials-only chips on phones; click = close-up, ▶ = replay; the
+   wide matrix behind a "Table" toggle (`?rv=table`).
+5. **No "shared reps"**: every rep a person ran counts; each rep is ranked among whoever ran it. Leaderboard = per
+   person over their own full reps (suspect ones left out of the averages): reps, avg rep per set distance,
+   distance-weighted pace (the order) + s/km to the fastest, best rep, fade, effort. Splits "Avg" = the leaderboard's
+   `avg_s` / `pace_s_km` (same number by construction). "Race standing" replaced by **Rep times / Rep pace** (each
+   person's own reps across the session); replay totals = each person's own time so far, ranked (and "moves up")
+   only while everyone in it ran the same reps. Story / highlights / records text no longer mention shared reps or
+   wins. Payload: `shared_slots`, `slots[].shared`, `rep_wins`, `rep_ties`, `gap_s`, `all_*` and the cumulative
+   `gap_s` are gone; new `n_counted`, `n_partial`, `gap_s_km`, `by_target`, cumulative `{total_s, n}`.
+6. **"Last time here"** hides scores with confidence "none" ("score then unreliable"), as elsewhere.
+
+Judgment calls in that pass: suspect reps (e.g. adrian's 64.5 s 15th 400 m) count as reps done but stay out of the
+averages / best / fade (as the splits did); fade uses the main set (anchor slots) so a jog-in "rep" someone ran alone
+before the set (patrik's 250 m / 600 m at Frogner) doesn't read as "finished stronger" — those extra reps do count in
+his average. Records also count every rep (as decided), so detector "reps" like a 250 m stride / patrik's 600 m
+jog-in now hold club records at odd distances — open question: a way to mark such reps as warm-up? Screenshots `data/adrian/screenshots/2026-11-01/dec-*.png`.

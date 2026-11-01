@@ -1482,65 +1482,84 @@ def _intervals(g, P):
                           "partial": [key for key, c in res.items() if c["partial"]],
                           "missing": [p["key"] for p in act if p["key"] not in res]})
     keys = [p["key"] for p in act]
-    shared = [i for i, s in enumerate(slots) if all(s["res"].get(k_, {}).get("result_s") is not None for k_ in keys)]
-    # ---- leaderboard
+    # ---- leaderboard: every rep a person ran counts (no "reps everyone ran" subset). Ranked by the distance-weighted
+    # average pace over the person's own full reps (suspect ones left out: probably short / a lap pressed early).
     lb = []
     n_anchor = sum(s["anchor"] for s in slots)
+
+    def _td(i, c):
+        """(time s, metres) of a full rep for pace: set distance -> (result, set distance); set time -> (set time, metres)"""
+        t = slots[i]["target"]
+        if not t or c.get("partial") or c.get("result_s") is None:
+            return None
+        if t[0] == "dist":
+            return (c["result_s"], t[1])
+        return (c["time_s"], c["dist_m"]) if c.get("dist_m") and c.get("time_s") else None
     for p in act:
         key = p["key"]
         mine = [(i, s["res"][key]) for i, s in enumerate(slots) if key in s["res"]]
         done = sum(1 for i, c in mine if slots[i]["anchor"])
-        rk = [(i, c) for i, c in mine if c["result_s"] is not None and slots[i]["order"]]   # raced reps
-        tot = sum(slots[i]["res"][key]["result_s"] for i in shared) if shared else None
-        wins = sum(1 for i in shared if slots[i]["res"][key].get("rank") == 1 and not slots[i]["res"][key].get("tie"))
-        ties = sum(1 for i in shared if slots[i]["res"][key].get("rank") == 1 and slots[i]["res"][key].get("tie"))
-        rk_ok = [(i, c) for i, c in rk if not c.get("suspect")]
-        best = min(rk_ok, key=lambda x: x[1]["result_s"] / (slots[x[0]]["target"][1] if slots[x[0]]["target"][0] == "dist" else 1), default=None) if rk_ok else None
-        # fade: last 3 vs first 3 ranked reps (suspect reps left out), as pace (s/km) for distance reps
-        pace = [(c["result_s"] or 0) * 1000 / slots[i]["target"][1] for i, c in rk_ok if slots[i]["target"][0] == "dist"]
-        fade = _r(np.mean(pace[-3:]) - np.mean(pace[:3]), 1) if len(pace) >= 6 else None
-        same_t = len({slots[i]["target"] for i, _ in rk_ok}) == 1
-        fade_s = _r(np.mean([c["result_s"] for _, c in rk_ok[-3:]]) - np.mean([c["result_s"] for _, c in rk_ok[:3]]), 1) if len(rk_ok) >= 6 and same_t else None
-        # every full rep the person ran (also the ones only they ran): count, total, average, distance-weighted pace
-        allr = [(i, c) for i, c in mine if c["result_s"] is not None and not c["partial"]]
-        all_t = {slots[i]["target"] for i, _ in allr}
-
-        def _pace(cells):
-            d = [(c["result_s"], slots[i]["target"][1]) for i, c in cells if slots[i]["target"] and slots[i]["target"][0] == "dist"]
-            return _r(1000 * sum(x for x, _ in d) / sum(m for _, m in d), 1) if d and len(d) == len(cells) else None
-        eff = [c["effort_pct"] for _, c in rk if c.get("effort_pct") is not None]
-        lb.append({"person": key, "reps_done": done, "extra_reps": len(mine) - done, "reps_ranked": len(rk), "of": n_anchor,
-                   "n_slots": len(slots),
-                   "total_s": _r(tot, 1), "avg_s": _r(tot / len(shared), 1) if shared else None,
-                   "all_n": len(allr), "all_total_s": _r(sum(c["result_s"] for _, c in allr), 1) if allr else None,
-                   "all_avg_s": _r(np.mean([c["result_s"] for _, c in allr]), 1) if allr and len(all_t) == 1 else None,
-                   "all_pace_s_km": _pace(allr), "pace_s_km": _pace([(i, slots[i]["res"][key]) for i in shared]) if shared else None,
+        full = [(i, c) for i, c in mine if c["result_s"] is not None and not c["partial"]]   # every full rep
+        ok = [(i, c) for i, c in full if not c.get("suspect")]                               # counted in averages
+        td = [x for x in (_td(i, c) for i, c in ok) if x]
+        pace = _r(1000 * sum(t for t, _ in td) / sum(d for _, d in td), 1) if td and sum(d for _, d in td) else None
+        # per set distance / set time: count, average, best (the leaderboard's "avg per rep" per distance)
+        by_t = {}
+        for i, c in ok:
+            by_t.setdefault(slots[i]["target"], []).append((i, c))
+        by_target = []
+        for tg_, cs in sorted(by_t.items(), key=lambda kv: (kv[0] is None, (kv[0] or ("", 0))[0] != "dist", (kv[0] or ("", 0))[1])):
+            if tg_ is None:
+                continue
+            if tg_[0] == "dist":
+                xs = [c["result_s"] for _, c in cs]
+                by_target.append({"kind": "dist", "value": tg_[1], "text": f"{tg_[1]} m", "n": len(xs),
+                                  "avg_s": _r(np.mean(xs), 1), "best_s": _r(min(xs), 1)})
+            else:
+                ms = [c["dist_m"] for _, c in cs if c.get("dist_m")]
+                by_target.append({"kind": "time", "value": tg_[1], "text": cmp_mmss(tg_[1]), "n": len(cs),
+                                  "avg_m": _r(np.mean(ms), 0) if ms else None, "best_m": _r(max(ms), 0) if ms else None})
+        best = min(ok, key=lambda x: (_td(*x) or (1e9, 1))[0] / (_td(*x) or (1e9, 1))[1], default=None) if ok else None
+        # fade: last 3 vs first 3 counted reps of the main set (the anchor's slots: a jog-in "rep" someone ran alone
+        # before the set isn't its start), as pace (s/km); per rep when they share the set distance
+        ms_ = [(i, c) for i, c in ok if slots[i]["anchor"]]
+        pc = [1000 * x[0] / x[1] for x in (_td(i, c) for i, c in ms_) if x]
+        fade = _r(np.mean(pc[-3:]) - np.mean(pc[:3]), 1) if len(pc) >= 6 else None
+        same_t = len({slots[i]["target"] for i, _ in ok}) == 1
+        same_m = len({slots[i]["target"] for i, _ in ms_}) == 1
+        fade_s = _r(np.mean([c["result_s"] for _, c in ms_[-3:]]) - np.mean([c["result_s"] for _, c in ms_[:3]]), 1) if len(ms_) >= 6 and same_m else None
+        eff = [c["effort_pct"] for _, c in full if c.get("effort_pct") is not None]
+        lb.append({"person": key, "reps_done": len(full), "n_counted": len(ok), "n_partial": sum(1 for _, c in mine if c["partial"]),
+                   "anchor_done": done, "extra_reps": len(mine) - done, "of": n_anchor, "n_slots": len(slots),
+                   "reps_ranked": sum(1 for i, c in full if slots[i]["order"]),
+                   "total_s": _r(sum(t for t, _ in td), 1) if td else None,
+                   "avg_s": _r(np.mean([c["result_s"] for _, c in ok]), 1) if ok and same_t and slots[ok[0][0]]["target"]
+                   and slots[ok[0][0]]["target"][0] == "dist" else None,
+                   "pace_s_km": pace, "by_target": by_target,
                    "suspect": [slots[i]["label"] for i, c in mine if c.get("suspect")],
-                   "rep_wins": wins, "rep_ties": ties,
                    "best": {"slot": best[0], "label": slots[best[0]]["label"], "result_s": best[1]["result_s"]} if best else None,
                    "fade_s_km": fade, "fade_s": fade_s, "avg_effort_pct": _r(np.mean(eff), 0) if eff else None,
                    "effort_mode": hr_norm(p["person"]).get("mode")})
-    lead = min((x["total_s"] for x in lb if x["total_s"] is not None), default=None)
+    lead = min((x["pace_s_km"] for x in lb if x["pace_s_km"] is not None), default=None)
     for x in lb:
-        x["gap_s"] = _r(x["total_s"] - lead, 1) if x["total_s"] is not None and lead is not None else None
-    lb.sort(key=lambda x: (x["total_s"] is None, x["total_s"] or 0, -x["reps_ranked"]))
+        x["gap_s_km"] = _r(x["pace_s_km"] - lead, 1) if x["pace_s_km"] is not None and lead is not None else None
+    lb.sort(key=lambda x: (x["pace_s_km"] is None, x["pace_s_km"] or 0, -x["reps_done"]))
     for n, x in enumerate(lb):
-        x["rank"] = n + 1 if x["total_s"] is not None else None
-    # ---- cumulative total / gap to the leader across the raced reps (>= 2 results); a person missing one drops out
-    cslots = [i for i, s in enumerate(slots) if s["order"]]
+        x["rank"] = n + 1 if x["pace_s_km"] is not None else None
+    # ---- cumulative: each person's own time run so far (full reps, in slot order), not a race between people
+    cslots = list(range(len(slots)))
     cum = {k_: [] for k_ in keys}
     tot = {k_: 0.0 for k_ in keys}
-    alive = {k_: True for k_ in keys}
+    cnt = {k_: 0 for k_ in keys}
     for i in cslots:
         for k_ in keys:
             c = slots[i]["res"].get(k_)
-            if alive[k_] and c and c["result_s"] is not None:
-                tot[k_] += c["result_s"]
+            if c and c["result_s"] is not None and not c["partial"]:
+                tot[k_] += c["time_s"] if slots[i]["target"] and slots[i]["target"][0] == "time" else c["result_s"]
+                cnt[k_] += 1
+                cum[k_].append({"total_s": _r(tot[k_], 1), "n": cnt[k_]})
             else:
-                alive[k_] = False
-        lead_ = min((tot[k_] for k_ in keys if alive[k_]), default=None)
-        for k_ in keys:
-            cum[k_].append({"total_s": _r(tot[k_], 1), "gap_s": _r(tot[k_] - lead_, 1)} if alive[k_] else None)
+                cum[k_].append(None)
     # ---- breaks (between consecutive reps of each participant, own or synthesized), compare's _break_stats
     breaks = {}
     for p in act:
@@ -1572,10 +1591,10 @@ def _intervals(g, P):
         kind, tv = s["target"] or (None, None)
         sl.append({"slot": i, "label": s["label"], "anchor": s["anchor"], "owner": s["owner"],
                    "target": {"kind": kind, "value": tv, "text": (f"{tv} m" if kind == "dist" else cmp_mmss(tv)) if tv else None},
-                   "start_s": _r(s["clock"] - _t0(P), 1), "n_people": len(s["res"]), "shared": i in shared})
+                   "start_s": _r(s["clock"] - _t0(P), 1), "n_people": len(s["res"])})
     t0 = _t0(P)
     reps = {k_: [_cell_out(slots[i]["res"].get(k_), t0) for i in range(len(slots))] for k_ in keys}
-    return {"anchor": anchor["key"], "slots": sl, "reps": reps, "standings": standings, "shared_slots": shared,
+    return {"anchor": anchor["key"], "slots": sl, "reps": reps, "standings": standings,
             "leaderboard": lb, "cumulative": {"slots": cslots, "labels": [slots[i]["label"] for i in cslots], "people": cum},
             "breaks": breaks, "recovered_faster": faster, "rep_closeups": closeups,
             "gps_scale": {p["key"]: _r(p["k"], 3) for p in act}}
@@ -1924,36 +1943,40 @@ def session(gid, doc=None, use_cache=True) -> dict:
 
 
 def headline(s) -> dict:
-    """one-line result for the list: intervals: winner, rep wins, mean gap per shared rep, closest rep;
-    race: finish order; together: share of time together"""
+    """one-line neutral summary for the list: intervals: workout · members · fastest rep (single set distance) or best
+    rep pace; race: members · finish times; together: share of time side by side. No win counts."""
     names = {k: (v or {}).get("name", k) for k, v in (s.get("people") or {}).items()}
 
     def nm(key):
         return names.get(key.split("#")[0], key)
     iv = s.get("intervals")
-    if iv and iv.get("leaderboard") and iv["shared_slots"]:
-        lb = [x for x in iv["leaderboard"] if x["total_s"] is not None]
-        w = lb[0]
-        wins = {x["person"]: x["rep_wins"] for x in iv["leaderboard"]}
-        ns = len(iv["shared_slots"])
-        gaps = [st["order"][-1]["gap_s"] for i, st in enumerate(iv["standings"]) if i in iv["shared_slots"] and st["order"]]
-        closest = min(((st["order"][1]["gap_s"], st["label"]) for i, st in enumerate(iv["standings"])
-                       if i in iv["shared_slots"] and len(st["order"]) >= 2), default=None)
-        per = (lb[-1]["gap_s"] or 0) / ns if len(lb) >= 2 else None
-        wtxt = "–".join(str(wins[x["person"]]) for x in lb)
-        nt = sum(1 for i in iv["shared_slots"] if iv["standings"][i]["order"] and iv["standings"][i]["order"][0]["tie"])
-        text = f"{nm(w['person'])} {wtxt}" + (f" ({nt} tied)" if nt else "") + (f" · {per:.1f} s faster per rep" if per is not None and per >= 0.05 else "")
-        if closest and ns > 1:
-            text += f" · closest: Rep {closest[1]}, {closest[0]:.1f} s"
-        return {"kind": "intervals", "winner": w["person"], "rep_wins": wins, "rep_ties": nt, "shared_reps": ns,
-                "avg_gap_s_per_rep": _r(per, 1), "max_gap_s": _r(max(gaps), 1) if gaps else None,
-                "closest": {"label": closest[1], "gap_s": closest[0]} if closest else None, "text": text}
-    c = s.get("continuous") or {}
     g = s["group"]
+    n_mem = len({p["person"] for p in g["participants"] if p["role"] != "other"})
+    mem = f"{n_mem} member{'s' if n_mem != 1 else ''}"
+    if iv and iv.get("leaderboard"):
+        lb = [x for x in iv["leaderboard"] if x["rank"] is not None]
+        targets = {(t["kind"], t["value"]) for x in lb for t in x["by_target"]}
+        parts = [g.get("workout") or "Intervals", mem]
+        fastest = None
+        if len(targets) == 1 and next(iter(targets))[0] == "dist":
+            b = min(((t["best_s"], x["person"]) for x in lb for t in x["by_target"]), default=None)
+            if b:
+                fastest = {"kind": "rep", "value_s": b[0], "person": b[1]}
+                parts.append(f"fastest rep {_mmss1(b[0])}")
+        elif lb:
+            fastest = {"kind": "pace", "value_s_km": lb[0]["pace_s_km"], "person": lb[0]["person"]}
+        reps = sum(x["reps_done"] for x in iv["leaderboard"])
+        if not fastest or fastest["kind"] != "rep":
+            parts.append(f"{reps} reps")
+        return {"kind": "intervals", "n_members": n_mem, "reps": reps, "fastest": fastest, "text": " · ".join(parts)}
+    c = s.get("continuous") or {}
     if g["label"] == "same_race" and (c.get("race") or c.get("finish")):
         f = c.get("race") or c["finish"]
-        text = " · ".join(f"{nm(x['person'])} " + (sg.mmss(x["time_s"]) if x["rank"] == 1 else f"{sg.mmss(x['gap_s'])} behind") for x in f)
-        return {"kind": "race", "winner": f[0]["person"], "order": [x["person"] for x in f], "text": text}
+        ts = sorted(x["time_s"] for x in f if x.get("time_s"))
+        span = sg.mmss(ts[0]) + (f"–{sg.mmss(ts[-1])}" if len(ts) > 1 else "")
+        km = [x.get("dist_km") for x in f if x.get("dist_km")]
+        what = f"{float(np.median(km)):.1f} km" if km else (g.get("workout") or "Race")
+        return {"kind": "race", "order": [x["person"] for x in f], "n_members": n_mem, "text": f"{what} · {mem} · {span}"}
     ap = (c.get("apart") or [])
     if ap:
         wp = min(x["with_pct"] or 0 for x in ap)
@@ -1961,6 +1984,14 @@ def headline(s) -> dict:
         span = next((p["together"]["text"] for p in g["participants"] if p.get("together")), None)
         return {"kind": "together", "with_pct": wp, "text": span or text}
     return {"kind": g["label"], "text": g["label_text"]}
+
+
+def _mmss1(v):
+    """58.2 s · 1:15.6"""
+    if v < 59.95:
+        return f"{v:.1f} s"
+    m, x = divmod(round(v, 1), 60)
+    return f"{int(m)}:{x:04.1f}"
 
 
 def _passes(x, D, kind):
@@ -2038,8 +2069,9 @@ def _segment_passes(people, fns, kind):
 
 
 def _rep_segments(g, P, s, t0):
-    """interval sessions: one segment per rep slot (start / time per person, passes own / clock, total so far, rank
-    changes overall); the whole-session passes (clock) with group-clock times"""
+    """interval sessions: one segment per rep slot (start / time per person, passes own / clock, each person's own
+    total so far — ranked, with rank changes, only while everyone in it ran the same reps); the whole-session passes
+    (clock) with group-clock times"""
     iv = s["intervals"]
     byk = {p["key"]: p for p in P}
     cum = iv["cumulative"]
@@ -2075,12 +2107,19 @@ def _rep_segments(g, P, s, t0):
         total = moves = None
         if sl["slot"] in ci:
             n = ci[sl["slot"]]
-            tot = {k_: v[n]["total_s"] for k_, v in cum["people"].items() if v[n]}
-            if len(tot) >= 2:
-                total = _ranked(tot)
-                cur = {k_: v["rank"] for k_, v in total.items()}
-                moves = _moves(prev_rank, cur) if prev_rank else []
-                prev_rank = cur
+            tot = {k_: v[n] for k_, v in cum["people"].items() if v[n]}
+            if tot:
+                # each person's own time so far; ranked (gap, rank, moves) only when everyone in it ran the same reps
+                same = len({tuple(i for i, x in enumerate(cum["people"][k_][:n + 1]) if x) for k_ in tot}) == 1
+                rk = _ranked({k_: v["total_s"] for k_, v in tot.items()}) if same and len(tot) >= 2 else {}
+                total = {k_: {"total_s": v["total_s"], "n": v["n"], "gap_s": (rk.get(k_) or {}).get("gap_s"),
+                              "rank": (rk.get(k_) or {}).get("rank")} for k_, v in tot.items()}
+                if rk:
+                    cur = {k_: v["rank"] for k_, v in rk.items()}
+                    moves = _moves(prev_rank, cur) if prev_rank and set(prev_rank) == set(cur) else []
+                    prev_rank = cur
+                else:
+                    prev_rank = None
         segs.append({"i": len(segs), "kind": "rep", "slot": sl["slot"], "label": sl["label"],
                      "title": f"Rep {sl['label']}" + (f" · {tgt['text']}" if tgt.get("text") else ""),
                      "target_m": cap, "start_s": _r(s0 - t0, 1),
@@ -2259,65 +2298,17 @@ def rows(doc=None, person=None, sport=None, label=None, near=False, place=None, 
     return out
 
 
-def head_to_head(groups: list[dict], sessions: dict) -> list[dict]:
-    """per pair of people over the given groups: sessions together, shared reps won / tied, sessions won
-    (total over the pair's shared reps), mean gap per shared rep (b - a). sessions: {gid: session payload}"""
-    acc = {}
-    for g in groups:
-        s = sessions.get(g["gid"]) or {}
-        ps = sorted(set(g["people"]))
-        iv = s.get("intervals")
-        for a, b in itertools.combinations(ps, 2):
-            x = acc.setdefault((a, b), {"a": a, "b": b, "sessions": 0, "interval_sessions": 0, "shared_reps": 0,
-                                        "rep_wins": {a: 0, b: 0}, "rep_ties": 0, "session_wins": {a: 0, b: 0},
-                                        "_gaps": []})
-            x["sessions"] += 1
-            if not iv:
-                continue
-            ra, rb = iv["reps"].get(a), iv["reps"].get(b)
-            if not ra or not rb:
-                continue
-            ta = tb = 0.0
-            n = 0
-            for ca, cb in zip(ra, rb):
-                if not ca or not cb or ca.get("result_s") is None or cb.get("result_s") is None:
-                    continue
-                n += 1
-                d = cb["result_s"] - ca["result_s"]
-                tie = abs(d) <= max(ca.get("tie_s") or TIE_MIN_S, TIE_MIN_S, (cb.get("tie_s") or 0))
-                if tie:
-                    x["rep_ties"] += 1
-                else:
-                    x["rep_wins"][a if d > 0 else b] += 1
-                ta += ca["result_s"]
-                tb += cb["result_s"]
-                x["_gaps"].append(d)
-            if n:
-                x["interval_sessions"] += 1
-                x["shared_reps"] += n
-                if abs(tb - ta) > TIE_MIN_S:
-                    x["session_wins"][a if tb > ta else b] += 1
-    out = []
-    for x in acc.values():
-        gp = x.pop("_gaps")
-        x["mean_gap_s"] = _r(np.mean(gp), 1) if gp else None
-        x["note"] = "mean_gap_s = b's rep result - a's, over shared reps (positive: a faster)"
-        out.append(x)
-    return out
-
-
 def list_payload(doc=None, viewer=None, **flt) -> dict:
-    """the list endpoint: filtered group rows + headline + completion, head-to-head per pair"""
+    """the list endpoint: filtered group rows + headline + reps done per person"""
     doc = doc or load()
     gs = rows(doc, **flt)
     info = people_info()
-    out, sess = [], {}
+    out = []
     for g in gs:
         s = None
         if not g["hidden"] and not g["no_track"]:
             try:
                 s = session(g["gid"], doc)
-                sess[g["gid"]] = s
             except Exception as e:  # noqa: BLE001
                 s = {"error": str(e)[:200]}
         row = {k: g[k] for k in ("gid", "date", "start_local", "start_utc", "sport", "sports", "kind", "label",
@@ -2335,7 +2326,7 @@ def list_payload(doc=None, viewer=None, **flt) -> dict:
             row["error"] = s["error"]
         out.append(row)
     return {"n": len(out), "viewer": viewer, "built": doc.get("built"),
-            "people": {p: info[p] for p in info}, "h2h": head_to_head([g for g in gs if not g["hidden"]], sess), "groups": out}
+            "people": {p: info[p] for p in info}, "groups": out}
 
 
 def _summary_headline(g, info):
@@ -2409,7 +2400,7 @@ def cmd_show(gid):
     iv = s.get("intervals")
     if iv:
         keys = list(iv["reps"])
-        print(f"\nanchor {iv['anchor']}  gps scale {iv['gps_scale']}  shared slots {len(iv['shared_slots'])}")
+        print(f"\nanchor {iv['anchor']}  gps scale {iv['gps_scale']}")
         print("slot  target   " + "".join(f"{k:>28}" for k in keys))
         for sl in iv["slots"]:
             cells = []
@@ -2423,13 +2414,13 @@ def cmd_show(gid):
                 cells.append(f"{tag:>3}{_fmt_s(c['result_s'] if c['result_s'] is not None else c['time_s']):>7} "
                              f"{'#' + str(rk) if rk else '':>3}{('=' if c.get('tie') else ''):1} "
                              f"{('+' + _fmt_s(c.get('gap_s'))) if c.get('gap_s') else '':>6} {c.get('effort_pct') or '':>4}%")
-            print(f"{sl['label']:5} {sl['target']['text'] or '':8} " + "".join(cells) + ("  shared" if sl["shared"] else ""))
+            print(f"{sl['label']:5} {sl['target']['text'] or '':8} " + "".join(cells))
         print("\nleaderboard:")
         for x in iv["leaderboard"]:
-            print(f"  {x['rank'] or '-'} {x['person']:10} reps {x['reps_done']}/{x['of']} total {_fmt_s(x['total_s'])} "
-                  f"avg {_fmt_s(x['avg_s'])} gap {_fmt_s(x['gap_s'])} wins {x['rep_wins']} ties {x['rep_ties']} "
+            print(f"  {x['rank'] or '-'} {x['person']:10} reps {x['reps_done']} (counted {x['n_counted']}) pace {x['pace_s_km']} s/km "
+                  f"(+{x['gap_s_km']}) avg {_fmt_s(x['avg_s'])} by distance {[(t['text'], t['n'], t.get('avg_s') or t.get('avg_m')) for t in x['by_target']]} "
                   f"fade {x['fade_s']} s ({x['fade_s_km']} s/km) effort {x['avg_effort_pct']} % {x['effort_mode']}")
-        print("cumulative gap:", {k: [c["gap_s"] if c else None for c in v] for k, v in iv["cumulative"]["people"].items()})
+        print("cumulative (own):", {k: [c["total_s"] if c else None for c in v] for k, v in iv["cumulative"]["people"].items()})
         for k, rows_ in iv["breaks"].items():
             print(f"breaks {k}: " + ", ".join(f"{b['after_label']}:{b['dur_s']:.0f}s drop30 {b.get('drop_30')} ({b.get('drop_30_pct')} %)" for b in rows_[:8]))
     c = s.get("continuous")
@@ -2481,8 +2472,8 @@ def validate() -> int:
         if g["kind"] == "intervals":
             if not check(iv is not None, f"{g['gid']}: intervals result"):
                 continue
-            ns = len(iv["shared_slots"])
-            check(ns >= 1, f"{g['gid']}: shared reps ({ns})")
+            nr = sum(1 for st in iv["standings"] if st["order"])
+            check(nr >= 1, f"{g['gid']}: ranked reps ({nr})")
             for st in iv["standings"]:
                 o = st["order"]
                 if not o:
@@ -2516,18 +2507,20 @@ def validate() -> int:
                         check(starts.get(c["start_s"]) == c["own_time_s"],
                               f"{g['gid']} {pt['key']} rep at {c['start_s']} s: {c['own_time_s']} = compare {starts.get(c['start_s'])}")
             for x in iv["leaderboard"]:
-                if x["total_s"] is not None:
-                    tot = sum(iv["reps"][x["person"]][i]["result_s"] for i in iv["shared_slots"])
-                    check(abs(tot - x["total_s"]) < 0.2 * ns + 0.1, f"{g['gid']} {x['person']}: total = sum of shared reps")
+                cells = [(c, slt) for c, slt in zip(iv["reps"][x["person"]], sl) if c and c["result_s"] is not None
+                         and not c["partial"] and not c.get("suspect")]
+                td = [((c["result_s"], slt["target"]["value"]) if slt["target"]["kind"] == "dist" else (c["time_s"], c["dist_m"]))
+                      for c, slt in cells]
+                if td and x["pace_s_km"] is not None:
+                    pace = 1000 * sum(t for t, _ in td) / sum(d for _, d in td)
+                    check(abs(pace - x["pace_s_km"]) <= 0.1, f"{g['gid']} {x['person']}: pace = own reps' time ÷ distance")
+            paces = [x["pace_s_km"] for x in iv["leaderboard"] if x["rank"] is not None]
+            check(paces == sorted(paces), f"{g['gid']}: leaderboard ranked by pace")
             cum = iv["cumulative"]
             for k, v in cum["people"].items():
                 live = [c for c in v if c]
                 if live:
-                    tot = sum(iv["reps"][k][i]["result_s"] for i, c in zip(cum["slots"], v) if c)
-                    check(abs(live[-1]["total_s"] - tot) < 0.2 * len(live) + 0.1, f"{g['gid']} {k}: cumulative total = sum")
-            for j in range(len(cum["slots"])):
-                gaps = [v[j]["gap_s"] for v in cum["people"].values() if v[j]]
-                check(not gaps or min(gaps) == 0, f"{g['gid']} cumulative after {cum['labels'][j]}: leader at 0")
+                    check(live[-1]["n"] == len(live), f"{g['gid']} {k}: cumulative counts every full rep")
         c = s.get("continuous")
         if c and c.get("available") and c.get("gap_over_distance"):
             gd = c["gap_over_distance"]

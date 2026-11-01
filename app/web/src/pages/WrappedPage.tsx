@@ -1,6 +1,6 @@
 // Community · Wrapped: the club's year as a scroll of big cards (/api/community/wrapped/<year | latest>), like
-// Spotify Wrapped: sessions, km, hours together, the busiest month, top place, favourite category, biggest day,
-// best form jump, closest finish, most loyal, rivalry, records, badges, then one card per member.
+// Spotify Wrapped: sessions, km, hours moving, the busiest month, top place, favourite category, biggest day,
+// best form jump, the closest rep, most loyal, records, badges, then one card per member.
 //   /community/wrapped · /community/wrapped/<year>
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -8,7 +8,7 @@ import { useApi } from "../lib/api";
 import { isoLocal, shortDate } from "../lib/format";
 import { personColour, personName, setPeopleInfo } from "../lib/people";
 import { useTheme } from "../lib/theme";
-import { catInfo, catVar, delta, monthLabel, paceKm, plural, rivalrySplit, type Wrapped, type WrappedMember } from "../lib/community";
+import { catInfo, catVar, delta, monthLabel, paceKm, plural, type Wrapped, type WrappedMember } from "../lib/community";
 import { Av, AvStack } from "../components/CommunityBits";
 import "./community.css";
 import "./club-wrapped.css";
@@ -80,7 +80,6 @@ function MemberSlide({ m, year, i }: { m: WrappedMember; year: number; i: number
           {m.partner && <li><span class="k">Ran most with</span><span class="cm-pl"><Av p={m.partner.person} size="sm" />{personName(m.partner.person)} · {plural(m.partner.sessions, "session")}</span></li>}
           {m.company.text && <li><span class="k">Company</span><b>{m.company.text}</b>{m.company.thin ? <span class="muted small wr-tr">thin data: a hint, not a verdict</span> : null}</li>}
           {m.company.pace.filter((p) => Math.abs(p.diff_s_km) >= 1).slice(0, 1).map((p) => <li><span class="k">Rep pace</span><b>{p.text}</b><span class="muted small wr-tr">{p.label}: {paceKm(p.joint_s_km)} vs {paceKm(p.solo_s_km)} /km</span></li>)}
-          {m.rivalry.map((r) => <li><span class="k">vs {personName(r.other)}</span><b>{r.won}–{r.lost}</b> head-to-head{r.trend ? <span class="muted wr-tr">{r.trend}</span> : null}</li>)}
           {m.streak_weeks >= 2 && <li><span class="k">Best streak</span><b>🔥 {m.streak_weeks} weeks</b></li>}
         </ul>
         {m.badges.length > 0 && <div class="wr-mbadges">{m.badges.map((b) => <a href={b.gid ? `/community/${b.gid}` : undefined} title={`${b.name}: ${b.description} (${b.date})`}><span>{b.emoji}</span>{b.name}</a>)}</div>}
@@ -99,7 +98,6 @@ export function WrappedPage({ year }: { year: string | null }) {
   const T = w.totals, P = w.previous, Y = w.year;
   const maxM = Math.max(1, ...w.months.map((m) => m.sessions));
   const people = w.members.map((m) => m.person);
-  const r0 = w.rivalry[0];
   return (
     <main class="cm wr">
       <nav class="wr-years" aria-label="Year">
@@ -121,7 +119,6 @@ export function WrappedPage({ year }: { year: string | null }) {
           <div class="wr-big"><b><Count v={T.km} on={seen} /></b> km<span class="wr-sub">run, hiked and ridden together (all members added up)</span>{vsPrev(T.km, P?.km, "km", Y)}</div>
           <div class="wr-row">
             <div><b><Count v={T.hours} d={1} on={seen} /></b><span>hours moving</span>{vsPrev(T.hours, P?.hours, "h", Y)}</div>
-            <div><b><Count v={T.person_hours_together} d={1} on={seen} /></b><span>person-hours out there together</span></div>
             <div><b><Count v={T.reps} on={seen} /></b><span>reps</span></div>
             <div><b><Count v={T.climb_m} on={seen} /></b><span>metres climbed</span></div>
             {T.kcal > 0 && <div><b><Count v={T.kcal} on={seen} /></b><span>kcal burned</span></div>}
@@ -190,7 +187,7 @@ export function WrappedPage({ year }: { year: string | null }) {
       )}
 
       {w.closest_finish && (
-        <Slide tone="var(--cat-race)" kicker="The closest finish">
+        <Slide tone="var(--cat-race)" kicker="Neck and neck">
           {() => <>
             <div class="wr-huge num">{w.closest_finish!.value.toFixed(1)} s</div>
             <div class="wr-lead">{w.closest_finish!.text}</div>
@@ -211,21 +208,6 @@ export function WrappedPage({ year }: { year: string | null }) {
               </>;
             })()}
             {w.top_pair && <div class="wr-also">Strongest pair: <Av p={w.top_pair.a} size="sm" /> {personName(w.top_pair.a)} & <Av p={w.top_pair.b} size="sm" /> {personName(w.top_pair.b)} · {plural(w.top_pair.sessions, "session")} together</div>}
-          </>}
-        </Slide>
-      )}
-
-      {r0 && (
-        <Slide tone="var(--cat-intervals)" kicker="The rivalry">
-          {() => <>
-            <div class="wr-duel">
-              <span><Av p={r0.a} size="xl" /><b>{personName(r0.a)}</b></span>
-              <b class="sc">{r0.wins[r0.a]}<i>–</i>{r0.wins[r0.b]}</b>
-              <span><Av p={r0.b} size="xl" /><b>{personName(r0.b)}</b></span>
-            </div>
-            <div class="wr-lead">{rivalrySplit(r0, r0.a, r0.b)}</div>
-            {r0.trend && <div class="wr-trend">{r0.trend.text}</div>}
-            {w.rivalry.slice(1, 4).map((r) => <div class="wr-also">{r.headline}</div>)}
           </>}
         </Slide>
       )}

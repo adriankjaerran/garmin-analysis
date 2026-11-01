@@ -1,4 +1,4 @@
-"""/api/together (list + head-to-head), /api/together/{gid} (session), /api/together/{gid}/replay, /api/together/people.
+"""/api/together (list), /api/together/{gid} (session), /api/together/{gid}/replay, /api/together/people.
 
 Groups are cross-person (data/together.json from scripts/together.py build), so these endpoints don't use the person
 store: they work unprefixed and under /api/<person>/... alike (the prefix only sets `viewer`). The engine
@@ -59,8 +59,7 @@ def list_together(request: Request,
                   place: str | None = Query(None, description="substring of the group's place name / id"),
                   date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to"),
                   q: str | None = Query(None, description="words: place, workout, label, date, people")):
-    """Rows (newest first) with headline + per-person completion, and head-to-head per pair over the listed
-    sessions' shared reps."""
+    """Rows (newest first) with a neutral headline and the reps each person ran."""
     doc = _doc()
     viewer = request.scope.get("person")
     flt = {"person": person, "sport": sport, "kind": kind, "label": label, "near": near, "place": place,

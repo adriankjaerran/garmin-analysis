@@ -311,17 +311,10 @@ function recentCols(anchor: string): Col<HomeRow>[] {
 // ------------------------------------------------------------------ joint training + first-run help
 interface TGroup { gid: string; date: string; start_local: string; kind: string; label: string; label_text?: string; workout: string | null;
   sport: string; place: { name: string | null } | null; people: string[];
-  headline: { text: string; winner?: string; rep_wins?: Record<string, number>; shared_reps?: number; avg_gap_s_per_rep?: number; with_pct?: number } }
+  headline: { text: string; with_pct?: number } }
 
-/** "Adrian won 10 of 10 reps, 7.8 s per rep faster" / the Together headline */
-function headlineText(g: TGroup): string {
-  const h = g.headline;
-  if (h.winner && h.rep_wins && h.avg_gap_s_per_rep !== undefined) {
-    const w = h.rep_wins[h.winner] ?? 0, n = h.shared_reps ?? w;
-    return `${personName(h.winner)} won ${w} of ${n} ${n === 1 ? "rep" : "reps"}, ${secs(h.avg_gap_s_per_rep, 1)} per rep faster`;
-  }
-  return h.text;
-}
+/** the neutral Together headline ("15×400 · 2 members · fastest rep 1:15.6") */
+const headlineText = (g: TGroup): string => g.headline.text;
 
 function LatestTogether({ anchor }: { anchor: string }) {
   const me = currentPerson();

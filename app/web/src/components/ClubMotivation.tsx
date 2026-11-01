@@ -1,12 +1,12 @@
 // Motivation pieces of the Community pages (docs/community.md "Motivation"): the club goal (editable, PATCH
 // /api/community/goals/{id}), "faster together than alone?" per member, badges (earned + locked with progress),
-// the newest badges strip, and the rivalry timeline per pair (cumulative rep wins + the gap per session).
-import { useEffect, useRef, useState } from "preact/hooks";
+// and the newest badges strip.
+import { useEffect, useState } from "preact/hooks";
 import { apiUrl } from "../lib/api";
 import { isoLocal, shortDate } from "../lib/format";
 import { personColour, personName } from "../lib/people";
 import { useTheme } from "../lib/theme";
-import { delta, deltaCls, monthLabel, paceKm, plural, rivalrySplit, type Badge, type Company, type CompanyShort, type Goal, type Goals, type Rivalry } from "../lib/community";
+import { delta, deltaCls, paceKm, plural, type Badge, type Company, type CompanyShort, type Goal, type Goals } from "../lib/community";
 import { Av } from "./CommunityBits";
 import "../pages/club-motivation.css";
 
@@ -226,82 +226,6 @@ export function LatestBadges({ badges }: { badges: Badge[] }) {
           <span class="t"><b>{b.name}</b><span class="muted"><Av p={b.person!} size="xs" /> {personName(b.person!)} · {shortDate(b.date!, isoLocal())}</span></span>
         </a>
       ))}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ rivalry timeline
-/** cumulative rep wins (steps, person colours) over the sessions, and below each session's gap per km (bar towards
- *  the faster one). Equal spacing per session (they can be years apart). `viewer` is shown first. */
-export function RivalryCard({ r, viewer }: { r: Rivalry; viewer?: string | null }) {
-  useTheme();
-  const [hover, setHover] = useState<number | null>(null);
-  const flip = viewer === r.b;
-  const [a, b] = flip ? [r.b, r.a] : [r.a, r.b];
-  const sgn = flip ? -1 : 1;
-  const tl = r.timeline;
-  const n = tl.length;
-  const box = useRef<HTMLDivElement>(null);
-  const [W, setW] = useState(640);
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => { if (el.clientWidth) setW(el.clientWidth); });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const H = 190, L = 34, R = 14, top = 12, midH = 92, gapTop = 122, gapH = 46;
-  const xs = (i: number) => L + (n === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (n - 1));
-  const maxW = Math.max(1, ...tl.map((t) => Math.max(t.cum_wins[a], t.cum_wins[b])));
-  const yW = (v: number) => top + midH - (v / maxW) * midH;
-  const gaps = tl.map((t) => (t.gap_s_km ?? t.mean_gap_s) * sgn);
-  const gMax = Math.max(1, ...gaps.map(Math.abs));
-  const g0 = gapTop + gapH / 2;
-  const path = (p: string) => `M${xs(0)} ${yW(0)} V${yW(tl[0].cum_wins[p])} ` + tl.slice(1).map((t, i) => `H${xs(i + 1)} V${yW(t.cum_wins[p])}`).join(" ");
-  const ca = personColour(a), cb = personColour(b);
-  const h = hover !== null ? tl[hover] : null;
-  const unit = tl.some((t) => t.gap_s_km !== null) ? "s/km" : "s/rep";
-  return (
-    <div class="cr">
-      <div class="cr-top">
-        <span class="cm-pl"><Av p={a} size="lg" />{personName(a)}</span>
-        <b class="cr-score">{r.wins[a]}<span class="dash">–</span>{r.wins[b]}</b>
-        <span class="cm-pl rt">{personName(b)}<Av p={b} size="lg" /></span>
-      </div>
-      <div class="cr-sub muted small">{rivalrySplit(r, a, b)}</div>
-      {r.trend && <div class={"cr-trend " + r.trend.kind}><span aria-hidden="true">{r.trend.kind === "closing" ? "📉" : r.trend.kind === "pulling_away" ? "📈" : r.trend.kind === "turned" ? "🔄" : "➖"}</span>{r.trend.text}</div>}
-      <div ref={box}><svg class="cr-svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={r.headline} onMouseLeave={() => setHover(null)}>
-        <text x="2" y={top + midH / 2 + 4} class="ax">wins</text>
-        <line x1={L} x2={W - R} y1={yW(0)} y2={yW(0)} stroke="var(--hairline)" />
-        <text x={L - 4} y={yW(maxW) + 4} class="ax" text-anchor="end">{maxW}</text>
-        <path d={path(b)} fill="none" stroke={cb} stroke-width="2.5" />
-        <path d={path(a)} fill="none" stroke={ca} stroke-width="2.5" />
-        <text x="2" y={g0 + 4} class="ax">gap</text>
-        <line x1={L} x2={W - R} y1={g0} y2={g0} stroke="var(--hairline)" stroke-dasharray="3 3" />
-        {tl.map((t, i) => {
-          const v = gaps[i], hgt = (Math.abs(v) / gMax) * (gapH / 2);
-          const bw = Math.max(6, Math.min(26, (W - L - R) / Math.max(2, n) * 0.4));
-          return <g>
-            <rect x={xs(i) - bw / 2} y={v > 0 ? g0 - hgt : g0} width={bw} height={Math.max(1, hgt)} rx="2" fill={v > 0 ? ca : cb} opacity={hover === null || hover === i ? 0.9 : 0.4} />
-            <circle cx={xs(i)} cy={yW(t.cum_wins[a])} r={hover === i ? 5 : 3.5} fill={ca} stroke="var(--surface)" stroke-width="1.5" />
-            <circle cx={xs(i)} cy={yW(t.cum_wins[b])} r={hover === i ? 5 : 3.5} fill={cb} stroke="var(--surface)" stroke-width="1.5" />
-            <rect x={xs(i) - (W - L - R) / Math.max(1, n) / 2} y="0" width={(W - L - R) / Math.max(1, n)} height={H} fill="transparent"
-              onMouseEnter={() => setHover(i)} onClick={() => { location.href = `/community/${t.gid}`; }} style={{ cursor: "pointer" }} />
-          </g>;
-        })}
-      </svg></div>
-      <div class="cr-dates">{tl.map((t, i) => (i % Math.max(1, Math.ceil(52 / Math.max(1, (W - L - R) / Math.max(1, n - 1)))) === 0 || hover === i) &&
-        <a href={`/community/${t.gid}`} class={hover === i ? "on" : ""} style={{ left: `${(xs(i) / W) * 100}%` }}>{
-          /* several sessions in one month: the day too, else "Oct 26" three times */
-          (tl.filter((x) => x.date.slice(0, 7) === t.date.slice(0, 7)).length > 1 ? `${+t.date.slice(8, 10)} ` : "") + monthLabel(t.date.slice(0, 7), true)}</a>)}</div>
-      <div class="cr-read small">
-        {h ? <>
-          <b>{shortDate(h.date, isoLocal())}</b> {h.title} · {h.kind === "race" ? "race" : plural(h.n, "shared rep")}:
-          <span style={{ color: ca }}> {personName(a)} {h.wins[a]}</span>–<span style={{ color: cb }}>{h.wins[b]} {personName(b)}</span>
-          {" · "}gap {Math.abs(h.mean_gap_s).toFixed(1)} s{h.kind === "reps" ? "/rep" : ""}{h.gap_s_km !== null ? ` (${Math.abs(h.gap_s_km).toFixed(0)} s/km)` : ""} to {personName((h.mean_gap_s * sgn) > 0 ? a : b)}
-          {h.closest_s <= 1 ? ` · closest ${h.closest_s.toFixed(1)} s` : ""}
-        </> : <span class="muted">Lines = cumulative wins · bars = the gap per session ({unit}), towards the faster one · hover / click a session</span>}
-      </div>
     </div>
   );
 }

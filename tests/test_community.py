@@ -42,12 +42,14 @@ def test_list_shape(client, cm):
     r = client.get("/api/community/sessions")
     assert r.status_code == 200, r.text[:300]
     d = r.json()
-    assert {"n", "people", "categories", "groups", "totals", "h2h"} <= set(d)
+    assert {"n", "people", "categories", "groups", "totals"} <= set(d) and "h2h" not in d
+    assert not {"person_hours_together"} & set(d["totals"])
     assert [c["id"] for c in d["categories"]] == cm.CAT_IDS
     assert d["n"] == len(d["groups"]) > 0
     for g in d["groups"]:
         assert g["category"] in cm.CAT_IDS and g["category_auto"] in cm.CAT_IDS
-        assert {"km", "moving_s", "reps", "climb_m", "person_min_together"} <= set(g["collective"])
+        assert {"km", "moving_s", "reps", "climb_m"} <= set(g["collective"])
+        assert not {"person_min_together", "person_min_shared", "reps_shared"} & set(g["collective"])
         assert g["n_timed"] >= 1 and g["n_guests"] == len(g["guests"])
         assert set(g["form"]) >= {p["person"] for p in g["participants"] if p["role"] != "other"} - {None}
         assert g["photo"] is None and g["kudos"] == []
@@ -197,7 +199,7 @@ def test_session_records_synthetic(cm):
     assert [(x["kind"], x["person"], x["improvement_s"]) for x in r["g3"]] == [("club_best", "a", 1.0)]
 
 
-# ------------------------------------------------------------------ motivation: company, badges, rivalry, wrapped, goals
+# ------------------------------------------------------------------ motivation: company, badges, wrapped, goals
 def test_company_effect(client, cm):
     c = client.get("/api/community/club").json()
     assert set(c["company"]) <= {a["person"] for a in c["attendance"]}
@@ -249,19 +251,21 @@ def test_badges(client, cm):
     assert client.get("/api/community/badges").json()["latest"]
 
 
-def test_rivalry_matches_h2h(client, cm):
+def test_no_rivalry_or_together_time(client, cm):
+    """decisions 2026-11-01: no rivalry / head-to-head, no person-hours together, no win-count badges"""
     c = client.get("/api/community/club").json()
-    assert c["rivalry"]
-    for r in c["rivalry"]:
-        tl = r["timeline"]
-        assert [t["date"] for t in tl] == sorted(t["date"] for t in tl)
-        assert tl[-1]["cum_wins"] == r["wins"]
-        pair = next(p for p in c["pairs"] if {p["a"], p["b"]} == {r["a"], r["b"]})
-        reps = {k: sum(t["wins"][k] for t in tl if t["kind"] == "reps") for k in (r["a"], r["b"])}
-        assert reps == pair["h2h"]["rep_wins"], "rivalry rep wins disagree with together's head-to-head"
-        if r["trend"]:
-            assert r["trend"]["kind"] in ("closing", "pulling_away", "steady", "turned") and r["trend"]["text"]
-    assert client.get("/api/community/rivalry").json()["rivalry"]
+    assert "rivalry" not in c and all("h2h" not in p for p in c["pairs"])
+    assert not {"person_hours_together", "person_hours_shared"} & set(c["totals"])
+    assert all("person_hours_together" not in m for m in c["months"])
+    assert client.get("/api/community/rivalry").status_code == 404
+    assert not {"rep_winner", "photo_finish"} & set(cm.BADGE_INFO)
+    assert "person_hours" not in cm.GOAL_METRICS
+    m = client.get(f"/api/community/members/{c['attendance'][0]['person']}").json()
+    assert "rivalry" not in m and "min_together" not in m["totals"]
+    assert all(not {"rep_wins", "h2h"} & set(p) for p in m["partners"])
+    assert all("rep_wins" not in s for s in m["sessions"])
+    cf = next((h for h in c["highlights"] if h["kind"] == "closest_finish"), None)
+    assert cf is None or "beat" not in cf["text"]
 
 
 def test_wrapped(client, cm):

@@ -1,11 +1,12 @@
 // One club session (/community/<gid>; /api/together/<gid> + the club layer /api/community/sessions/<gid>). Top to
 // bottom: hero (photo / title / category / kudos / share), the story in words, who was there (member cards with
 // form), collective + records + last time here, then "How it went" (headline, tools, highlights); for intervals the
-// leaderboard, per-rep standings, cumulative gap to the leader and a rep close-up (metres behind the leader + the
-// track with a dot per person), for continuous runs / races / hikes the gap over distance, distance apart, who led
+// per-rep board (a row per rep, everyone who ran it fastest first; the wide table behind a toggle), the leaderboard
+// (average rep pace over each person's own reps), each person's rep times across the session and a rep close-up
+// (metres behind the rep's leader + the track with a dot per person), for continuous runs / races / hikes the gap over distance, distance apart, who led
 // where and km splits; then the replay (everyone round the map on one clock), splits, breaks, photos.
 // Heart rate stays at three small elements (effort per rep, recovery in the breaks, effort in the header); the rest
-// is behind the "Heart rate" toggle. URL: ?rep=<slot label>&align=clock&replay=1&rrep=<rep to replay>&hr=1
+// is behind the "Heart rate" toggle. URL: ?rep=<slot label>&align=clock&replay=1&rrep=<rep to replay>&hr=1&rv=table
 import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi } from "../lib/api";
@@ -26,7 +27,7 @@ import { CommunitySessionMembers } from "../components/CommunitySessionMembers";
 import { CommunitySessionSplits } from "../components/CommunitySessionSplits";
 import { CommunitySessionPhotos } from "../components/CommunitySessionPhotos";
 import { SessionHighlights, SessionStory } from "../components/CommunitySessionHighlights";
-import { sessionFacts, useCommunity } from "../lib/communitySession";
+import { closestRep, sessionFacts, useCommunity } from "../lib/communitySession";
 import "./together.css";
 
 type N = number | null;
@@ -83,7 +84,7 @@ function mineOf(s: TSession): TParticipant | undefined {
   return s.participants.find((p) => p.person === v && p.role !== "other" && p.has_fit);
 }
 
-/** "How it went": the headline ("🏆 Adrian 10–0 · 7.8 s faster per rep"), the detection label and the tools
+/** "How it went": the neutral headline ("⚡ 15×400 · 2 members · fastest rep 1:15.6"), the detection label and the tools
  *  (Compare with my other sessions, Replay, Heart rate); recording caveats under it. The title, date and people
  *  are in the community hero and the member cards above. */
 function SessionBar({ s, hr, replayable, replayOpen }: { s: TSession; hr: boolean; replayable: boolean; replayOpen: boolean }) {
@@ -116,7 +117,7 @@ function SessionBar({ s, hr, replayable, replayOpen }: { s: TSession; hr: boolea
       </div>
       {showH && lead && (
         <div class="tg-hero">
-          <span class="big" style={{ color: h.winner ? personColour(h.winner) : undefined }}>{h.kind === "race" ? "🏁 " : h.kind === "intervals" ? "🏆 " : "👥 "}{lead}</span>
+          <span class="big">{h.kind === "race" ? "🏁 " : h.kind === "intervals" ? "⚡ " : "👥 "}{lead}</span>
           {parts.length > 0 && <span class="rest">{parts.join(" · ")}</span>}
         </div>
       )}
@@ -134,53 +135,45 @@ function fadeText(v: number, perKm: boolean) {
 }
 
 function Leaderboard({ s, iv }: { s: TSession; iv: Intervals }) {
-  const n = iv.shared_slots.length;
   const sport = s.group.sport;
   const effMode = iv.leaderboard.find((l) => l.effort_mode)?.effort_mode;
   const anyEff = iv.leaderboard.some((l) => l.avg_effort_pct);
-  const sameT = new Set(iv.shared_slots.map((i) => iv.slots[i].target?.text)).size === 1;
+  const nT = new Set(iv.leaderboard.flatMap((l) => l.by_target.map((t) => t.text))).size;
+  const anySus = iv.leaderboard.some((l) => (l.suspect ?? []).length);
   return (
     <div class="card">
-      <div class="head sm"><h2>Leaderboard</h2><span class="sub">over the {n} rep{n === 1 ? "" : "s"} everyone ran{sameT && iv.slots[iv.shared_slots[0]]?.target ? ` (${iv.slots[iv.shared_slots[0]].target!.text})` : ""}</span></div>
+      <div class="head sm"><h2>Leaderboard</h2><span class="sub">every rep each person ran counts · ordered by average rep pace (total time ÷ total distance of their own reps)</span></div>
       <div class="tg-mxwrap"><table class="tg-tbl lb">
         <thead><tr>
-          <th></th><th>Person</th><th class="num" title="Sum of the shared reps">Total</th>
-          <th class="num" title={`${sameT ? "Average time per shared rep, and " : ""}average rep pace: total distance ÷ total time of the shared reps`}>Avg</th>
-          <th class="num" title="Total time behind the leader">Gap</th>
-          <th class="num" title="Shared reps won (+ dead heats)">Wins</th><th class="num opt" title="Fastest rep (suspect reps left out)">Best</th>
+          <th></th><th>Person</th><th class="num" title="Full reps run (partial reps not counted)">Reps</th>
+          <th class="num" title={"Average time per rep" + (nT > 1 ? ", per set distance" : "") + (anySus ? " (suspect reps left out)" : "")}>Avg rep</th>
+          <th class="num" title="Average rep pace: total distance ÷ total time of the person's own reps; then the difference to the fastest average">Pace</th>
+          <th class="num opt" title="Fastest rep (suspect reps left out)">Best</th>
           <th class="num opt" title={"Fade: average of the last 3 reps minus the first 3 (per rep; per km when the rep distances differ).\nSlower = faded towards the end, faster = finished stronger. Suspect reps are left out."}>Fade</th>
           {anyEff && <th class="num opt" title={`Average peak HR per rep as % of ${effortLabel(effMode)}`}>Effort</th>}
         </tr></thead>
         <tbody>
           {iv.leaderboard.map((l) => {
             const fade = l.fade_s ?? l.fade_s_km;
-            const more = (l.all_n ?? 0) > n;
-            return [
-              <tr key={l.person} class={more ? "hasub" : ""}>
-                <td class="rank">{l.total_s !== null ? MEDAL[l.rank - 1] ?? l.rank : ""}</td>
+            return (
+              <tr key={l.person}>
+                <td class="rank">{l.rank !== null ? MEDAL[l.rank - 1] ?? l.rank : ""}</td>
                 <td><span class="pn"><Av p={l.person} /><span class={l.person === s.viewer ? "me" : ""}>{personName(l.person)}</span></span></td>
-                <td class="num"><b>{l.total_s !== null ? repTime(l.total_s) : "—"}</b></td>
-                <td class="num"><span class="nm2 r">{sameT && <span>{repTime(l.avg_s)}</span>}<span class={sameT ? "muted small" : ""}>{paceText(l.pace_s_km, sport)}</span></span></td>
-                <td class="num">{l.rank === 1 ? <span class="muted">leader</span> : behind(l.gap_s)}</td>
-                <td class="num">{l.rep_wins}{l.rep_ties ? <span class="muted small" title="dead heats"> +{l.rep_ties} tied</span> : ""}</td>
+                <td class="num" title={l.n_partial ? `+ ${l.n_partial} partial` : undefined}>{l.reps_done}{l.n_partial ? <span class="muted small"> +{l.n_partial}◐</span> : null}</td>
+                <td class="num"><span class="nm2 r">{l.by_target.length ? l.by_target.map((t) => (
+                  <span key={t.text}>{t.kind === "dist" ? repTime(t.avg_s) : `${t.avg_m ?? "—"} m`}{nT > 1 || l.by_target.length > 1 ? <span class="muted small"> {t.text} ×{t.n}</span> : null}</span>
+                )) : "—"}</span></td>
+                <td class="num"><span class="nm2 r"><b>{paceText(l.pace_s_km, sport)}</b>{l.gap_s_km ? <span class="muted small">+{l.gap_s_km.toFixed(1)} s/km</span> : null}</span></td>
                 <td class="num opt">{l.best ? <>{repTime(l.best.result_s)} <span class="muted small">{rl(l.best.label)}</span></> : "—"}</td>
                 <td class={"num opt " + (fade === null ? "" : fade < -0.5 ? "good" : fade > 0.5 ? "bad" : "")}>{fade === null ? "—" : fadeText(fade, l.fade_s === null)}</td>
                 {anyEff && <td class="num opt">{l.avg_effort_pct ? `${l.avg_effort_pct} %` : "—"}</td>}
-              </tr>,
-              more && (
-                <tr key={l.person + ":all"} class="subrow">
-                  <td></td>
-                  <td colSpan={8} class="muted small" title={`Every full rep ${personName(l.person)} ran, also the ones only they ran${(l.suspect ?? []).length ? ` (incl. suspect ${(l.suspect ?? []).map((x) => rl(x)).join(", ")})` : ""}`}>
-                    All {l.all_n} reps {personName(l.person)} ran: {l.all_avg_s !== null ? `avg ${repTime(l.all_avg_s)} · ` : ""}{paceText(l.all_pace_s_km, sport)} · total {repTime(l.all_total_s)}
-                    {(l.suspect ?? []).length ? ` (incl. suspect ${(l.suspect ?? []).map((x) => rl(x)).join(", ")})` : ""}</td>
-                </tr>
-              ),
-            ];
+              </tr>
+            );
           })}
         </tbody>
       </table></div>
-      {iv.leaderboard.some((l) => (l.suspect ?? []).length) && (
-        <p class="note small">? suspect rep: {iv.leaderboard.filter((l) => (l.suspect ?? []).length).map((l) => `${personName(l.person)} ${(l.suspect ?? []).map((x) => rl(x, false)).join(", ")}`).join("; ")} — much faster than the other reps of the same distance (probably short or a lap pressed early); left out of Best and Fade.</p>
+      {anySus && (
+        <p class="note small">? suspect rep: {iv.leaderboard.filter((l) => (l.suspect ?? []).length).map((l) => `${personName(l.person)} ${(l.suspect ?? []).map((x) => rl(x, false)).join(", ")}`).join("; ")} — much faster than the other reps of the same distance (probably short or a lap pressed early); counted as a rep, left out of the averages, Best and Fade.</p>
       )}
     </div>
   );
@@ -191,20 +184,97 @@ function cellMain(c: Cell, timeSlot: boolean) {
   return repTime(c.partial ? c.own_time_s ?? c.time_s : c.result_s ?? c.time_s);
 }
 
+/** chips shown per rep row before "+k" (10–20 people stay one or two lines; phones: the podium + you) */
+const boardTop = () => (typeof window !== "undefined" && window.innerWidth < 500 ? 3 : 6);
+
+/** the primary results view for intervals: one row per rep (label + set distance), then everyone who ran it as a chip,
+ *  fastest first, with a medal for the top 3, their time and the gap to the rep's fastest. Click a row: the close-up. */
+function RepBoard({ iv, sel, onSel, viewer }: { iv: Intervals; sel: string | null; onSel: (l: string) => void; viewer: string | null }) {
+  useTheme();
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+  const keys = Object.keys(iv.reps);
+  return (
+    <div class="tg-rb" role="list">
+      {iv.slots.map((sl) => {
+        const st = iv.standings[sl.slot];
+        const timeSlot = sl.target?.kind === "time";
+        const cu = iv.rep_closeups.find((c) => c.slot === sl.label);
+        const ranked = st.order.map((o) => ({ k: o.person, o, c: iv.reps[o.person][sl.slot]! }));
+        const rest = keys.filter((k) => iv.reps[k][sl.slot] && !st.order.some((o) => o.person === k)).map((k) => ({ k, o: null, c: iv.reps[k][sl.slot]! }));
+        const chips = [...ranked, ...rest];
+        const top = boardTop();
+        const many = chips.length > top + 1 && !open[sl.slot];
+        // the top N, plus "you" when further down (so your own result is always on the row)
+        const shown = many ? chips.filter((x, i) => i < top || x.k === viewer) : chips;
+        const medals = st.order.length >= 2;
+        return (
+          <div key={sl.slot} role="listitem" class={"tg-rb-row" + (sel === sl.label ? " selected" : "") + (cu?.available ? " clickable" : "") + (!sl.anchor ? " extra" : "")}
+            onClick={cu?.available ? () => onSel(sl.label) : undefined} title={cu?.available ? `${rl(sl.label, false)}: show the close-up` : undefined}>
+            <div class="tg-rb-lab"><b>{rl(sl.label)}</b><span class="muted">{sl.target?.text ?? ""}</span></div>
+            <div class="tg-rb-chips">
+              {shown.map(({ k, o, c }) => {
+                const gap = o && o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? `−${Math.round(o.gap_m)} m` : `+${secs(o.gap_s, 1)}`) : null;
+                const tip = [personName(k), cellMain(c, timeSlot), o ? (o.tie ? `dead heat (within ${o.tie_s} s)` : o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : behind(o.gap_s)) + " the fastest" : "fastest") : null,
+                  c.partial ? `partial: ${dur(c.own_time_s)} for ${Math.round(c.own_dist_m ?? 0)} m, not ranked` : null,
+                  !o && !c.partial ? "only one person ran this rep" : null,
+                  c.suspect ? `⚠ suspect: ${c.suspect}` : null, c.source === "onset" ? "from the speed step" : null,
+                  c.effort_pct ? `peak HR ${c.effort_pct} %` : null].filter(Boolean).join(" · ");
+                return (
+                  <span key={k} class={"tg-rb-chip" + (c.partial ? " partial" : "") + (k === viewer ? " me" : "") + (o?.rank === 1 && medals ? " first" : "")}
+                    style={{ "--pc": personColour(k) } as any} title={tip}>
+                    {(c.partial || (o && medals)) && <span class="rk">{c.partial ? "◐" : MEDAL[o!.rank - 1] ?? o!.rank}</span>}
+                    <Av p={k} size="xs" />
+                    <span class="nm">{personInfo(k).name}</span>
+                    <b class="v">{cellMain(c, timeSlot)}{c.suspect ? <span class="sus">?</span> : null}{c.source === "onset" ? <sup>≈</sup> : null}</b>
+                    {gap && <small class="g">{gap}</small>}
+                  </span>
+                );
+              })}
+              {many && <button class="tg-rb-more" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [sl.slot]: true }); }}
+                title="Show everyone who ran this rep">+{chips.length - shown.length}</button>}
+            </div>
+            <button class="tg-rp-row" title={`Replay ${rl(sl.label, false)}: everyone from the start line`} aria-label={`Replay ${rl(sl.label, false)}`}
+              onClick={(e) => { e.stopPropagation(); setQuery({ replay: 1, rrep: sl.label }); }}>▶</button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** results per rep: the board (default) or the wide table (a column per person; handy with a few people) */
+function RepResults({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
+  const { query } = useLocation();
+  const table = query.get("rv") === "table";
+  return (
+    <div class="card tg-rep-results">
+      <div class="head sm"><h2>Rep by rep</h2><span class="sub">each rep ranked among whoever ran it · click a rep for the close-up, ▶ to replay it</span>
+        <div class="tools">
+          <div class="seg" role="group" aria-label="View">
+            <button class={!table ? "on" : ""} onClick={() => setQuery({ rv: null })} title="A row per rep, everyone who ran it fastest first">Board</button>
+            <button class={table ? "on" : ""} onClick={() => setQuery({ rv: "table" })} title="A column per person">Table</button>
+          </div>
+        </div>
+      </div>
+      {table ? <Standings s={s} iv={iv} sel={sel} onSel={onSel} /> : <RepBoard iv={iv} sel={sel} onSel={onSel} viewer={s.viewer} />}
+      <p class="note small">🥇🥈🥉 fastest three of the rep · +s behind the rep's fastest · = dead heat (within the recording precision) · ◐ partial (not ranked) · ≈ found from the speed step · ? suspect (hover)</p>
+    </div>
+  );
+}
+
 function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
+  void s;
   const keys = Object.keys(iv.reps);
   let maxGap = 0;
   for (const st of iv.standings) for (const o of st.order) maxGap = Math.max(maxGap, o.gap_s);
   const many = keys.length > 3;
   return (
-    <div class="card">
-      <div class="head sm"><h2>Rep by rep</h2><span class="sub">time for the set distance and how far behind the rep winner · click a rep for the close-up</span></div>
+    <>
       <div class="tg-mxwrap">
         <table class="tg-tbl mx">
           <thead><tr>
             <th>Rep</th><th>Set</th>
             {keys.map((k) => <th key={k} class="pcol"><span class="pn"><Av p={k} size="sm" />{many ? personInfo(k).initials : personName(k)}</span></th>)}
-            {keys.length === 2 && <th class="num opt">Gap</th>}
             <th class="rp" aria-label="Replay"></th>
           </tr></thead>
           <tbody>
@@ -212,11 +282,10 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
               const st = iv.standings[sl.slot];
               const timeSlot = sl.target?.kind === "time";
               const ranked = st.order.length > 0;
-              const gap2 = keys.length === 2 && ranked ? st.order[st.order.length - 1] : null;
               const cu = iv.rep_closeups.find((c) => c.slot === sl.label);
               return (
                 <tr key={sl.slot} class={(sel === sl.label ? "selected " : "") + (cu?.available ? "clickable " : "") + (!sl.anchor ? "extra" : "")}
-                  onClick={cu?.available ? () => onSel(sl.label) : undefined} title={!sl.anchor ? "An extra rep (only some ran it): shown, not ranked" : !ranked ? "Not ranked: only one person has a full result" : ""}>
+                  onClick={cu?.available ? () => onSel(sl.label) : undefined} title={!ranked ? "Not ranked: only one person has a full result" : ""}>
                   <td class="rl">{rl(sl.label)}</td>
                   <td class="muted">{sl.target?.text ?? ""}</td>
                   {keys.map((k) => {
@@ -230,11 +299,11 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
                       c.source === "onset" ? "from the speed step (no rep detected on this watch)" : null,
                       c.method === "merged" ? "two detected pieces merged" : null, c.method === "interpolated" ? "time at the set distance (interpolated)" : null,
                       c.own_dist_m ? `GPS ${Math.round(c.own_dist_m)} m` : null, o?.tie ? `dead heat (within ${o.tie_s} s)` : null,
-                      o && o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : behind(o.gap_s)) + " the rep winner" : null,
+                      o && o.gap_s > 0.05 ? (timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : behind(o.gap_s)) + " the rep's fastest" : null,
                       c.hr_peak ? `peak HR ${c.hr_peak} bpm` : null].filter(Boolean).join(" · ");
                     return (
                       <td key={k} class={"cell" + (c.partial ? " partial" : "") + (!o && !c.partial ? " unranked" : "") + (c.suspect ? " suspect" : "")} style={style} title={tip}>
-                        <span class="m">{c.suspect ? <span class="sus">?</span> : o ? (o.tie ? <span class="tie" title="dead heat">=</span> : o.rank === 1 ? MEDAL[0] : many ? <span class="rk">{o.rank}</span> : "") : c.partial ? "◐" : ""}</span>
+                        <span class="m">{c.suspect ? <span class="sus">?</span> : o ? (o.tie ? <span class="tie" title="dead heat">=</span> : MEDAL[o.rank - 1] ?? (many ? <span class="rk">{o.rank}</span> : "")) : c.partial ? "◐" : ""}</span>
                         <span class="v">{cellMain(c, timeSlot)}{c.source === "onset" ? <sup>≈</sup> : null}</span>
                         {o && o.gap_s > 0.05 && <span class="g">{timeSlot && o.gap_m !== null ? behind(o.gap_m, "m") : many ? secs(o.gap_s, 1) : behind(o.gap_s)}</span>}
                         {c.partial && c.own_dist_m ? <span class="g">{Math.round(c.own_dist_m)} m</span> : null}
@@ -242,12 +311,6 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
                       </td>
                     );
                   })}
-                  {keys.length === 2 && (
-                    <td class="num bar opt">{gap2 && gap2.gap_s > 0 ? (
-                      <span class="gb" title={`${personName(gap2.person)} ${behind(gap2.gap_s)}`}>
-                        <i style={{ width: `${Math.max(4, (gap2.gap_s / (maxGap || 1)) * 100)}%`, background: personColour(gap2.person) }} />
-                      </span>) : gap2 ? <span class="muted small">tie</span> : null}</td>
-                  )}
                   <td class="rp"><button class="tg-rp-row" title={`Replay ${rl(sl.label, false)}: everyone from the start line`} aria-label={`Replay ${rl(sl.label, false)}`}
                     onClick={(e) => { e.stopPropagation(); setQuery({ replay: 1, rrep: sl.label }); }}>▶</button></td>
                 </tr>
@@ -256,38 +319,43 @@ function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: str
           </tbody>
         </table>
       </div>
-      <p class="note small">🥇 rep winner · = dead heat (within the recording precision) · ◐ partial (not ranked) · ≈ found from the speed step · ? suspect (hover) · % = peak HR as % of {effortLabel(iv.leaderboard[0]?.effort_mode)}</p>
-    </div>
+      <p class="note small">% = peak HR as % of {effortLabel(iv.leaderboard[0]?.effort_mode)}</p>
+    </>
   );
 }
 
-function Cumulative({ iv, sel }: { iv: Intervals; sel: string | null }) {
+/** each person's own rep times (one set distance) or rep pace across the session (each person's own reps, whoever ran what) */
+function RepTrend({ s, iv, sel }: { s: TSession; iv: Intervals; sel: string | null }) {
   const theme = useTheme();
-  const cu = iv.cumulative;
-  const x = useMemo(() => cu.labels.map((_l, i) => i + 1), [cu]);
-  const series = useMemo<TSeries[]>(() => Object.entries(cu.people).map(([k, v]) => ({
-    key: k, colour: personColour(k), values: v.map((p) => (p ? neg(p.gap_s) : null)), points: true, width: 2.2,
-  })), [cu, theme]);
+  const keys = Object.keys(iv.reps);
+  const full = (c: Cell | null | undefined) => !!c && !c.partial && !c.suspect && c.result_s !== null;   // suspect: probably short
+  const tg = new Set(iv.slots.filter((sl) => keys.some((k) => full(iv.reps[k][sl.slot]))).map((sl) => sl.target?.text));
+  const one = tg.size === 1 && iv.slots.find((sl) => keys.some((k) => full(iv.reps[k][sl.slot])))?.target?.kind === "dist";
+  const val = (sl: Intervals["slots"][number], c: Cell | null | undefined): N => {
+    if (!full(c) || !sl.target) return null;
+    if (one) return c!.result_s;
+    return sl.target.kind === "dist" ? (c!.result_s! * 1000) / sl.target.value : c!.dist_m ? (c!.time_s! * 1000) / c!.dist_m : null;
+  };
+  const x = useMemo(() => iv.slots.map((_s, i) => i + 1), [iv]);
+  const series = useMemo<TSeries[]>(() => keys.map((k) => ({ key: k, colour: personColour(k), points: true, width: 2,
+    values: iv.slots.map((sl) => val(sl, iv.reps[k][sl.slot])) })), [iv, theme]);
   const [ci, setCi] = useState<number | null>(null);
-  const i = ci ?? cu.labels.length - 1;
-  const selI = sel ? cu.labels.indexOf(sel) : -1;
-  if (cu.labels.length < 2) return null;
-  const rows = Object.entries(cu.people).map(([k, v]) => {
-    const prev = i > 0 ? v[i - 1] : null;
-    return { k, p: v[i], rep: v[i] && (i === 0 ? v[i]!.gap_s : prev ? v[i]!.gap_s - prev.gap_s : null) };
-  }).sort((a, b) => (a.p?.gap_s ?? 1e9) - (b.p?.gap_s ?? 1e9));
+  const selI = sel ? iv.slots.findIndex((sl) => sl.label === sel) : -1;
+  if (iv.slots.length < 2) return null;
+  const i = ci ?? (selI >= 0 ? selI : null);
+  const fmt = (v: number) => (one ? repTime(v) : paceText(v, s.group.sport));
   return (
     <div class="card">
-      <div class="head sm"><h2>Race standing</h2><span class="sub">total time behind the leader after each rep both ran (leader on top)</span></div>
+      <div class="head sm"><h2>{one ? "Rep times" : "Rep pace"}</h2><span class="sub">each person's own reps across the session (faster on top{one ? "" : "; pace, as the distances differ"}; suspect reps left out)</span></div>
       <div class="tg-legend">
-        <span class="muted">after {rl(cu.labels[i], false)}</span>
-        {rows.map((r) => (
-          <span key={r.k}><i class="sw" style={{ background: personColour(r.k) }} />{personName(r.k)} <b>{r.p ? (r.p.gap_s < 0.05 ? "leads" : behind(r.p.gap_s)) : "—"}</b>
-            {r.p && r.rep !== null && Math.abs(r.rep) >= 0.05 && <span class="muted"> ({r.rep > 0 ? "lost" : "gained"} {secs(Math.abs(r.rep), 1)} this rep)</span>}</span>
-        ))}
+        {i === null ? <span class="muted">hover a rep</span> : <>
+          <span class="muted">{rl(iv.slots[i].label, false)}{iv.slots[i].target ? ` · ${iv.slots[i].target!.text}` : ""}</span>
+          {series.filter((sr) => sr.values[i] !== null).sort((a, b) => a.values[i]! - b.values[i]!).map((sr) => (
+            <span key={sr.key}><i class="sw" style={{ background: sr.colour }} />{personName(sr.key)} <b>{fmt(sr.values[i]!)}</b></span>))}
+        </>}
       </div>
-      <TLine x={x} series={series} xLabels={cu.labels.map((l) => rl(l))} height={190} zero from0 yFmt={behindTick} ySize={82} onCursor={setCi}
-        bands={selI >= 0 ? [{ a: selI + 1 - 0.4, b: selI + 1 + 0.4 }] : []} />
+      <TLine x={x} series={series} xLabels={iv.slots.map((sl) => rl(sl.label))} height={190} dir={-1} yFmt={(v) => (one ? repTime(v) : `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, "0")}`)}
+        ySize={62} onCursor={setCi} bands={selI >= 0 ? [{ a: selI + 1 - 0.4, b: selI + 1 + 0.4 }] : []} />
     </div>
   );
 }
@@ -452,7 +520,7 @@ function IntervalsView({ s, iv, replay, hr, top, middle }: { s: TSession; iv: In
   const { query } = useLocation();
   const align = query.get("align") === "clock" ? "clock" : "own";
   const avail = iv.rep_closeups.filter((c) => c.available);
-  const closest = s.headline.closest?.label;
+  const closest = closestRep(iv)?.label;
   const want = query.get("rep") ?? (closest && avail.some((c) => c.slot === closest) ? closest : avail[0]?.slot);
   const cu = avail.find((c) => c.slot === want) ?? avail[0] ?? null;
   const onSel = (l: string) => setQuery({ rep: l });
@@ -461,13 +529,13 @@ function IntervalsView({ s, iv, replay, hr, top, middle }: { s: TSession; iv: In
       {top}
       <div class="tg-body">
         <div class="tg-col">
+          <RepResults s={s} iv={iv} sel={cu?.slot ?? null} onSel={onSel} />
           <Leaderboard s={s} iv={iv} />
-          <Standings s={s} iv={iv} sel={cu?.slot ?? null} onSel={onSel} />
         </div>
         <div class="tg-col side">
-          <Cumulative iv={iv} sel={cu?.slot ?? null} />
           {cu ? <RepCloseup s={s} iv={iv} cu={cu} replay={replay} align={align} onSel={onSel} onReplay={() => setQuery({ replay: 1, rrep: cu.slot })} />
-            : <div class="card"><div class="empty">No rep close-up: no rep has a set distance everyone ran.</div></div>}
+            : <div class="card"><div class="empty">No rep close-up: no rep with a set distance that two or more people ran.</div></div>}
+          <RepTrend s={s} iv={iv} sel={cu?.slot ?? null} />
         </div>
       </div>
       {middle}
@@ -562,7 +630,7 @@ function ContinuousView({ s, replay, hr, top, middle }: { s: TSession; replay: R
                 <tbody>{c.race.map((r) => (
                   <tr key={r.person}><td class="rank">{MEDAL[r.rank - 1] ?? r.rank}</td>
                     <td><span class="pn"><Av p={r.person} /><span class={r.person === s.viewer ? "me" : ""}>{personName(r.person)}</span></span></td>
-                    <td class="num"><b>{dur(r.time_s)}</b></td><td class="num">{r.rank === 1 ? <span class="muted">winner</span> : behind(r.gap_s)}</td>
+                    <td class="num"><b>{dur(r.time_s)}</b></td><td class="num">{r.rank === 1 ? <span class="muted">first</span> : behind(r.gap_s)}</td>
                     <td class="num">{r.dist_km ? `${r.dist_km.toFixed(2)} km` : "—"}</td><td class="num">{r.dist_km ? speedText(sport, (r.dist_km * 1000) / r.time_s) : "—"}</td></tr>
                 ))}</tbody>
               </table></div>

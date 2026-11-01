@@ -218,3 +218,33 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 .tg-rp-row:hover { background: var(--accent-surface); border-color: var(--accent); }
 .tg-tbl.live td:nth-child(3) { white-space: nowrap; }
 @media (max-width: 760px) { .tg-rp-keys { display: none; } .tg-rp-chips .tg-rp-align { margin-left: 0; } }
+
+/* ---- per-rep board (TogetherSession RepBoard): a row per rep, everyone who ran it as a chip, fastest first */
+.tg-rb { display: flex; flex-direction: column; border-top: 1px solid var(--hairline); }
+.tg-rb-row { display: grid; grid-template-columns: 58px 1fr 28px; align-items: center; gap: var(--space-2); padding: 5px 4px; border-bottom: 1px solid var(--hairline); }
+.tg-rb-row.clickable { cursor: pointer; }
+.tg-rb-row.clickable:hover { background: var(--surface-hover); }
+.tg-rb-row.selected { background: var(--accent-surface); box-shadow: inset 3px 0 0 var(--accent); }
+.tg-rb-row.extra .tg-rb-lab b { color: var(--text-muted); font-weight: var(--fw-regular); }
+.tg-rb-row:hover .tg-rp-row, .tg-rb-row.selected .tg-rp-row { opacity: 1; }
+.tg-rb-lab { display: flex; flex-direction: column; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.tg-rb-lab b { font-weight: var(--fw-semibold); }
+.tg-rb-lab .muted { font-size: var(--fs-12); }
+.tg-rb-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; min-width: 0; }
+.tg-rb-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 7px 0 3px; border-radius: 12px; font-size: var(--fs-12);
+  border: 1px solid color-mix(in srgb, var(--pc) 35%, var(--hairline)); background: color-mix(in srgb, var(--pc) 7%, var(--surface));
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tg-rb-chip .rk { min-width: 15px; text-align: center; font-size: 12px; color: var(--text-muted); }
+.tg-rb-chip .nm { max-width: 7.5em; overflow: hidden; text-overflow: ellipsis; }
+.tg-rb-chip .v { font-weight: var(--fw-semibold); }
+.tg-rb-chip .g { color: var(--text-muted); }
+.tg-rb-chip .sus { color: var(--state-version); margin-left: 1px; }
+.tg-rb-chip.first { border-color: color-mix(in srgb, var(--pc) 60%, var(--hairline)); background: color-mix(in srgb, var(--pc) 14%, var(--surface)); }
+.tg-rb-chip.me .nm { font-weight: var(--fw-semibold); }
+.tg-rb-chip.partial { opacity: 0.65; border-style: dashed; }
+.tg-rb-more { height: 24px; padding: 0 8px; border-radius: 12px; font-size: var(--fs-12); }
+.tg-rep-results .tg-mxwrap { margin-top: 0; }
+@media (max-width: 500px) {
+  .tg-rb-row { grid-template-columns: 40px 1fr 24px; gap: 6px; }
+  .tg-rb-chip .nm { display: none; }   /* the avatar's initials name them; the chip stays two-per-line */
+}

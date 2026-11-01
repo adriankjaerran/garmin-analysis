@@ -53,7 +53,7 @@ function MemberCard({ m, s, c, f }: { m: CsMember; s: TSession; c: CsSession; f:
   const n = m.numbers;
   const sport = p?.sport && p.sport !== "other" ? p.sport : s.group.sport;   // a multisport file ("other") in a run session: run pace
   const rank = m.rank ?? race?.rank ?? null;
-  const ofPeople = s.intervals ? s.intervals.leaderboard.filter((l) => l.total_s !== null).length : s.continuous?.race?.length ?? 0;
+  const ofPeople = s.intervals ? s.intervals.leaderboard.filter((l) => l.rank !== null).length : s.continuous?.race?.length ?? 0;
   const iv = !!s.intervals && m.reps_done !== null;
   const movingKm = n?.km && n?.moving_s ? (n.km * 1000) / n.moving_s : null;
   const roleText = m.role === "partial" ? "part of the workout" : m.role === "other" ? "other workout" : null;
@@ -67,9 +67,9 @@ function MemberCard({ m, s, c, f }: { m: CsMember; s: TSession; c: CsSession; f:
   if (n?.km) stats.push([`${km(n.km)} km`, "distance"]);
   if (n?.moving_s && !(race && Math.abs(race.time_s - n.moving_s) < 90)) stats.push([dur(n.moving_s), "moving", n.dur_s ? `moving time (elapsed ${dur(n.dur_s)})` : "moving time"]);
   if (iv) {
-    stats.push([`${m.reps_done}/${m.of}`, "reps", "shared reps done of the shared reps"]);
-    if (m.avg_s) stats.push([repTime(m.avg_s), "avg rep", "average time per shared rep"]);
-    if (m.pace_s_km) stats.push([paceText(m.pace_s_km, sport), "rep pace", "average pace over the shared reps"]);
+    stats.push([`${m.reps_done}`, "reps", "every full rep they ran"]);
+    if (m.avg_s) stats.push([repTime(m.avg_s), "avg rep", "average time per rep (suspect reps left out)"]);
+    if (m.pace_s_km) stats.push([paceText(m.pace_s_km, sport), "rep pace", "average pace over their own reps: total time ÷ total distance"]);
   } else if (race) {
     stats.push([dur(race.time_s), "race time"]);
     if (race.dist_km) stats.push([speedText(sport, (race.dist_km * 1000) / race.time_s), "race pace"]);
@@ -84,8 +84,8 @@ function MemberCard({ m, s, c, f }: { m: CsMember; s: TSession; c: CsSession; f:
           <span class="cs-m-wk" title={m.type ?? undefined}>{m.workout ?? "—"}{roleText ? <span class="cs-role"> · {roleText}</span> : null}</span>
         </div>
         {rank !== null && ofPeople > 1 && (
-          <span class="cs-rank" title={iv ? `Rank over the shared reps${m.rep_wins !== null ? ` · ${m.rep_wins} rep${m.rep_wins === 1 ? "" : "s"} won` : ""}` : "Race placing"}>
-            {MEDAL[rank - 1] ?? `#${rank}`}{iv && m.rep_wins ? <small>{m.rep_wins} won</small> : null}
+          <span class="cs-rank" title={iv ? "Place by average rep pace over their own reps" : "Race placing"}>
+            {MEDAL[rank - 1] ?? `#${rank}`}
           </span>
         )}
       </div>
@@ -158,10 +158,7 @@ function Collective({ c, s }: { c: CsSession; s: TSession }) {
     { v: `${km(k.km)} km`, l: `${verb} together`, sub: n > 1 && k.km ? `${km(k.km / n)} km each on average` : null, tip: "sum of everyone's distance" },
     { v: hoursMin(k.moving_s), l: `collective time ${s.group.sport === "run" ? "running" : "moving"}`, sub: k.moving_s ? `${dur(k.moving_s / n)} each` : null, tip: "sum of everyone's moving time" },
   ];
-  if (k.reps) tiles.push({ v: num(k.reps), l: "reps between you", sub: k.reps_shared ? `${k.reps_shared} side by side in the same slots` : null, tip: "every full rep each person ran" });
-  if (k.person_min_shared) tiles.push({ v: `${num(k.person_min_shared)}`, l: "person-minutes together",
-    sub: k.person_min_together ? `${num(k.person_min_together)} of them side by side` : null,
-    tip: `per person the time out there at the same time as the others, summed${k.together_estimated ? " (estimated: no track on one side)" : ""}; "side by side" = within a few metres of each other` });
+  if (k.reps) tiles.push({ v: num(k.reps), l: "reps between you", sub: n > 1 ? `${(k.reps / n).toFixed(k.reps % n ? 1 : 0)} each on average` : null, tip: "every full rep each person ran" });
   if (k.climb_m) tiles.push({ v: `${num(k.climb_m)} m`, l: "climbed", sub: climb, tip: "sum of everyone's elevation gain" });
   if (k.kcal) tiles.push({ v: num(k.kcal), l: "kcal burned", sub: buns >= 1 ? `≈ ${buns} cinnamon bun${buns === 1 ? "" : "s"} 🥐` : null, tip: "sum of the watches' calorie estimates (a bun ≈ 250 kcal)" });
   return (

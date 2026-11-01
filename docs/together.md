@@ -104,7 +104,7 @@ the anchor's for intervals / races, else a member of the group sport who didn't 
 |---|---|---|
 | 2026-10-20_2007_Bislet | same_workout | adrian 15×400 (full), patrik 10×400 (partial) |
 | 2026-10-15_2012_Bislet | same_workout 0.79 | patrik 1×1300 + 2×3000, adrian multisport file, a run since 2026-11-01 (partial: cut the 2nd 3000 at 2 km) |
-| 2026-10-06_1911_Frogner-stadion | same_workout | adrian 3×1800 + 2×900 (adrian 5–0), patrik (joined 22 min late, all 5 reps) |
+| 2026-10-06_1911_Frogner-stadion | same_workout | adrian 3×1800 + 2×900, patrik (joined 22 min late, all 5 reps) |
 | 2026-09-10_1841_Bislet | together 0.97 | easy run; patrik continued alone with reps |
 | 2026-06-29_0824_Weinan-1 | together 0.88 | hike |
 | 2025-11-11_1936_Bislet | same_workout | adrian 6×800 + 2×400, patrik "10 reps mixed" |
@@ -166,19 +166,24 @@ earliest file start).
   - `partial` (◐): otherwise; shown with own time / distance, not ranked.
   - Set-time slots (`0:45`): metres covered in the set time (÷ GPS scale), ranked by metres; `result_s` = the time to
     cover the winner's metres at own pace (so totals add up).
-- **Standings** per slot (≥ 2 results): rank, `gap_s` to the winner, `gap_m` (≈ gap × set distance ÷ time);
+- **Standings** per slot (≥ 2 results; each rep is ranked among whoever ran it, extra slots too): rank, `gap_s` to the
+  rep's fastest, `gap_m` (≈ gap × set distance ÷ time);
   **dead heat** when within `tie_s` = max(1 s, half the coarser median recording interval) of the group's best
   (`tie: true`, same rank).
 - **Suspect reps** (`cell.suspect`: the reason): > 10 % faster than the person's median for the same set distance
   (≥ 3 such reps), e.g. adrian's 15th 400 m in 64.5 s (median 77.8 s): a short rep or a lap pressed early. Kept in
-  totals, left out of best rep and fade; listed in `leaderboard[].suspect`.
-- **Shared slots** = slots where every participant (not `other`) has a result. **Leaderboard**: total / average over
-  the shared slots, `pace_s_km` (distance-weighted: total distance ÷ total time of the shared reps), gap to the
-  leader, rep wins / ties (shared slots), best rep, `reps_done` / `of` (anchor slots), `extra_reps`; every full rep the
-  person ran (also the ones only they ran): `all_n`, `all_total_s`, `all_avg_s` (one set distance only),
-  `all_pace_s_km`; **fade** (last 3 vs first 3 raced reps, suspect ones left out: `fade_s` when they share the set
-  distance, `fade_s_km` as pace; positive = slower at the end), average effort.
-- **Cumulative** over the raced slots: total and gap to the leader after each; a person missing a slot drops out (null).
+  `reps_done`, left out of the averages, best rep and fade; listed in `leaderboard[].suspect`.
+- **No "shared reps"** (2026-11-01): people may run separate reps from a common start or all together; every rep a
+  person ran counts. **Leaderboard**, per person over their own full reps (suspect ones left out of the averages):
+  `reps_done` (every full rep), `n_counted`, `n_partial`, `pace_s_km` = distance-weighted average rep pace (total time
+  ÷ total distance; set-time reps: set time ÷ metres) — **the ranking** —, `gap_s_km` to the fastest average,
+  `avg_s` (one set distance only), `by_target` [{kind, value, text, n, avg_s, best_s | avg_m, best_m}] (average per set
+  distance / set time), `total_s` (time of the counted reps), best rep, `anchor_done` / `of` (anchor slots),
+  `extra_reps`; **fade** (last 3 vs first 3 counted reps of the main set = the anchor's slots: `fade_s` when they share
+  the set distance, `fade_s_km` as pace; positive = slower at the end), average effort. The page's Splits "Avg" row
+  shows exactly `avg_s` / `pace_s_km`.
+- **Cumulative**: each person's own time run so far after every slot (`{total_s, n}`, null in a slot without a full rep
+  of theirs; set-time reps add the set time): not a race between people.
 - **Rep close-ups** (`rep_closeups`, distance slots): per person `d_m` = metres since the own rep start × scale (to the
   set distance, capped; null after own finish) and `behind_m` = leader's `d_m` − own (along the track, not straight
   line; null after the leader's finish), on a 1 s grid, aligned at each person's **own** start (`own`, the default) and on
@@ -206,134 +211,29 @@ earliest file start).
   `with_pct`, `within_20m_pct`, `median_apart_m` (while with each other).
 
 Validation (2026-11-01, `together.py validate`: 0 failures over 19 groups; detected rep times equal each person's own
-`compare --mode intervals` rep times, totals = sums, cumulative leader at 0):
+`compare --mode intervals` rep times, standings sorted with the fastest at 0, leaderboard pace = own reps' time ÷
+distance and ranked by it, cumulative counts every full rep):
 2026-10-06 (fixed 2026-11-01): adrian's 1800s are 416.8 / 403.2 / 411.7 s and 900s 187.2 / 171.2 s (detector =
 lap presses; they were 472 / 588 / 507 / 205 / 201 s "merged" because the 1754 m GPS reps had been snapped to 1600 m,
-see app.md#rep-pace), adrian 5–0, +223.8 s over 5 reps (was "Patrik 2–3"); no other session changed.
-2026-10-20: adrian 12:52.3, patrik 14:10.7 over 10 × 400 (+78.4 s, adrian 10–0, closest rep 10 +2.5 s; rep 1: patrik
-≈ 54 m behind at 70 s); 2025-11-11: 6 shared reps, adrian 6–0 (rep 1 patrik ran 2 × 330 m, rep 2 split by his detector,
-◐); 2024-04-14: patrik's reps from onsets (typed easy), +30–40 s per 1000 m (positions confirm 75–145 m behind at
-adrian's finish), the 45 s rep a dead heat; 2026-10-06: patrik's split first 1800 merged (490 s vs 417 s);
-2026-10-15: 1 shared 3000 m (adrian 691 s, patrik 737 s), adrian's 2nd cut at 2009 m (◐); race 2023-05-07 39:08 vs
-43:26; 2026-09-10 easy run 97 % with each other, km splits within 2 s.
-
-## API
-All GET; they work unprefixed and under `/api/<person>/…` alike (the prefix only sets `viewer`; groups are global).
-404 for an unknown gid (or no together.json), 422 for engine errors. Responses are memoised by together.json and every
-input's mtime; engine calls share compare's lock. Warm ≈ 10 ms, cold session 0.05–0.3 s.
-
-### `GET /api/together?person=&sport=&kind=&label=&near=1&place=&from=&to=&q=`
-Filters: `person` (comma list, any of; default all), `sport` (families), `kind`, `label` (comma lists), `near=1` (also
-hidden near-misses), `place` (substring of the place name / id), `from` / `to` (dates), `q` (all words in gid, date,
-label, kind, workout, place, names).
-```
-{n, viewer: "patrik" | null, built,
- people: {adrian: {name: "Adrian", initials: "A", colour: "#2f5fd0", colour_dark: "#6f96ee", auto: false}, ...},
- h2h: [{a: "adrian", b: "patrik", sessions: 11, interval_sessions: 5, shared_reps: 26,
-        rep_wins: {adrian: 25, patrik: 0}, rep_ties: 1, session_wins: {adrian: 5, patrik: 0},
-        mean_gap_s: 21.8 /* b − a per shared rep: positive = a faster */}],
- groups: [{gid, date, start_local, start_utc, sport, sports, kind, label, label_text, score, hidden, no_track, place,
-           workout, people, n_people,
-           participants: [{person, activity_id, role, workout, signature, n_reps, dist_km, dur_s, together,
-                           reps_done: 10, of: 15 /* intervals */}],
-           headline: {kind: "intervals", winner: "adrian", rep_wins: {adrian: 10, patrik: 0}, rep_ties: 0,
-                      shared_reps: 10, avg_gap_s_per_rep: 7.8, max_gap_s: 11.4, closest: {label: "10", gap_s: 2.5},
-                      text: "Adrian 10–0 · 7.8 s faster per rep · closest: Rep 10, 2.5 s"}
-                     | {kind: "race", winner, order, text: "Adrian 39:08 · Patrik 4:18 behind"}
-                     | {kind: "together", with_pct, text: "side by side 97 % of the time" | "together 16–42 min"}
-                     | {kind: "unverified", text: "Patrik has no watch file"}}]}
-```
-
-### `GET /api/together/{gid}`
-```
-{gid, requested_gid, viewer, kind, t0_utc, compute_s,
- group: <the together.json group>,
- participants: [{key: "patrik" /* "patrik#2" for a 2nd file */, person, activity_id, role, anchor, name, type, sport,
-                 signature, workout, dist_km, dur_s, start_utc, start_local, offset_s, clock_fixed, has_fit, has_gps,
-                 product, sample_s: 3.0, sample_p90_s: 8.0, together,
-                 display: {name, initials, colour, colour_dark},
-                 hr_norm: {max: 207, rest: null, mode: "hrmax", source: "watch_zones", warn},
-                 shape: {score: 48.55, discipline: "interval", kind: "hard"} | null /* fitness.json */}],
- people: {person: display}, caveats: [{kind: sampling|clock|hr|no_gps|no_track|clock_jump|engine, person, text}],
- headline: {...as in the list},
- intervals: null | {
-   anchor: "adrian", gps_scale: {adrian: 1.0, patrik: 1.024}, shared_slots: [0..9],
-   slots: [{slot: 0, label: "1", anchor: true, owner: "adrian", target: {kind: "dist", value: 400, text: "400 m"},
-            start_s: 555.8 /* group clock */, n_people: 2, shared: true}],
-   reps: {person key: [cell | null per slot]},
-     cell = {source: detector|onset, method: detector|interpolated|merged|partial|no_distance, partial,
-             result_s: 86.5 /* ranked value */, time_s: 86.5, dist_m: 400, own_time_s: 86.5, own_dist_m: 412,
-             start_s: 523.4 /* own file s */, clock_start_s: 555.8, scale: 0.9711, rank: 2, gap_s: 10.9, tie: false,
-             tie_s: 1.5, suspect?: "reason", hr: 159, hr_peak: 184, hr_start: 120, effort_pct: 89, effort_mode: "hrmax"},
-   standings: [{slot, label, order: [{person, result_s, rank, gap_s, gap_m, tie, tie_s}], partial: [keys], missing: [keys]}],
-   leaderboard: [{rank, person, total_s: 850.7, avg_s, pace_s_km, gap_s: 78.4, reps_done: 10, extra_reps: 0, of: 15,
-                  n_slots, reps_ranked, all_n, all_total_s, all_avg_s, all_pace_s_km, suspect: ["15"], rep_wins,
-                  rep_ties, best: {slot, label, result_s}, fade_s, fade_s_km, avg_effort_pct, effort_mode}],
-   cumulative: {slots: [slot indices], labels: ["1", ...], people: {key: [{total_s, gap_s} | null]}},
-   breaks: {key: [{after_slot, after_label, next_slot, next_label, start_s, dur_s, dist_m, speed_kmh, standing_s, kind,
-                   hr_peak, hr_30, drop_30, hr_60, drop_60, hr_90, drop_90, hr_min, hr_next_start, drop_30_pct,
-                   hr_next_start_pct}]},
-   recovered_faster: [{after_slot, after_label, person}],
-   rep_closeups: [{slot: "1", available, leader: "adrian", target_m: 400,
-                   own: {x0: 0, n: 89, people: {key: {d_m: [...], behind_m: [...], start_delta_s}}},
-                   clock: {...same, x = s since the earliest start in the slot}}]},
- continuous: null | {available, why, reference, window_s: [a, b] /* group clock */, ref_length_m,
-   clock: "moving" | "elapsed", stopped_s, split_at_m,
-   gap_over_distance: {x_m: [0, 50, ...], x0_route_m, people: {key: [s behind the first | null, ...]}, flagged},
-   led: [{from_m, to_m, person | null}], km_splits: [{km, people: {key: {time_s, rank, gap_s}}}],
-   finish: [{person, rank, time_s, gap_s, clock_s}], common_m,
-   race: [{person, rank, time_s, dist_km, gap_s}] /* same_race */,
-   apart: [{a, b, t_s: [...], apart_m: [...], with: [bool], with_pct, within_20m_pct, median_apart_m}]}}
-```
-Interval sessions get `continuous` with `apart` only; `together`-labelled ones get the full continuous block.
-About 20–130 kB per session (5–30 kB gzipped), dominated by the rep close-ups.
-
-### `GET /api/together/{gid}/replay?step_s=2&max_points=4000`
-```
-{gid, available, t0_utc, step_s, note,
- people: {key: {person, role, t: [s on the group clock], lat: [...], lon: [...], hr: [...], dist_m: [...],
-                route_m?: [metres along the shared route, continuous only; null outside the joint window]}},
- reps: [{slot, label, start_s, end_s}],      # rep windows on the same clock ("reps only" playback)
- segment_kind: "rep" | "km" | null,          # intervals: one segment per rep slot; continuous: per km of the route
- segments: [{i, kind, slot, label: "4", title: "Rep 4 · 400 m" | "km 3", target_m: 400 | null, from_m? /* km */,
-             start_s, end_s /* earliest start, last finish, group clock */,
-             people: {key: {start_s, time_s /* the time run in the replay */, scale, partial, result_s, rank}},
-             passes: {own: [{x_s, at_m, who, whom}], clock: [...]},   # x_s = s into the segment on that axis
-             total: {key: {total_s, gap_s, rank}} | null,             # total time so far, incl. this segment
-             moves: [{person, from_rank, to_rank}] | null}],          # overall rank changes vs the previous one
- passes: [{t_s, at_m, who, whom, seg, label}],                        # the whole session on the group clock
- pass_rule: {min_lead_m: {rep: 2, km: 8, route: 10}, hold_s: {rep: 3, km: 8, route: 10}}}
-```
-Positions only where the participant has GPS (Bislett indoor laps are masked). 150–250 kB (35–75 kB gzipped);
-segments + passes add ~0.05 s to a cold call.
-
-- **Rep segments** (`_rep_segments`): every slot someone ran; per person the rep's group-clock start
-  (`clock_start_s`) and the time at the set distance (`time_s`; partial reps: their own time). Metres into the rep =
-  own distance since own start × the cell's `scale`, capped at the set distance, exactly at the line after a full
-  finish. `total` = the session's `cumulative` (shared reps only, so extra reps have none); `moves` compares its
-  ranks with the previous shared rep's.
-- **Km segments** (`_km_segments`, continuous with `continuous.available`): each person projected onto the
-  reference's path (`_route_progress`, the same projection as the gap over distance), km boundaries from where everyone
-  is on it (a last piece < 300 m joins the last km); `total` = time from the person's start of km 1 to the end of
-  this km. Session passes are computed over the whole joint window by metres along the route.
-- **Passes** (`_passes`): per pair on a 1 s axis, the order flips and the new lead holds ≥ `min_lead_m` for
-  ≥ `hold_s` consecutive seconds (GPS jitter / running side by side isn't a pass; the first established order isn't
-  one); `x_s` / `at_m` = where the lead last changed sign. "own" = everyone from their own start (a virtual race on
-  speed), "clock" = real time (a late start counts).
-
-### Also
-- `GET /api/together/people`: `{people: {id: display}}`; `GET /api/people` has the same as `info`.
-- Activity rows (`/api/activities`, `/api/activities/{id}` → `activity.together`):
-  `{gid, label, kind, role, with: [person, ...]}` when the activity is in a visible group (not as `other`), else null.
-  Reloaded when together.json changes. `/api/search` rows carry the same `together` field (the 👥 marker in Activities).
+see app.md#rep-pace); patrik also has two extra reps before rep 1 (250 m, 600 m, only he ran them: counted in his
+average and records, not in fade). 2026-10-20: adrian 15 reps (14 counted, rep 15 suspect) avg 1:17.6 = 3:14 /km,
+patrik 10 reps avg 1:25.1 = 3:33 /km (+18.6 s/km); closest rep 10 (2.5 s); rep 1: patrik ≈ 54 m behind at 70 s.
+2025-11-11: rep 1 patrik ran 2 × 330 m, rep 2 split by his detector (◐); 2024-04-14: patrik's reps from onsets (typed
+easy), +30–40 s per 1000 m (positions confirm 75–145 m behind at adrian's finish), the 45 s rep a dead heat;
+2026-10-15: adrian's 2nd 3000 cut at 2009 m (◐); race 2023-05-07 39:08 vs 43:26; 2026-09-10 easy run 97 % with each
+other, km splits within 2 s.
 
 ## Pages (polish 2)
 - List: `PageHeader` with `?` tips (labels explained; the sidebar badge = your sessions in the last 30 days);
   unverified rows say who has no watch file (one badge, no duplicate "no track").
 - Session: rep labels "R3" / "Rep 3"; times with units ("45.3 s", ≥ 60 s "1:17.2"); gaps unsigned with words
-  ("10.9 s behind"); "behind" charts plot the leader / front on top. Leaderboard Avg = time per rep + distance-weighted
-  pace (`/km` on foot, km/h else), a sub-row with all the reps a person ran, Fade "0.7 s slower" with a tooltip, ? for
-  suspect reps. Breaks: "Faster recovery" column (was 🫀). "Compare with my other <workout> sessions"
+  ("10.9 s behind"); "behind" charts plot the leader / front on top. Intervals (2026-11-01): **Rep by rep** board = the
+  primary results view: a row per rep (label + set distance), everyone who ran it as a chip fastest first (🥇🥈🥉 for
+  the top 3 when ≥ 2 ran it, time, +gap to the rep's fastest; 8 chips then "+k"; on phones initials only); click a row
+  for the close-up, ▶ to replay it; the wide matrix behind a **Table** toggle (`?rv=table`). **Leaderboard**: Reps,
+  Avg rep (per set distance), Pace (distance-weighted, + s/km to the fastest average) — the order —, Best, Fade, Effort;
+  no wins column. **Rep times / Rep pace** chart: each person's own reps across the session (faster on top; replaces
+  the "race standing" over shared reps). Fade "0.7 s slower" with a tooltip, ? for suspect reps. Breaks: "Faster recovery" column (was 🫀). "Compare with my other <workout> sessions"
   (`/compare?suggest=<viewer's id>`) in the header, "compare ↗" per person (their own Compare). Replay button toggles
   (Replay ✕ when open). Overlapping map tracks: each line under the next is drawn 2.5 px wider (outline).
   Side-by-side gap chart: 250 m rolling median and at least a 15 s scale. Unverified: the GPS map of whoever has one,
@@ -344,9 +244,9 @@ segments + passes add ~0.05 s to a cold call.
   the rep (Own start) or on the real clock (Clock, the same `align` toggle as the close-up), all on one clock, the map
   zoomed to the rep (faint lines = each person's rep path, 20 s trails, initials in the dots, each dot waits at its
   finish). Live table: metres behind the leader → after the finish the time behind the first finisher, rep time,
-  **total so far** (previous shared reps + the running rep; the session total at the finish). **Passes & moves** feed
-  (newest first, only what has happened): "R4 · 210 m: Patrik passes Adrian", "Patrik moves up to 1st overall". At the
-  last finish a **finish card** on the map (ranking, gaps, totals, rank changes) for 2.6 s, then **auto-advance** to the
+  **own time so far** (each person's previous reps + the running rep). **Passes & moves** feed
+  (newest first, only what has happened): "R4 · 210 m: Patrik passes Adrian", "Patrik moves up to 1st overall" (only while everyone ran the same reps). At the
+  last finish a **finish card** on the map (the rep's order, gaps, own totals, rank changes) for 2.6 s, then **auto-advance** to the
   next rep with ≥ 2 people (checkbox). Whole session = the group clock (reps only skips breaks), live standings as
   before (continuous: metres along the shared route), the session passes in the feed and a short finish card after
   each rep. Speeds 1–16× (whole continuous sessions up to 64×; rep mode starts at the speed that runs a median rep in
