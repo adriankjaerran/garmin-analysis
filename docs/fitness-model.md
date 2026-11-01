@@ -349,3 +349,7 @@ p10 −12.6 (15, low confidence). patrik intervals median −3.0, p10 −12.7 (1
 - No HR fallback for easy runs: the HR-aerobic estimate failed as a score (test-retest 4.7 VDOT, above), and the
   efficiency factor exists for only 36 of adrian's easy runs and 1 of patrik's, rounded to 3 decimals (≈ 5 % steps).
 - HR-intent parameters (HR max 206, watch trust by date) are adrian's and are applied to patrik too.
+
+**Robust reference (2026-11-01):** each other session enters the leave-one-out reference with the shape model's robust
+weight (`sigma / √weight`), so a session the model rejected (e.g. patrik 2026-09-10, 60.4, weight < 0.5) no longer
+inflates the form the other sessions are compared with (it had pushed patrik's October reference to 57 → deltas −8 to −11).
