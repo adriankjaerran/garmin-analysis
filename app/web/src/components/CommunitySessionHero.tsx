@@ -1,20 +1,14 @@
 // Community hero on top of a session page (/community/<gid>): the cover photo (else the tracks drawn on the
-// category's gradient), the editable title, category select (six + automatic), date / time / place, kudos and
+// category's gradient), the editable title, category select (six + automatic), date / time / place, kudos, Share and
 // older / newer session navigation; the note (editable) right under it. Data: /api/community/sessions/{gid}
 // via lib/communitySession.ts (shared with the members strip and the photo gallery).
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { useLocation } from "../lib/router";
 import { longDate, shortDate } from "../lib/format";
 import { personName } from "../lib/people";
-import { patchSession, setKudos, someoneName, useCommunity, viewerOf, type CsSession } from "../lib/communitySession";
+import { patchSession, setKudos, someoneName, useCommunity, viewerOf, type CsSession, type Facts } from "../lib/communitySession";
+import { ShareButton } from "./CommunitySessionShare";
 import type { Replay, TSession } from "../lib/together";
 import "../pages/community-session.css";
-
-/** the session pages' base path: /community when we're under it, else /together (both show this page) */
-export function useSessionBase() {
-  const { path } = useLocation();
-  return path.startsWith("/together") ? "/together" : "/community";
-}
 
 /** "2026-10-15_2012_Bislet" -> "Thu 15 Oct" (+ year when it differs from `ref`) */
 const gidDate = (gid: string, ref?: string) => (/^\d{4}-\d\d-\d\d/.test(gid) ? shortDate(gid.slice(0, 10), ref) : gid);
@@ -155,9 +149,9 @@ function Note({ c }: { c: CsSession }) {
   );
 }
 
-export function CommunitySessionHero({ gid, s, replay }: { gid: string; s: TSession; replay: Replay | null }) {
+export function CommunitySessionHero({ gid, s, replay, facts }: { gid: string; s: TSession; replay: Replay | null; facts: Facts }) {
   const { data: c, error } = useCommunity(gid);
-  const base = useSessionBase();
+  const base = "/community";
   if (!c) return error ? <div class="cs-hero-missing note small">Club details unavailable: {error}</div> : <div class="cs-hero cs-hero-loading" />;
   const m = c.meta;
   const cover = m.photos.find((p) => p.id === m.cover) ?? null;
@@ -171,7 +165,7 @@ export function CommunitySessionHero({ gid, s, replay }: { gid: string; s: TSess
           {cover ? <img src={cover.url} alt="" /> : <>{replay && <Tracks replay={replay} />}<span class="cs-hero-emoji">{c.category_info.emoji}</span></>}
         </div>
         <div class="cs-hero-top">
-          <a class="cs-back" href={base}>‹ Community</a>
+          <a class="cs-back" href={base}>‹ Sessions</a>
           <span class="cs-nav">
             {c.nav.older ? <a href={`${base}/${encodeURIComponent(c.nav.older)}`} title={`Older session: ${c.nav.older}`}>‹ {gidDate(c.nav.older, c.date)}</a> : <span class="off">‹ older</span>}
             {c.nav.newer ? <a href={`${base}/${encodeURIComponent(c.nav.newer)}`} title={`Newer session: ${c.nav.newer}`}>{gidDate(c.nav.newer, c.date)} ›</a> : <span class="off">newer ›</span>}
@@ -189,6 +183,7 @@ export function CommunitySessionHero({ gid, s, replay }: { gid: string; s: TSess
         </div>
         <div class="cs-hero-foot">
           <Kudos c={c} />
+          <ShareButton s={s} c={c} facts={facts} replay={replay} />
           {m.photos.length > 0 && <a class="cs-photos-link" href="#cs-photos" onClick={(e) => { e.preventDefault(); document.getElementById("cs-photos")?.scrollIntoView({ behavior: "smooth" }); }}>📷 {m.photos.length} photo{m.photos.length === 1 ? "" : "s"}</a>}
         </div>
       </section>

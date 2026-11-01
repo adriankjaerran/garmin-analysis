@@ -1,7 +1,7 @@
 // Community part of a session page under the hero: "Who was there" (a card per member in their colour: role,
 // workout, rank, km, time, pace, reps, the form chip "+2.4 vs form", records set; links to the activity / Compare;
 // guests added by hand as chips), the collective panel ("Together you ran 17.9 km — that's …"), records set in the
-// session and the other sessions at the same place. Data: /api/community/sessions/{gid} (lib/communitySession.ts)
+// session, "Last time here" and the other sessions at the same place; per member badges (best rep, faster recovery). Data: /api/community/sessions/{gid} (lib/communitySession.ts)
 // plus the together session already on the page (participants, leaderboard, race result).
 import { useState } from "preact/hooks";
 import { withPerson } from "../lib/router";
@@ -11,10 +11,10 @@ import { useTheme } from "../lib/theme";
 import { MEDAL, paceText, repTime, type TSession } from "../lib/together";
 import {
   climbFun, distanceFun, hoursMin, patchSession, useCommunity,
-  type CsForm, type CsMember, type CsRecord, type CsSession,
+  type CsForm, type CsMember, type CsRecord, type CsSession, type Facts,
 } from "../lib/communitySession";
-import { Avatar } from "../pages/TogetherPage";
-import { useSessionBase } from "./CommunitySessionHero";
+import { Avatar } from "./CommunityBits";
+import { LastTimeHere } from "./CommunitySessionHighlights";
 import "../pages/community-session.css";
 
 const DISC: Record<string, string> = { interval: "interval", long: "long-distance", ski: "ski" };
@@ -45,7 +45,7 @@ function recordBadge(r: CsRecord) {
   return r.kind === "club_best" ? "🏆 Club record" : "⭐ Club PB";
 }
 
-function MemberCard({ m, s, c }: { m: CsMember; s: TSession; c: CsSession }) {
+function MemberCard({ m, s, c, f }: { m: CsMember; s: TSession; c: CsSession; f: Facts }) {
   useTheme();
   const p = s.participants.find((x) => x.key === m.key);
   const lb = s.intervals?.leaderboard.find((l) => l.person === m.key);
@@ -58,6 +58,11 @@ function MemberCard({ m, s, c }: { m: CsMember; s: TSession; c: CsSession }) {
   const movingKm = n?.km && n?.moving_s ? (n.km * 1000) / n.moving_s : null;
   const roleText = m.role === "partial" ? "part of the workout" : m.role === "other" ? "other workout" : null;
   const me = m.key === c.viewer;
+  const pf = f.people[m.key];
+  const badges: { t: string; tip: string }[] = [];
+  if (pf?.bestRep && f.sameTarget) badges.push({ t: `⚡ Best rep R${pf.bestRep.label} · ${repTime(pf.bestRep.s)}`, tip: `${personName(m.key)}'s fastest rep (suspect reps left out)` });
+  if (pf && pf.breaks >= 2 && pf.recoveries > 0) badges.push({ t: `💚 Faster recovery ${pf.recoveries}/${pf.breaks}`, tip: `the bigger heart-rate drop in the first 30 s of ${pf.recoveries} of ${pf.breaks} breaks` });
+  if (pf?.strongFinish !== null && pf?.strongFinish !== undefined && pf.strongFinish < -0.5) badges.push({ t: "📈 Finished stronger", tip: `the last 3 reps ${Math.abs(pf.strongFinish).toFixed(1)} s faster per rep than the first 3` });
   const stats: [string, string, string?][] = [];
   if (n?.km) stats.push([`${km(n.km)} km`, "distance"]);
   if (n?.moving_s && !(race && Math.abs(race.time_s - n.moving_s) < 90)) stats.push([dur(n.moving_s), "moving", n.dur_s ? `moving time (elapsed ${dur(n.dur_s)})` : "moving time"]);
@@ -95,8 +100,11 @@ function MemberCard({ m, s, c }: { m: CsMember; s: TSession; c: CsSession }) {
           {m.has_fit && <a href={withPerson(`/compare?suggest=${m.activity_id}`, m.person)} title={`${personName(m.key)}'s own similar sessions, in Compare`}>compare ↗</a>}
         </span>
       </div>
-      {m.records.length > 0 && (
-        <div class="cs-m-recs">{m.records.map((r, i) => <span key={i} class={"cs-rec-badge " + r.kind} title={r.text}>{recordBadge(r)} · {r.label}</span>)}</div>
+      {(m.records.length > 0 || badges.length > 0) && (
+        <div class="cs-m-recs">
+          {m.records.map((r, i) => <span key={i} class={"cs-rec-badge " + r.kind} title={r.text}>{recordBadge(r)} · {r.label}</span>)}
+          {badges.map((b) => <span key={b.t} class="cs-rec-badge hl" title={b.tip}>{b.t}</span>)}
+        </div>
       )}
     </div>
   );
@@ -211,9 +219,9 @@ function SamePlace({ c, base }: { c: CsSession; base: string }) {
   );
 }
 
-export function CommunitySessionMembers({ gid, s }: { gid: string; s: TSession }) {
+export function CommunitySessionMembers({ gid, s, f }: { gid: string; s: TSession; f: Facts }) {
   const { data: c } = useCommunity(gid);
-  const base = useSessionBase();
+  const base = "/community";
   if (!c) return null;
   const order = s.participants.map((p) => p.key);
   const members = [...c.members].sort((a, b) => (order.indexOf(a.key) + 1 || 99) - (order.indexOf(b.key) + 1 || 99));
@@ -224,7 +232,7 @@ export function CommunitySessionMembers({ gid, s }: { gid: string; s: TSession }
         <div class="head"><h2>Who was there</h2>
           <span class="sub">{nT} member{nT === 1 ? "" : "s"} timed{nG ? ` · ${nG} guest${nG === 1 ? "" : "s"}` : ""}{c.form_available ? " · form = this session vs each person's shape the day before" : ""}</span></div>
         <div class="cs-members">
-          {members.map((m) => <MemberCard key={m.key} m={m} s={s} c={c} />)}
+          {members.map((m) => <MemberCard key={m.key} m={m} s={s} c={c} f={f} />)}
         </div>
         <Guests c={c} />
       </section>
@@ -233,6 +241,7 @@ export function CommunitySessionMembers({ gid, s }: { gid: string; s: TSession }
         {(c.records.length > 0 || c.same_place.length > 0) && (
           <div class="cs-side">
             <Records c={c} base={base} />
+            <LastTimeHere c={c} base={base} />
             <SamePlace c={c} base={base} />
           </div>
         )}

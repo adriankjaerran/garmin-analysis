@@ -6,7 +6,7 @@ import { speedVal, speedUnit } from "../lib/format";
 import { personColour, personName } from "../lib/people";
 import { useTheme } from "../lib/theme";
 import { repTime, type Cell, type TSession } from "../lib/together";
-import { Avatar } from "../pages/TogetherPage";
+import { Avatar } from "./CommunityBits";
 import "../pages/community-session.css";
 
 type N = number | null;
@@ -53,7 +53,7 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
       <div class="tg-mxwrap">
         <table class="tg-tbl cs-sp">
           <thead>
-            <tr><th rowSpan={2}>Rep</th><th rowSpan={2}>Set</th>
+            <tr><th rowSpan={2}>Rep</th><th rowSpan={2} class="set">Set</th>
               {keys.map((k) => <th key={k} colSpan={3} class="pgrp" style={{ borderBottomColor: personColour(k) }}><span class="pn"><Avatar p={k} size="sm" />{personName(k)}</span></th>)}</tr>
             <tr>{keys.map((k) => [<th key={k + "t"} class="num">Time</th>, <th key={k + "p"} class="num">{speedUnit(sport) === "km/h" ? "km/h" : "Pace"}</th>, <th key={k + "h"} class="num">HR</th>])}</tr>
           </thead>
@@ -61,7 +61,7 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
             {rows.map(({ sl, timeSlot, cells, best }) => (
               <tr key={sl.slot} class={!sl.anchor ? "extra" : ""}>
                 <td class="rl">R{sl.label}</td>
-                <td class="muted">{sl.target?.text ?? ""}</td>
+                <td class="muted set">{sl.target?.text ?? ""}</td>
                 {keys.map((k, i) => {
                   const v = cells[k];
                   const sep = i > 0 ? " sep" : "";
@@ -81,7 +81,7 @@ export function CommunitySessionSplits({ s }: { s: TSession }) {
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={2}><b>Average</b></td>
+              <td><b>Avg</b></td><td class="set" />
               {keys.map((k, i) => {
                 const a = avg(k);
                 return [<td key={k + "t"} class={"num" + (i > 0 ? " sep" : "")} title={`${a.n} full reps`}><b>{a.t ? repTime(a.t) : `${a.n} reps`}</b></td>,

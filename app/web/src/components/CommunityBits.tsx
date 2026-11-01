@@ -1,4 +1,4 @@
-// Small shared pieces of the Community pages: avatars, category chips, form-delta chips, stat tiles, the
+// Small shared pieces of the Community pages: avatars (Av; Avatar on the session page), category chips, form-delta chips, stat tiles, the
 // head-to-head card, a debounced search box and a tile-free route sketch (SVG of the members' tracks).
 import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
@@ -21,6 +21,17 @@ export function Av({ p, size, dim, title, href }: { p: string; size?: "xs" | "sm
   return href
     ? <a class={cls} style={style} href={href} title={title ?? personName(p)} onClick={(e) => e.stopPropagation()}>{i.initials}</a>
     : <span class={cls} style={style} title={title ?? personName(p)}>{i.initials}</span>;
+}
+/** session-page avatar (tg-av, pages/together.css): initials on the person colour, ◐ for a partial participant */
+export function Avatar({ p, role, size, dim }: { p: string; role?: string; size?: "sm" | "lg"; dim?: boolean }) {
+  useTheme();
+  const i = personInfo(p);
+  const roleText = role === "partial" ? " · partial (part of the workout)" : role === "other" ? " · other workout" : "";
+  return (
+    <span class={"tg-av" + (size ? " " + size : "") + (role === "other" || dim ? " dim" : "")} style={{ background: personColour(p) }} title={personName(p) + roleText}>
+      {i.initials}{role === "partial" && <i class="role" aria-hidden="true">◐</i>}
+    </span>
+  );
 }
 /** overlapping avatars */
 export const AvStack = ({ people, size, max = 6 }: { people: string[]; size?: "sm" | "lg"; max?: number }) => (

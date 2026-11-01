@@ -1,9 +1,12 @@
-// One joint session (/together/<gid>, /api/together/<gid>): header with everyone's fitness score and effort,
-// then for intervals the leaderboard, per-rep standings, cumulative gap to the leader and a rep close-up (metres
-// behind the leader + the track with a dot per person); for continuous runs / races / hikes the gap over
-// distance, distance apart, who led where and km splits. Replay ▶ runs everyone round the map on one clock.
+// One club session (/community/<gid>; /api/together/<gid> + the club layer /api/community/sessions/<gid>). Top to
+// bottom: hero (photo / title / category / kudos / share), the story in words, who was there (member cards with
+// form), collective + records + last time here, then "How it went" (headline, tools, highlights); for intervals the
+// leaderboard, per-rep standings, cumulative gap to the leader and a rep close-up (metres behind the leader + the
+// track with a dot per person), for continuous runs / races / hikes the gap over distance, distance apart, who led
+// where and km splits; then the replay (everyone round the map on one clock), splits, breaks, photos.
 // Heart rate stays at three small elements (effort per rep, recovery in the breaks, effort in the header); the rest
 // is behind the "Heart rate" toggle. URL: ?rep=<slot label>&align=clock&replay=1&rrep=<rep to replay>&hr=1
+import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApi } from "../lib/api";
 import { people as allPeople, currentPerson, setQuery, useLocation, withPerson } from "../lib/router";
@@ -14,15 +17,16 @@ import {
   KIND_LABEL, LABELS, MEDAL, behind, labelShort, paceText, pathBetween, placeText, posAt, repTime, rollingMedian, valAt,
   type Cell, type Closeup, type Intervals, type Replay, type TParticipant, type TSession,
 } from "../lib/together";
-import { PageHeader } from "../components/PageHeader";
 import { TLine, type TSeries } from "../components/TLine";
 import { TogetherMap, type MapDot, type MapLine } from "../components/TogetherMap";
 import { ReplayPanel } from "../components/Replay";
-import { Avatar } from "./TogetherPage";
+import { Avatar } from "../components/CommunityBits";
 import { CommunitySessionHero } from "../components/CommunitySessionHero";
 import { CommunitySessionMembers } from "../components/CommunitySessionMembers";
 import { CommunitySessionSplits } from "../components/CommunitySessionSplits";
 import { CommunitySessionPhotos } from "../components/CommunitySessionPhotos";
+import { SessionHighlights, SessionStory } from "../components/CommunitySessionHighlights";
+import { sessionFacts, useCommunity } from "../lib/communitySession";
 import "./together.css";
 
 type N = number | null;
@@ -79,87 +83,45 @@ function mineOf(s: TSession): TParticipant | undefined {
   return s.participants.find((p) => p.person === v && p.role !== "other" && p.has_fit);
 }
 
-function Header({ s, hr, replayable, replayOpen }: { s: TSession; hr: boolean; replayable: boolean; replayOpen: boolean }) {
+/** "How it went": the headline ("🏆 Adrian 10–0 · 7.8 s faster per rep"), the detection label and the tools
+ *  (Compare with my other sessions, Replay, Heart rate); recording caveats under it. The title, date and people
+ *  are in the community hero and the member cards above. */
+function SessionBar({ s, hr, replayable, replayOpen }: { s: TSession; hr: boolean; replayable: boolean; replayOpen: boolean }) {
   const g = s.group;
-  const lb = s.intervals?.leaderboard ?? [];
   const kindL = KIND_LABEL[s.kind] ?? s.kind;
-  // intervals / races: the group's workout; otherwise each person may have logged it differently ("Easy run" vs
-  // "9 reps"), so the viewer's own label when it is of the group's sport (else the group's)
-  const me = s.participants.find((p) => p.person === (s.viewer ?? currentPerson()));
-  const what = s.intervals || s.kind === "race" || !me || me.sport !== g.sport ? g.workout : me.workout ?? g.workout;
-  const head = what && !/^(Run|Race)$/.test(what) ? what : kindL;
-  const title = [head, g.place?.name].filter(Boolean).join(" · ");
-  const unverified = g.no_track;
   const span = s.participants.find((p) => p.together)?.together?.text;
   const mine = mineOf(s);
   const cmpWhat = mine ? (mine.signature ?? (mine.workout ?? "").toLowerCase()) : "";
   const hint = LABELS.find((l) => l.id === g.label)?.hint;
+  const h = s.headline;
+  const showH = !!h?.text && h.kind !== "unverified" && !g.no_track;
+  const parts = showH ? h.text.split(" · ") : [];
+  const lead = parts.shift();
   return (
-    <section class="first tg-header">
-      <a class="tg-back" href="/together">‹ Together</a>
-      <PageHeader title={title}
-        sub={<>
-          <span class={"tg-badge " + g.label} title={hint}>{labelShort(g.label)}</span>
-          {" "}{shortDate(g.date)} {g.date.slice(0, 4)} · {g.start_local}{head.toLowerCase().includes(kindL.toLowerCase()) ? "" : ` · ${kindL}`}{span ? ` · ${span}` : ""}
-          {g.place?.name_local ? <span class="muted" title={placeText(g.place)}> · {g.place.name_local}</span> : null}
-        </>}
-        tips={[
-          s.intervals ? "Rep by rep: the time for the set distance; click a rep for the close-up on the map" : "Hover a chart: the map shows everyone at that point",
-          s.intervals ? "Own start compares running speed only; Clock counts a late start as in a real race" : "Gaps are moving time: stops made together are left out",
-          "Replay runs everyone's dot on one clock (space = play / pause)",
-          "Each person's card links to their activity and to Compare (their own similar sessions)",
-        ]}>
-        {mine && cmpWhat && !unverified && (
-          <a class="btn tg-cmp" href={withPerson(`/compare?suggest=${mine.activity_id}`, mine.person)}
-            title={`Your other sessions like this one, in Compare (${personName(mine.key)}'s activities)`}>Compare with my other {cmpWhat} sessions →</a>
-        )}
-        {replayable && <button class={replayOpen ? "on tg-toggle" : "tg-toggle"} aria-pressed={replayOpen} onClick={() => setQuery({ replay: replayOpen ? null : 1, rrep: null })}
-          title={replayOpen ? "Close the replay" : "Everyone's dot running on the map, on one clock"}>{replayOpen ? "Replay ✕" : "Replay ▶"}</button>}
-        {!unverified && <button class={hr ? "on tg-toggle" : "tg-toggle"} aria-pressed={hr} onClick={() => setQuery({ hr: hr ? null : 1 })}
-          title="Heart rate traces per rep and effort across the session">♥ Heart rate</button>}
-      </PageHeader>
-      <div class="tg-people">
-        {s.participants.map((p) => {
-          const l = lb.find((x) => x.person === p.key);
-          const reps = l ? `${l.reps_done}/${l.of} reps` : null;
-          const eff = l?.avg_effort_pct;
-          return (
-            <div key={p.key} class={"tg-pcard" + (p.role === "other" ? " other" : "")} style={{ borderLeftColor: personColour(p.key) }}>
-              <div class="top">
-                <Avatar p={p.key} role={p.role} />
-                <b class={p.key === s.viewer ? "me" : ""}>{personName(p.key)}</b>
-                {p.key === s.viewer && <span class="muted">you</span>}
-                <span class="links">
-                  <a class="act" href={withPerson(`/activities/${p.activity_id}`, p.person)} title={`${p.name} (${personName(p.key)}'s activity)`}>activity ↗</a>
-                  {p.has_fit && <a class="act" href={withPerson(`/compare?suggest=${p.activity_id}`, p.person)} title={`${personName(p.key)}'s own similar sessions, in Compare`}>compare ↗</a>}
-                </span>
-              </div>
-              <div class="muted">{[reps, p.workout && !reps ? p.workout : null, p.dist_km ? `${km(p.dist_km)} km` : null, p.dur_s ? dur(p.dur_s) : null, p.role === "partial" ? "partly" : p.role === "other" ? "other workout" : null].filter(Boolean).join(" · ")}</div>
-              {(p.shape || eff) && (
-                <div class="fit" title={`Fitness score from this session (fitness model)${eff ? `; average rep effort = peak HR as % of ${effortLabel(l?.effort_mode)}` : ""}${p.hr_norm?.warn ? "\n⚠ " + p.hr_norm.warn : ""}`}>
-                  {p.shape ? <><b>{p.shape.score.toFixed(1)}</b><span class="muted"> fitness</span></> : null}
-                  {eff ? <>{p.shape ? " @ " : ""}<b>{eff} %</b><span class="muted"> of {effortLabel(l?.effort_mode)}</span>{p.hr_norm?.warn ? <span class="warn"> ⚠</span> : null}</> : null}
-                </div>
-              )}
-            </div>
-          );
-        })}
+    <section class="cs-bar">
+      <div class="head">
+        <h2>How it went</h2>
+        <span class="sub"><span class={"tg-badge " + g.label} title={hint}>{labelShort(g.label)}</span>{" "}{kindL}{span ? ` · ${span}` : ""}
+          {g.place?.name_local ? <span class="muted" title={placeText(g.place)}> · {g.place.name_local}</span> : null}</span>
+        <div class="tools">
+          {mine && cmpWhat && !g.no_track && (
+            <a class="btn tg-cmp" href={withPerson(`/compare?suggest=${mine.activity_id}`, mine.person)}
+              title={`Your other sessions like this one, in Compare (${personName(mine.key)}'s activities)`}>Compare with my other {cmpWhat} sessions →</a>
+          )}
+          {replayable && <button class={replayOpen ? "on tg-toggle" : "tg-toggle"} aria-pressed={replayOpen} onClick={() => setQuery({ replay: replayOpen ? null : 1, rrep: null })}
+            title={replayOpen ? "Close the replay" : "Everyone's dot running on the map, on one clock"}>{replayOpen ? "Replay ✕" : "Replay ▶"}</button>}
+          {!g.no_track && <button class={hr ? "on tg-toggle" : "tg-toggle"} aria-pressed={hr} onClick={() => setQuery({ hr: hr ? null : 1 })}
+            title="Heart rate traces per rep and effort across the session">♥ Heart rate</button>}
+        </div>
       </div>
+      {showH && lead && (
+        <div class="tg-hero">
+          <span class="big" style={{ color: h.winner ? personColour(h.winner) : undefined }}>{h.kind === "race" ? "🏁 " : h.kind === "intervals" ? "🏆 " : "👥 "}{lead}</span>
+          {parts.length > 0 && <span class="rest">{parts.join(" · ")}</span>}
+        </div>
+      )}
       <Caveats s={s} />
     </section>
-  );
-}
-
-function Hero({ s }: { s: TSession }) {
-  const h = s.headline;
-  if (!h?.text || h.kind === "unverified") return null;
-  const parts = h.text.split(" · ");
-  const lead = parts.shift()!;
-  return (
-    <div class="tg-hero">
-      <span class="big" style={{ color: h.winner ? personColour(h.winner) : undefined }}>{h.kind === "race" ? "🏁 " : h.kind === "intervals" ? "🏆 " : "👥 "}{lead}</span>
-      {parts.length > 0 && <span class="rest">{parts.join(" · ")}</span>}
-    </div>
   );
 }
 
@@ -486,7 +448,7 @@ function HeartIntervals({ s, iv, cu, replay }: { s: TSession; iv: Intervals; cu:
   );
 }
 
-function IntervalsView({ s, iv, replay, hr }: { s: TSession; iv: Intervals; replay: Replay | null; hr: boolean }) {
+function IntervalsView({ s, iv, replay, hr, top, middle }: { s: TSession; iv: Intervals; replay: Replay | null; hr: boolean; top?: ComponentChildren; middle?: ComponentChildren }) {
   const { query } = useLocation();
   const align = query.get("align") === "clock" ? "clock" : "own";
   const avail = iv.rep_closeups.filter((c) => c.available);
@@ -496,6 +458,7 @@ function IntervalsView({ s, iv, replay, hr }: { s: TSession; iv: Intervals; repl
   const onSel = (l: string) => setQuery({ rep: l });
   return (
     <>
+      {top}
       <div class="tg-body">
         <div class="tg-col">
           <Leaderboard s={s} iv={iv} />
@@ -507,6 +470,7 @@ function IntervalsView({ s, iv, replay, hr }: { s: TSession; iv: Intervals; repl
             : <div class="card"><div class="empty">No rep close-up: no rep has a set distance everyone ran.</div></div>}
         </div>
       </div>
+      {middle}
       <Breaks s={s} iv={iv} />
       {hr && <HeartIntervals s={s} iv={iv} cu={cu} replay={replay} />}
     </>
@@ -514,7 +478,7 @@ function IntervalsView({ s, iv, replay, hr }: { s: TSession; iv: Intervals; repl
 }
 
 // ------------------------------------------------------------------ continuous
-function ContinuousView({ s, replay, hr }: { s: TSession; replay: Replay | null; hr: boolean }) {
+function ContinuousView({ s, replay, hr, top, middle }: { s: TSession; replay: Replay | null; hr: boolean; top?: ComponentChildren; middle?: ComponentChildren }) {
   const theme = useTheme();
   const c = s.continuous!;
   const race = s.group.label === "same_race";
@@ -577,7 +541,7 @@ function ContinuousView({ s, replay, hr }: { s: TSession; replay: Replay | null;
     values: hx.map((m) => hrPct(pOf(k), valAt(replay.people[k].t, replay.people[k].hr, m * 60))) })), [replay, hx, theme]);
   const last = c.finish?.[c.finish.length - 1];
 
-  if (!c.available) return <section><p class="note">{c.why ?? "No comparison available."}</p></section>;
+  if (!c.available) return <>{top}<section><p class="note">{c.why ?? "No comparison available."}</p></section>{middle}</>;
   const apartCard = ap && wasTogether && ax.length > 1 && (
     <div class="card">
       <div class="head sm"><h2>Distance apart</h2><span class="sub">straight line between you, metres · dashed: not side by side</span></div>
@@ -587,6 +551,7 @@ function ContinuousView({ s, replay, hr }: { s: TSession; replay: Replay | null;
   );
   return (
     <>
+      {top}
       <div class="tg-body">
         <div class="tg-col">
           {c.race && c.race.length > 0 && (
@@ -675,6 +640,7 @@ function ContinuousView({ s, replay, hr }: { s: TSession; replay: Replay | null;
           )}
         </div>
       </div>
+      {middle}
       {hr && hs.length > 0 && (
         <section>
           <div class="head"><h2>Heart rate</h2><span class="sub">% of max HR over the clock{s.participants.some((p) => p.hr_norm?.warn) ? " (⚠ max HR from the watch's zone settings)" : ""}</span></div>
@@ -747,44 +713,71 @@ function Unverified({ s, replay }: { s: TSession; replay: Replay | null }) {
   );
 }
 
+/** the replay where the story gets to it (after the standings): the panel when open, else a one-line invitation */
+function ReplaySection({ s, rp, replay, open, hr }: { s: TSession; rp: { data: Replay | null; error: string | null }; replay: Replay | null; open: boolean; hr: boolean }) {
+  const { query } = useLocation();
+  const unit = s.intervals ? "a rep" : "a km";
+  return (
+    <section class="tg-replay-sec">
+      <div class="head"><h2>Replay</h2><span class="sub">everyone on one clock · pick {unit} to run it from the start line{open ? " · space = play / pause" : ""}</span></div>
+      {!open ? (
+        <button class="cs-replay-cta" onClick={() => setQuery({ replay: 1, rrep: null })}>
+          <span class="cs-replay-play" aria-hidden="true">▶</span>
+          <span><b>Run it again</b><span class="muted"> — every dot on the map, who passed whom and when{s.intervals ? "; or press ▶ on a rep above" : ""}</span></span>
+        </button>
+      ) : replay ? <ReplayPanel s={s} r={replay} hr={hr} startRep={query.get("rrep")} onClose={() => setQuery({ replay: null, rrep: null })} />
+        : <div class="empty">{rp.error ?? (rp.data && !rp.data.available ? rp.data.note ?? "No positions to replay." : "Loading positions…")}</div>}
+    </section>
+  );
+}
+
 export function TogetherSession({ gid }: { gid: string }) {
   const { query } = useLocation();
   const { data: raw, error } = useApi<TSession>(`/api/together/${encodeURIComponent(gid)}`);
   const s = useMemo(() => (raw ? ordered(raw) : null), [raw]);
+  const { data: c } = useCommunity(gid);
   const hr = query.get("hr") === "1";
   const replayOpen = query.get("replay") === "1";
   if (s) setPeopleInfo(s.people);
+  const facts = useMemo(() => (s ? sessionFacts(s, c, personName) : null), [s, c]);
   const gpsN = s ? s.participants.filter((p) => p.has_gps).length : 0;
-  const canMap = !!s && gpsN >= 1 && (s.group.no_track || !!(s.intervals?.rep_closeups.some((c) => c.available) || s.continuous?.available || replayOpen));
-  // replay positions: also the maps' dots, so loaded once the session is shown with a map
+  const canMap = !!s && gpsN >= 1 && (s.group.no_track || !!(s.intervals?.rep_closeups.some((x) => x.available) || s.continuous?.available || replayOpen));
+  // replay positions: also the maps' dots and the hero / share card sketch, so loaded once the session is shown with a map
   const rp = useApi<Replay>(s && (canMap || replayOpen) ? `/api/together/${encodeURIComponent(gid)}/replay` : null);
-  useEffect(() => { document.title = s ? `Together · ${s.group.date} ${s.group.workout}` : "Together"; }, [s]);
+  useEffect(() => {
+    const t = c?.meta.title || c?.display_title || s?.group.workout;
+    document.title = s ? `${t} · ${shortDate(s.group.date, "0000")} · Sessions` : "Sessions";
+  }, [s, c]);
   useEffect(() => { if (replayOpen) document.querySelector(".tg-replay-sec")?.scrollIntoView({ block: "nearest" }); }, [replayOpen, !!rp.data, query.get("rrep")]);
 
-  if (error) return <main class="tg"><a class="tg-back" href="/together">‹ Together</a><h1>Session not found</h1><div class="note">{/no together group/.test(error) ? `There is no joint session "${gid}". It may have been renamed or merged when the sessions were re-detected.` : error}</div></main>;
-  if (!s) return <main class="tg"><div class="empty">Loading…</div></main>;
+  if (error) return (
+    <main class="tg">
+      <a class="cs-back-plain" href="/community">‹ Sessions</a>
+      <h1>Session not found</h1>
+      <div class="note">{/no together group|not found|404/i.test(error) ? `There is no club session "${gid}". It may have been renamed or merged when the sessions were re-detected.` : error}</div>
+      <p><a href="/community">See all sessions →</a></p>
+    </main>
+  );
+  if (!s || !facts) return <main class="tg"><div class="empty">Loading…</div></main>;
   const replay = rp.data?.available ? rp.data : null;
   const unverified = s.group.no_track || gpsN < 2 && !s.intervals;
   const replayable = !unverified && (gpsN >= 2 || !!s.intervals);
+  const bar = <SessionBar s={s} hr={hr} replayable={replayable} replayOpen={replayOpen && replayable} />;
+  const top = <>{bar}<SessionHighlights f={facts} /></>;
+  const middle = <>
+    {replayable && <ReplaySection s={s} rp={rp} replay={replay} open={replayOpen} hr={hr} />}
+    <CommunitySessionSplits s={s} />
+  </>;
   return (
-    <main class="tg">
-      <CommunitySessionHero gid={s.gid} s={s} replay={replay} />
-      <Header s={s} hr={hr} replayable={replayable} replayOpen={replayOpen && replayable} />
-      {!unverified && <Hero s={s} />}
-      <CommunitySessionMembers gid={s.gid} s={s} />
+    <main class="tg cs-page">
+      <CommunitySessionHero gid={s.gid} s={s} replay={replay} facts={facts} />
+      <SessionStory f={facts} />
+      <CommunitySessionMembers gid={s.gid} s={s} f={facts} />
       {s.group.label === "same_place_diff_workout" && <p class="note">Same place and time, but different workouts (e.g. only a shared warm-up or cool-down): hidden from the list by default.</p>}
-      {replayOpen && !unverified && (
-        <section class="tg-replay-sec">
-          <div class="head"><h2>Replay</h2><span class="sub">everyone on one clock · pick {s.intervals ? "a rep" : "a km"} to run it from the start line · space = play / pause</span></div>
-          {replay ? <ReplayPanel s={s} r={replay} hr={hr} startRep={query.get("rrep")} onClose={() => setQuery({ replay: null, rrep: null })} />
-            : <div class="empty">{rp.error ?? (rp.data && !rp.data.available ? rp.data.note ?? "No positions to replay." : "Loading positions…")}</div>}
-        </section>
-      )}
-      {unverified ? <Unverified s={s} replay={replay} />
-        : s.intervals ? <IntervalsView s={s} iv={s.intervals} replay={replay} hr={hr} />
-        : s.continuous ? <ContinuousView s={s} replay={replay} hr={hr} />
-        : <section><p class="note">No comparison for this session.</p></section>}
-      {!unverified && <CommunitySessionSplits s={s} />}
+      {unverified ? <>{bar}<Unverified s={s} replay={replay} /></>
+        : s.intervals ? <IntervalsView s={s} iv={s.intervals} replay={replay} hr={hr} top={top} middle={middle} />
+        : s.continuous ? <ContinuousView s={s} replay={replay} hr={hr} top={top} middle={middle} />
+        : <>{top}<section><p class="note">No comparison for this session.</p></section>{middle}</>}
       <CommunitySessionPhotos gid={s.gid} />
     </main>
   );

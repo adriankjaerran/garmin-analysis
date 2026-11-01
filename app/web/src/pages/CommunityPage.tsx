@@ -3,15 +3,16 @@
 //   /community?cat=intervals,race&people=adrian&period=2026|12m|90d|2026-10&q=bislett&near=1&view=list
 // A card: cover photo (or a sketch of the members' tracks on the category colour), category, title, place / date,
 // members (+ guests), headline, collective km / hours / reps, form delta per member, kudos / photos / records.
-import { useEffect, useMemo } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { qs, useApi } from "../lib/api";
-import { people as allPeople, setQuery, useLocation } from "../lib/router";
+import { people as allPeople, currentPerson, setQuery, useLocation } from "../lib/router";
 import { dur, isoLocal, shortDate } from "../lib/format";
 import { personColour, personName, setPeopleInfo } from "../lib/people";
 import { placeText } from "../lib/together";
 import { byMonth, catInfo, catVar, CATS, hrs, kms, monthLabel, periods, plural, resolvePeriod, type Category, type CGroup, type CList } from "../lib/community";
 import { PageHeader } from "../components/PageHeader";
 import { Av, CatChip, FormChip, PairCard, RouteSketch, SearchBox, Stat, usePeopleTracks } from "../components/CommunityBits";
+import { kudosOverride, toggleKudos } from "../lib/communitySession";
 import "./community.css";
 
 function Headline({ g }: { g: CGroup }) {
@@ -88,14 +89,39 @@ function Card({ g, tracks, order }: { g: CGroup; tracks: Map<string, string>; or
           {col.climb_m >= 150 && <span title="Metres climbed (all members)"><b>{col.climb_m.toLocaleString("en-GB")}</b> m ↑</span>}
           {col.person_min_shared > 0 && <span class="muted" title="Person-minutes on the move at the same time (sum over the members)">{Math.round(col.person_min_shared)} person-min</span>}
         </div>
-        {(forms.length > 0 || g.n_kudos > 0) && (
-          <div class="foot">
-            <span class="forms">{forms.map((k) => <FormChip key={k} p={k} v={g.form[k]} info={g.form_info?.[k]} />)}</span>
-            {g.n_kudos > 0 && <span class={"kudos" + (g.kudoed ? " on" : "")} title={`Kudos from ${g.kudos.map(personName).join(", ")}`}>♥ {g.n_kudos}</span>}
-          </div>
-        )}
+        <div class="foot">
+          <span class="forms">{forms.map((k) => <FormChip key={k} p={k} v={g.form[k]} info={g.form_info?.[k]} />)}</span>
+          <KudosButton g={g} />
+        </div>
       </div>
     </a>
+  );
+}
+
+/** 👏 kudos as the URL's person, on a card / row (inside the link: the click doesn't open the session) */
+function KudosButton({ g, compact }: { g: CGroup; compact?: boolean }) {
+  const me = currentPerson();
+  const [st, setSt] = useState(() => kudosOverride.get(g.gid) ?? { kudos: g.kudos, kudoed: g.kudoed ?? g.kudos.includes(me) });
+  const [busy, setBusy] = useState(false);
+  const [pop, setPop] = useState(false);
+  useEffect(() => { setSt(kudosOverride.get(g.gid) ?? { kudos: g.kudos, kudoed: g.kudoed ?? g.kudos.includes(me) }); }, [g, me]);
+  const n = st.kudos.length;
+  const click = async (e: MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    if (busy || !me) return;
+    const on = !st.kudoed;
+    setBusy(true);
+    setSt({ kudos: on ? [...st.kudos, me] : st.kudos.filter((p) => p !== me), kudoed: on });   // optimistic
+    try { setSt(await toggleKudos(g.gid, me, on)); if (on) { setPop(true); setTimeout(() => setPop(false), 650); } }
+    catch { setSt(st); } finally { setBusy(false); }
+  };
+  const who = n ? `Kudos from ${st.kudos.map(personName).join(", ")}` : "No kudos yet";
+  return (
+    <button class={"cm-kudos" + (st.kudoed ? " on" : "") + (pop ? " pop" : "") + (compact ? " compact" : "")} aria-pressed={st.kudoed}
+      onClick={click} title={`${who} · ${st.kudoed ? `click to take back ${personName(me)}'s kudos` : `give kudos as ${personName(me)}`}`}
+      aria-label={st.kudoed ? `Take back kudos (${n})` : `Give kudos (${n})`}>
+      <span aria-hidden="true">👏</span>{n > 0 || !compact ? <b>{n || ""}</b> : null}
+    </button>
   );
 }
 
@@ -112,7 +138,7 @@ function Row({ g, order }: { g: CGroup; order: string[] }) {
       <span class="forms">{forms.map((k) => <FormChip key={k} p={k} v={g.form[k]} info={g.form_info?.[k]} />)}</span>
       <span class="num">{kms(g.collective.km)}</span>
       <span class="num muted">{dur(g.collective.moving_s)}</span>
-      <span class="ex">{g.n_records > 0 && <span title={g.records_short.join("\n")}>🏆</span>}{g.n_photos > 0 && <span>📷</span>}{g.n_kudos > 0 && <span class="kudos">♥{g.n_kudos}</span>}</span>
+      <span class="ex">{g.n_records > 0 && <span title={g.records_short.join("\n")}>🏆</span>}{g.n_photos > 0 && <span>📷</span>}<KudosButton g={g} compact /></span>
       <span class="go" aria-hidden="true">›</span>
     </a>
   );

@@ -6,7 +6,7 @@ import { useEffect, useState } from "preact/hooks";
 import { apiUrl } from "./api";
 import { currentPerson } from "./router";
 import type { PersonInfo } from "./people";
-import type { TPlace } from "./together";
+import type { TPlace, TSession } from "./together";
 
 type N = number | null;
 
@@ -105,7 +105,8 @@ export async function setKudos(gid: string, person: string, on: boolean): Promis
   const r = on
     ? await fetch(apiUrl(`${base(gid)}/kudos`), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person }) })
     : await fetch(apiUrl(`${base(gid)}/kudos?person=${encodeURIComponent(person)}`), { method: "DELETE" });
-  await json(r);
+  const j = await json<{ kudos: string[]; kudoed: boolean | null }>(r);
+  kudosOverride.set(gid, { kudos: j.kudos, kudoed: j.kudoed ?? j.kudos.includes(person) });
   await reload(gid);
 }
 
@@ -167,4 +168,149 @@ export function hoursMin(s: N): string {
   if (!s) return "—";
   const m = Math.round(s / 60), h = Math.floor(m / 60);
   return h ? `${h} h ${String(m % 60).padStart(2, "0")} min` : `${m} min`;
+}
+
+// ------------------------------------------------------------------ kudos from the list page
+/** kudos changed in this page visit (the list API response is memoised): gid -> latest state */
+export const kudosOverride = new Map<string, { kudos: string[]; kudoed: boolean }>();
+/** POST / DELETE kudos as `person`; returns the new list (also remembered in kudosOverride) */
+export async function toggleKudos(gid: string, person: string, on: boolean): Promise<{ kudos: string[]; kudoed: boolean }> {
+  const r = on
+    ? await fetch(apiUrl(`${base(gid)}/kudos`), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ person }) })
+    : await fetch(apiUrl(`${base(gid)}/kudos?person=${encodeURIComponent(person)}`), { method: "DELETE" });
+  const j = await json<{ kudos: string[]; kudoed: boolean | null }>(r);
+  const st = { kudos: j.kudos, kudoed: j.kudoed ?? j.kudos.includes(person) };
+  kudosOverride.set(gid, st);
+  return st;
+}
+
+// ------------------------------------------------------------------ facts: story, highlights, per-person badges
+type Names = (k: string) => string;
+const WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+export const partOfDay = (hhmm: string) => { const h = Number(hhmm.slice(0, 2)); return h < 5 ? "night" : h < 12 ? "morning" : h < 17 ? "afternoon" : h < 22 ? "evening" : "night"; };
+export const andList = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+const signed = (d: number) => `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d).toFixed(1)}`;
+const sd = (xs: number[]) => { const m = xs.reduce((a, b) => a + b, 0) / xs.length; return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length); };
+const t1 = (s: number) => (s < 59.95 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`);
+
+export interface Highlight { id: string; emoji: string; title: string; person: string | null; value: string; sub: string; rep?: string }
+export interface PersonFacts { bestRep: { label: string; s: number } | null; recoveries: number; breaks: number; even: number | null; strongFinish: number | null }
+export interface Facts { story: string[]; highlights: Highlight[]; people: Record<string, PersonFacts>; sameTarget: boolean }
+
+/** everything the session page says in words, from the together session (+ the club layer when loaded) */
+export function sessionFacts(s: TSession, c: CsSession | null, name: Names): Facts {
+  const iv = s.intervals, cont = s.continuous, g = s.group;
+  const members = s.participants.filter((p) => p.role !== "other");
+  const people: Record<string, PersonFacts> = {};
+  for (const p of members) people[p.key] = { bestRep: null, recoveries: 0, breaks: 0, even: null, strongFinish: null };
+  const hl: Highlight[] = [];
+  const story: string[] = [];
+  const who = andList([...new Set(members.map((p) => name(p.key)))]);
+  const guests = c?.meta.guests ?? [];
+  const d = new Date(g.date + "T12:00:00");
+  const when = `On a ${WEEKDAY[d.getDay()]} ${partOfDay(g.start_local)}`;
+  const place = c?.place?.name ?? g.place?.name;
+  const verb = g.sport === "hike" ? "hiked" : g.sport === "bike" ? "rode" : g.sport === "ski" ? "skied" : g.sport === "swim" ? "swam" : "ran";
+  const kmTot = c?.collective.km ?? null;
+  const raceKm = cont?.race?.[0]?.dist_km;
+  const adj = ({ easy: "an easy ", long: "a long ", tempo: "a tempo " } as Record<string, string>)[c?.category_info.id ?? ""] ?? "";
+  const what = iv ? g.workout : s.kind === "race" ? (raceKm ? `${raceKm.toFixed(1)} km` : "together")
+    : kmTot && members.length ? `${adj}${(kmTot / members.length).toFixed(1)} km` : g.workout.toLowerCase();
+  story.push(`${when}${place ? ` at ${place}` : ""}, ${who}${guests.length ? ` (with ${andList(guests)})` : ""} ${s.kind === "race" ? "raced" : verb} ${what}.`);
+
+  let sameTarget = false;
+  if (iv && !g.no_track) {
+    const shared = iv.shared_slots;
+    sameTarget = shared.length >= 3 && new Set(shared.map((i) => iv.slots[i].target?.text)).size === 1 && iv.slots[shared[0]].target?.kind === "dist";
+    const h = s.headline;
+    const n = h.shared_reps ?? shared.length;
+    if (h.winner && h.rep_wins && n > 1) {
+      const w = h.rep_wins[h.winner] ?? 0;
+      const others = Object.entries(h.rep_wins).filter(([k]) => k !== h.winner).map(([, v]) => v);
+      const score = [w, ...others].join("–");
+      story.push(`${name(h.winner)} took ${w === n ? `all ${n}` : `${w} of the ${n}`} shared reps (${score})${h.avg_gap_s_per_rep ? `, ${h.avg_gap_s_per_rep.toFixed(1)} s faster per rep on average` : ""}${h.closest ? `; Rep ${h.closest.label} was the closest at ${h.closest.gap_s.toFixed(1)} s` : ""}.`);
+    }
+    // rep of the day: the closest ranked rep
+    if (h.closest && n >= 3) {
+      const sl = iv.slots.find((x) => x.label === h.closest!.label);
+      const st = sl ? iv.standings[sl.slot] : null;
+      if (st && st.order.length >= 2) {
+        const [a, b] = st.order;
+        hl.push({ id: "closest", emoji: "🎯", title: "Rep of the day", person: a.person, rep: h.closest.label,
+          value: `Rep ${h.closest.label} · ${h.closest.gap_s.toFixed(1)} s`, sub: `${name(a.person)} ${t1(a.result_s)} vs ${name(b.person)} ${t1(b.result_s)}${sl?.target ? ` (${sl.target.text})` : ""}` });
+      }
+    }
+    for (const l of iv.leaderboard) {
+      const pf = people[l.person];
+      if (!pf) continue;
+      if (l.best) pf.bestRep = { label: l.best.label, s: l.best.result_s };
+      const f = l.fade_s ?? null;
+      if (f !== null) pf.strongFinish = f;
+      if (sameTarget) {
+        const xs = shared.map((i) => iv.reps[l.person]?.[i]).filter((x) => x && !x.partial && !x.suspect && x.result_s).map((x) => x!.result_s!);
+        if (xs.length >= 4) pf.even = sd(xs);
+      }
+    }
+    if (sameTarget) {
+      const best = iv.leaderboard.filter((l) => l.best).sort((a, b) => a.best!.result_s - b.best!.result_s)[0];
+      if (best?.best) hl.push({ id: "fastest", emoji: "⚡", title: "Fastest rep", person: best.person, rep: best.best.label,
+        value: `${name(best.person)} · ${t1(best.best.result_s)}`, sub: `Rep ${best.best.label}, ${iv.slots[shared[0]].target!.text}` });
+    }
+    // recovery: who's HR dropped more, per break
+    const rf = iv.recovered_faster;
+    if (rf.length >= 2) {
+      for (const r of rf) if (people[r.person]) people[r.person].recoveries++;
+      for (const k of Object.keys(people)) people[k].breaks = rf.length;
+      const top = Object.entries(people).sort((a, b) => b[1].recoveries - a[1].recoveries)[0];
+      if (top && top[1].recoveries > rf.length / 2) {
+        hl.push({ id: "recovery", emoji: "💚", title: "Faster recovery", person: top[0], value: `${name(top[0])} · ${top[1].recoveries} of ${rf.length}`,
+          sub: "breaks with the bigger heart-rate drop in the first 30 s" });
+        if (top[1].recoveries / rf.length >= 0.6) story.push(`${name(top[0])} recovered faster in ${top[1].recoveries} of the ${rf.length} breaks.`);
+      }
+    }
+    const fin = Object.entries(people).filter(([, v]) => v.strongFinish !== null && v.strongFinish < -0.5).sort((a, b) => a[1].strongFinish! - b[1].strongFinish!)[0];
+    if (fin) hl.push({ id: "finish", emoji: "📈", title: "Strongest finish", person: fin[0], value: `${name(fin[0])} · ${Math.abs(fin[1].strongFinish!).toFixed(1)} s faster`,
+      sub: "the last 3 reps vs the first 3, per rep" });
+    const even = Object.entries(people).filter(([, v]) => v.even !== null).sort((a, b) => a[1].even! - b[1].even!)[0];
+    if (even && members.length > 1) hl.push({ id: "even", emoji: "🎚️", title: "Most even", person: even[0], value: `${name(even[0])} · ±${even[1].even!.toFixed(1)} s`,
+      sub: "the smallest spread of the shared rep times" });
+  } else if (cont?.available) {
+    const race = cont.race ?? [];
+    if (race.length >= 2) {
+      const [a, b] = race;
+      story.push(`${name(a.person)} won in ${hms(a.time_s)}, ${name(b.person)} ${hms(b.gap_s)} behind${race.length > 2 ? `, then ${andList(race.slice(2).map((r) => name(r.person)))}` : ""}.`);
+      hl.push({ id: "winner", emoji: "🏁", title: "Winner", person: a.person, value: `${name(a.person)} · ${hms(a.time_s)}`, sub: `${hms(b.gap_s)} ahead of ${name(b.person)}` });
+    }
+    const ap = cont.apart?.[0];
+    if (ap?.with_pct && ap.with_pct >= 20) {
+      if (!race.length) story.push(`Side by side ${ap.with_pct} % of the time${ap.median_apart_m !== null ? `, typically ${ap.median_apart_m} m apart` : ""}.`);
+      hl.push({ id: "together", emoji: "👥", title: "Side by side", person: null, value: `${ap.with_pct} % of the time`, sub: ap.within_20m_pct !== null ? `within 20 m ${ap.within_20m_pct} %` : "" });
+    }
+    const led: Record<string, number> = {};
+    for (const l of cont.led ?? []) if (l.person) led[l.person] = (led[l.person] ?? 0) + (l.to_m - l.from_m);
+    const front = Object.entries(led).sort((a, b) => b[1] - a[1])[0];
+    if (front && front[1] >= 300 && front[0] !== race[0]?.person) hl.push({ id: "front", emoji: "🧭", title: "Most in front", person: front[0], value: `${name(front[0])} · ${(front[1] / 1000).toFixed(1)} km`, sub: "in front by more than 2 s" });
+    let fk: { k: string; km: number; t: number } | null = null;
+    for (const r of cont.km_splits ?? []) for (const [k, v] of Object.entries(r.people)) if (v.time_s && (!fk || v.time_s < fk.t)) fk = { k, km: r.km, t: v.time_s };
+    if (fk && (cont.km_splits?.length ?? 0) >= 2) hl.push({ id: "fastkm", emoji: "⚡", title: "Fastest km", person: fk.k, value: `${name(fk.k)} · ${hms(fk.t)}`, sub: `km ${fk.km}` });
+  }
+  // form: how each did against their current shape
+  if (c) {
+    const fs = c.members.filter((m) => m.role !== "other" && m.form && m.form.delta !== null && m.form.confidence !== "none").map((m) => ({ k: m.key, d: m.form!.delta! }));
+    const up = fs.filter((f) => f.d >= 0.5);
+    if (fs.length && up.length === fs.length && fs.length > 1) story.push(`${fs.length === 2 ? "Both" : `All ${fs.length}`} ran above their current form (${andList(fs.map((f) => signed(f.d)))}).`);
+    else if (up.length) story.push(`${andList(up.map((f) => `${name(f.k)} (${signed(f.d)})`))} ran above current form.`);
+    const jump = [...fs].sort((a, b) => b.d - a.d)[0];
+    if (jump && jump.d >= 1 && fs.length > 1) hl.push({ id: "form", emoji: "🚀", title: "Biggest form jump", person: jump.k, value: `${name(jump.k)} · ${signed(jump.d)}`, sub: "vs their shape the day before" });
+    const rec = c.records.find((r) => r.kind === "club_best") ?? c.records[0];
+    if (rec) story.push(`${name(rec.key ?? rec.person)} set a ${rec.kind === "club_best" ? "club record" : "club PB"} (${rec.label}, ${rec.measure === "race" ? hms(rec.value_s) : t1(rec.value_s)}).`);
+  }
+  return { story, highlights: hl, people, sameTarget };
+}
+/** "39:08" / "1:02:10" / "45 s" */
+export function hms(s: number): string {
+  s = Math.round(s);
+  if (s < 60) return `${s} s`;
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`;
 }
