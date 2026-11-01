@@ -1,247 +1,177 @@
 # The web app
 
-A local app for browsing the data on maps: every run / ski / hike shows its track, a day shows
-everywhere you were that day. FastAPI backend (`app/server`) + Vite/TypeScript frontend (`app/web`),
-following the same Fabstack console UI rules as the HTML report ([report.md](report.md)).
+A local app for browsing the data: maps of every track, a day view, search, comparison, fitness and the running club.
+FastAPI backend (`app/server`) + Preact/Vite frontend (`app/web`), following the Fabstack console UI rules of the HTML
+report ([report.md](report.md)). Concepts (places, workouts, shape, together) are in
+[CONCEPTUAL_MODEL.md](CONCEPTUAL_MODEL.md); this file is the map of the app.
 
 ## Run
 ```
-uv sync                                   # fastapi, uvicorn
+uv sync
 (cd app/web && npm install && npm run build)   # once, and after frontend changes -> app/web/dist
-uv run garmin-app-cache adrian            # pre-parse FIT files (incremental, ~8 s first time, 0.1 s after)
-uv run garmin-app                         # http://127.0.0.1:8765  (or: uv run python -m app.server)
+uv run garmin-app-cache adrian                 # pre-parse FIT files (incremental)
+uv run garmin-app                              # http://127.0.0.1:8765  (or: uv run python -m app.server)
 ```
-Options: `garmin-app --person adrian --port 8765 --reload` (`--person` = the default person; one server serves
-everyone in `data/`). The server also refreshes every person's cache
-incrementally in the background at startup (new or changed FIT files only) and on
-`POST /api/cache/refresh`. Re-run `scripts/session_groups.py` first if you want places, routes, legs and
-reps for new activities; then `garmin-app-cache` picks up the rep times.
-
-Frontend development: run `uv run garmin-app` and, in another terminal, `cd app/web && npm run dev`
-(http://localhost:5173, hot reload, `/api` proxied to :8765; other ports: `API_PORT=8767 VITE_PORT=5175 npm run dev`). `npm run typecheck` checks types only.
+- Options: `garmin-app --person adrian --port 8765 --reload`. One server serves everyone in `data/`; `--person` is the
+  default person.
+- The server refreshes every person's cache incrementally at startup and on `POST /api/cache/refresh`. Re-run
+  `scripts/session_groups.py` first to get places, routes, legs and reps for new activities.
+- Frontend dev: run `uv run garmin-app`, then `cd app/web && npm run dev` (http://localhost:5173, hot reload, `/api`
+  proxied to :8765; other ports: `API_PORT=8767 VITE_PORT=5175 npm run dev`). `npm run typecheck` checks types only.
 
 ## Pages
-Every view is a URL (path + query), so links and reloads keep the state. URLs are prefixed with the person:
-`/<person>/activities/123` (the table below leaves the prefix out). Everyone with an `activities_index.json` in
-`data/` is a person. The top of the sidebar shows whose data it is (coloured initial + name + ▾, and a 3 px top border in
-that person's colour); clicking it switches person and keeps the section (and the whole `/day/<date>` and
-`/community/…` path: dates, groups and the club are the same for everyone), dropping ids and filters — except on an
-activity done together (`/activities/<id>` with `together`): that opens the other person's activity of the same
-Together group (the session page if they have no activity in it). Unprefixed URLs redirect to the default person.
-Every page starts with the same header (`components/PageHeader.tsx`): title, short context and a `?` whose popover holds
-the one-line "what is this page" (`about`, never shown as text on the page) and a few tips. Mobile (< 760 px): the sidebar becomes a top bar with Home (the Auto / Light / Dark toggle moves into the person
-menu, so the bar is three rows), tables scroll sideways in
-their box, maps take the full width, button groups scroll under 500 px.
-The frontend writes person-less paths everywhere; `lib/router.ts` (`navigate`, a preact vnode hook for `<a href>`)
-and `lib/api.ts` (`/api/x` → `/api/<person>/x`) add the prefix. Sidebar, in two labelled groups (with more than one person): **Personal** = Home; Explore = Activities (+ the open Activity), Calendar & day, Map, Places & routes; Analysis = Compare, Fitness, Race predictor. **Community** (the running club, [community.md](community.md)) = Sessions (badge = the person's club sessions in the last 30 days), Club, Members (+ the open member). On mobile the group labels are hidden (a thin divider before Community).
+Every view is a URL, so links and reloads keep the state. URLs are prefixed with the person (`/<person>/activities/123`;
+the table leaves the prefix out); unprefixed URLs redirect to the default person. A person is anyone with an
+`activities_index.json` in `data/`. Switching person keeps the section (and the whole `/day/…` and `/community/…`
+path) and drops ids and filters, except that an activity done together opens the other person's activity in the same
+group. The frontend writes person-less paths; `lib/router.ts` and `lib/api.ts` add the prefix.
+
+Sidebar: **Personal** (Home; Activities, Calendar & day, Map, Places & routes; Compare, Fitness, Race predictor) and
+**Community** (Sessions, Club, Members). Every page has a `PageHeader` (title, context, `?` help). Below 760 px the
+sidebar becomes a top bar.
 
 | URL | Shows |
 |---|---|
-| `/map?sport=run&year=2025&mode=heat&v=lon,lat,zoom` | All GPS tracks (20 m simplified), coloured by sport or as a heat overlay; hover = activity, click = open it |
-| `/?vm=km\|time` | **Home** (one request, `/api/home`). Header: the current **shape** as one line of plain text, "Shape · Interval 52.8 · Long 58.4 · Ski 55.3" (each links to Fitness; ± sd and the last hard evidence in the tooltip; a shape without a race / hard session for > 90 days is muted). **Latest active day** ("Today" / "Yesterday" / "Latest active day · Sat 31 Oct"): a table of its activities (start, sport, workout label, km, moving, pace, HR, place; click = activity), "Day view", and the daily summary as one muted line ("RHR 48 · Stress 15 · Battery 40–87 · 4,400 steps · Sleep 7:12 h (score 81)"; missing values are left out; a summary / sleep from an earlier day — the most recent ≤ 3 days back — gets that date in brackets). **Last 5 weeks**: Monday-aligned training log, one cell per day with one line per activity (the workout label when it is a rep structure, wrapping at spaces, else km; done-together in the tooltip), week totals (km, h, sport mix bar); click a day = Day view, an activity = Activity; days after today hatched; on mobile 7 narrow columns with the week total under each week. **Volume** per sport + All (plain text sport names): last 7 days (km or h; the activity count in the tooltip) vs the average week of the 4 weeks before, last 30 days vs the average 30 days of the 12 months before (bar = this period, tick = typical, Δ %; the explanation is the `title` tooltip on the "Volume" heading); `vm=time` switches km ↔ hours. **Recent workouts** (full width): the last 30 days (at least 15): date, sport, workout label like "6×1000 @ 3:27 /km" ([workout label](#workout-label) @ avg rep pace; else the family, e.g. "Easy run"; the "@" meaning in the column tooltip), rest, km, moving, pace, HR, place (ellipsis + tooltip); hover ↔ training-log entry. No maps and no emoji on Home; page help (what the page is, tips) is behind the `?`. **Distances** ([distance trust](#distance-trust)): km cells show an indoor estimate as "≈ 9.2" (tooltip = how) or "—"; week totals, the latest-day and 30-day sums and Volume km count trusted distances only (Volume tooltip: "n without a trusted distance: not in km"; Time counts them). **Training log on a phone** (< 500 px): the compact label ("6×1.2k", "1×1.3k + 2×3k", `compactSig`) that wraps only after "×" / before "+", km without the unit — never clipped digits. No progress or records on Home (records are on Fitness). |
-| `/activities?q=&sport=run&from=&to=&adv=1&place=Bislet&place_mode=main&signature=6×1000&rep_count=5-7&rep_len=1000m&tol=0.1&rest_s=2:00-3:00&pick=a,b&sel=<id>` | **Activities**. Empty result: "No activities match these filters" with a **Clear all filters** button in place. Simple filters always visible: words (`q`: name, date, place(s), region(s), route, workout), sport chips, period (Any time, last 7 / 30 / 90 days, last 12 months, each year → `from` / `to`) and from–to dates. **Advanced** (`adv=1` opens the panel; its active filters show as removable chips when closed): place / region (touched or `main`), route, workout family, category, signature (`6×1000` or `~×1000`), same-workout key (`exact_key`), reps (`5-7`), rep length (`1000m`, `4:00`, `900-1100`, ± `tol`), rest (`2:00-3:00`, `90-`), `part=main`, km (`8-12`). **List**: full-width sortable table — tick box, Date (both sticky when the table scrolls sideways), Sport (plain text; a sport-coloured dot only while the map is open, as its legend), Workout (the [workout label](#workout-label), e.g. "6×1000", "1×1300 + 2×3000" or "Easy run"; same-workout label, measured main reps, name and who it was done with in the tooltip), and only when intervals are in the result **Avg rep pace** (on foot /km, swims /100 m, else km/h; median rep time in the tooltip) and **Rest** (this activity's median rest; its same-workout group's median in the tooltip), then km, Time (moving), Pace, HR (whole activity), Climb, Place (touched places and region in the tooltip), Route. Clicking a row **selects** it (`sel`); clicking it again opens the activity; Esc clears the selection. With the map hidden, the selected row's summary pane (the same as under the map: details, Open activity, Day view, Compare, Closest, × to close) sits under the table. **Map** (header toggle, off by default, remembered in `localStorage` `activities.map`): a right-hand pane with every result track on the Grey basemap, fitted to the densest cluster ("n elsewhere · show all"; hover row ↔ track); with the map open, clicking a row (or its track) selects it: the map zooms to it with the other results grey, and the summary pane moves under the map; clicking it again opens the activity. Toggling the map keeps the selection. Sport filter chips are plain text. Tick rows (`pick`) → "Compare ticked" (`/compare?ids=…`); with ≤ 12 results "Compare all". **Groups** (`view=groups&gk=places\|regions\|routes\|workouts&touched=1&g=<key>`): groups left by the current filters — places (points, blue = named, grey = start clusters, plus named shapes), regions (polygons), routes (lines), workout tree family › signature › same workout. Click a row = show it on the map (members' tracks, zoom), click again or "list →" = apply it as a filter (this help is in the page's `?` tips; the Sports column is plain text, "Run 12, Ski 3"). `/activities?year=2025` becomes `from=2025-01-01&to=2025-12-31`; `place=<id>` means touched (add `place_mode=main` for the main place). **Phone** (≤ 760 px): the results are a two-line list instead of the table — "Sat 31 Oct · 6×1000 @ 3:27 /km" / "8.4 km · 40:43 · 4:52 /km · HR 143 · Bislett" (≈ estimate / no km for untrusted distances), newest first, 100 at a time ("Show more"), tap = open; sport as text on the second line. The header km total counts trusted distances only. |
-| `/activities/<id>?color=speed\|hr\|alt` | Title without icons; summary (workout label + avg rep pace, a plain "Together with …" link to the Together session in the header, "Training load / effect"); map with the track coloured by pace/speed, HR or elevation; stacked charts — pace on foot (run, walk, hike) else speed, HR and elevation by default; cadence and power behind a **More charts** toggle (shown directly when nothing else can be drawn) — with reps (or pauses) shaded (what is shaded is in the section title's tooltip); one-sample pace spikes are smoothed out and a flat elevation (≤ 6 m between p2 and p98, e.g. a track) is not drawn. Reps are "Rep 1 …", rep and break times in s / m:ss. Unknown id: a friendly "There is no activity … for <person>" with links. Hovering the chart moves a marker on the map, hovering the track moves the chart cursor. Pool swims: pace /100 m, swimming vs rest time, pool / lengths / strokes, pace (min/100 m) + stroke-rate charts with rests shaded. No GPS: charts full width, no map. **Segments** tabs (`seg=reps|lengths|legs|laps`, default reps, else lengths, else legs): reps, pool lengths, legs (< 100 m merged into the next) & pauses, watch laps (hovering a row highlights that stretch on the map; what each tab means is the heading's tooltip). Hidden when it would only show a single leg (no reps, lengths or laps). **Closest activities** (`&nk=5\|10\|20&np=balanced\|workout\|route\|place`): a table of the top-k by `/api/nearest` (no map): date, workout, km, Moving, avg rep pace / rest (intervals), place, **Score** (0–1; the reasons in its tooltip, the component weights in the heading's tooltip); “Compare these” → `/compare?ids=this,top 5`; `?go=closest` scrolls to it **Distance**: untrusted (indoor / no GPS) = "≈ 10.5 km estimated from the laps · watch said 18.21 km" (how in the tooltip) or "no GPS"; pace "—" and the pace / speed chart panel dropped (HR, cadence stay). **Route**: "fastest of 19" or "3rd fastest of 19 (47:55 on the route, best 47:14)" (time on the route, `route.rank`). Under the summary: record chips for a top-3 split ("Fastest 5 km (17:38)", "2nd fastest 1 km", `/api/records` `by_activity`) and the **Progress** line for interval workouts done before (`/api/progress/{id}`): "6×1000: 3:27 /km here · rep HR 176 · best 3:13 (Tue 14 Oct 2025) · 11th of 19 · → level with the 4 before", sparkline of every occurrence (this one = dot, best = ring), "all 19 →" (Activities filtered to the signature). Shape section: see the Shape row below. |
-| `/day/<date>` | Title "Tue 20 Oct 2026" with ← Day / date field / Day → only; plain links to the day's Together sessions; the **Activities** table first (start, sport with a coloured dot as the map legend, workout, km, moving, pace, HR, climb, place; who it was done with in the workout tooltip); year heat calendar (colour = main sport, darker = longer, in the `?` tips; cells scale with the width); map of every track that day (empty day: the previous active day's tracks, muted) beside the daily summary and sleep — a missing summary and / or sleep is one muted line ("Daily data not downloaded yet" for the last 3 days, else "No daily data downloaded for this day"; the map takes the full width when both are missing); 2-minute HR (gaps not bridged). ← / → keys = previous / next day |
-| `/places?place=<id>&route=R3&tab=places\|activities&sport=ski` | Places as circles (colour = the place's main sport, size = main-place activities; a one-line legend bottom-left, the only sport dots on the page; the 14 busiest labelled, each label placed right / left / above / below its circle where it overlaps no other label or busy circle, re-placed after every zoom), route list (Route name · Sport as text · Activities · Best · Last; no route-code column — the R-codes stay in the URL, `/activities?route=` and Compare; the places list likewise has a Sport text column); a place shows "94 · 108 touched", its routes and (`tab=activities`) its activities, "List activities"; a route shows its reference line (dashed), common stops, all member tracks, the activity table, "Compare all n" and "List activities". **Route ranking** (`/api/routes/{id}` `ranked`, `pbs`, `trend`, members' rank fields): the route pane shows "Best 47:14 · date" + a sparkline of every time on the route (up = faster, ring = best; explained in its tooltip); no emoji; the sessions table gets **#** (the PB's rank in bold; point-to-point routes rank each direction on its own, the main direction first when sorted), **On route** (time on the route = moving time over its legs, start line to end, lead-in excluded; moving / paused in the tooltip) and **Δ best**, instead of Moving / Paused; **Dir** only when directions differ. Laps routes aren't ranked (the old columns). The route list has a **Best** column. |
-| `/compare?ids=a,b,c&mode=distance\|moving\|elapsed\|intervals\|breaks&ref=first\|median&focus=<id>&start=ref\|<id>\|lat,lon\|rep1&srad=40&rep=R3&view=reps&smooth=raw` | **Compare** one session with one or many ([compare.md](compare.md) is the engine). Header: title, session count, one-line "what is this" and a `?` with tips (no compute time). Without `mode` the page waits for the first session's suggestion and uses its mode (Intervals for an interval set, Route position for a route, Moving time otherwise). **Controls**: row 1 = session chips + Suggestions; row 2 = mode tabs, then **one** contextual group (Intervals: Show All / Per rep / R1 … Rn; Breaks: Break All / After R1 … / Recovery; buttons up to 10 reps on wide screens, a select under 760 px or with more reps), then the changed options as chips (× = back to the default) and **Options** (popover: Reference, Start, Pace / Speed, Gap in, Rep axis, Break width, Rep width, Match reps, Pace line smoothed / raw; options that don't apply to the current view are disabled with the reason, not hidden). Session colours avoid pure red / green (blue, orange, purple, teal, pink, brown, slate, ochre; reference neutral and thicker; the highlighted session among many is blue): no red / green colouring in the tables. Session chips (click = highlight, `ref` = make it the reference, `start` = use its start, ↗ = open, × = remove; hover for the actions), paste ids / activity URLs, **Suggestions** for the first session (same workout, same signature at the place, any signature, whole route, most similar → replace the set, or add single sessions). Reference: first session or median of the selection. **Start: Own / Common** (Options; Route position, Moving, Elapsed; disabled in the interval views): Common (`start=ref`) puts a start line at the first session's start, "start" on a chip (hover) uses that session's start instead (`start=<id>`, e.g. the run where the watch was started on time; the anchor chip shows "start", removing it falls back to `ref`). Every session is cut where it crosses the line (a stop there: when it leaves), so x = 0 at the line and the lead-in is gone from the charts and table; sessions whose watch started further along the anchor's path are kept as **late** (amber "late +240 m" badge, they enter where they join), sessions that never get on it are **excluded** (faded dashed chip, reason in the tooltip and the note under the tabs). The sessions table gets a **Start** column ("lead-in 5:24 · 890 m", "start", "late +1.6 km") and its totals are from the line (hover km / Moving / Elapsed / Stopped for the whole session); the map draws each lead-in thin and dashed. `srad` = line half-width in m (no UI yet). **Start: Rep 1** (`start=rep1`, offered when the first session has a rep signature): x = 0 at each session's rep 1 (the rep matched to the reference's rep 1, as in Intervals), warm-up cut off (dashed on the map), real breaks kept; Route position then runs on the own distance from rep 1. Sessions without rep 1 but a later matched rep get an amber "from R2" badge and enter at the reference's time of that rep; sessions without reps are excluded (faded chip, reason in the note); the table's **Rep 1** column says where rep 1 started ("7:05 · 0.78 km in"); Match reps (By length / By number) is enabled too. Mode tabs: **Route position** (ghost race: gap to the reference along the route, ahead up, axis / legend / tables in words: "12 s behind", "1:53 ahead"; `delta=elapsed` counts stops), **Moving time**, **Elapsed** (distance to the reference at the same time: "40 m ahead"), **Intervals** (reps start at the same x, breaks squeezed to `gap` s (15–120, default 60), `rep_axis=normalized` = % of each rep, pace range from the reps only), **Breaks** (breaks start at the same x in real seconds, reps squeezed to `rgap` s, HR first). `match=index` pairs reps by number instead of by length. **Show** (Intervals): **All** (the timeline), **Per rep** (`view=reps`: one small chart per rep slot, every session overlaid, x = seconds since the rep start with 15 s before and up to 30 s of the next break after it, the same pace / speed scale in all; hover = map markers at that second of the rep; click a chart = open that rep) or **R1 … Rn** (`rep=R3`, `rep=3` works too; extra reps `rep=R1+1`; also by clicking a rep label under the rep ladder): only that rep of every session on its own real-time axis (−15 s … longest rep + 30 s, shaded = the rep), pace / gap within the rep / HR, the map zoomed to that rep's stretch (rest of the tracks dashed), its column highlighted in the ladder and the reps table. **Break** (Breaks): All / After R1 … = only the break after that rep (squeezed rep + break), map zoomed to the break, its column highlighted; the last one is **Recovery** (up to 2 min after the last rep; chart only, not in the breaks table). Interval pace / speed lines are smoothed (7 s rolling median + 7 s mean; `smooth=raw` = the 1 s values); Per rep's shared y range is the p1–p99 of the reps, padded. Both use `rep_series` from the API (fetched only for Per rep / Rep N). `metric=pace\|speed`. Left: map with every track and one marker per session at the chart cursor — at the same time in the time and aligned modes; in Route position where each session was when the reference (or median) reached the cursor, times counted from each session's own start on the axis (a late joiner starts moving with the reference), so the markers race each other — plus a hover legend with every session's values at the cursor (sorted by gap / pace). Right: synced uPlot charts (gap, pace/speed, HR, elevation; reps shaded), reference dark on top, the highlighted session thick; with > 6 sessions the others are grey with the interquartile band, with the median reference a dashed median line; drag = zoom all, double-click = reset. **Intervals extras**: a **Gap within each rep** panel (seconds behind / ahead of the reference at the same distance, reset at every rep start, from the rep points only; shown with ≥ 2 sessions), **Who was faster** under the map (avg rep pace / speed per session = total rep distance / total rep time, the difference to the reference = mean over the reps both have, "6 s/km faster", neutral bars from a centre line (right = faster); with one rep selected it ranks that rep only, "Rep 3: who was faster"; the hover legend replaces it while on the charts), a **rep ladder** above the reps table (pace / speed per rep, one line per session, faster up) and the **reps × sessions table** (best per column bold, the difference to the reference in each cell's tooltip) + Mean / Δ ref columns; the reps section comes before the sessions table. Ski sessions get a note that reps are the hard efforts between stops; mixed sports get a note. A reference without reps (e.g. a pool swim in Intervals) falls back to the engine's anchor session for the lines. Map: Grey basemap by default. Tables (sortable, best per column bold, explanations in the heading / metric-switch tooltip, hover ↔ highlight, click = keep highlighted): sessions with deltas vs the reference (+ gap at the last point both covered and **Covered** % of the route, "rev." = reversed, in Route position; uncovered stretches are breaks in the lines, + rep summary in the interval modes); legs × sessions (`lm` = moving time / Δ leg / gap at leg end / speed / HR / stopped / rank; partly covered legs faded); reps × sessions (`rm`) and breaks × sessions (`bm`: duration, kind, HR drop 30/60 s, HR at next start, …), `tab=reps\|breaks`. Tables have no max height (the page grows; wide tables scroll sideways in `.tablewrap`). `/compare?suggest=<id>` picks a set and redirects (intervals → same workout, route → all route sessions, else same workout); `/compare` alone lists recent runs / ski sessions to start from (Date, Workout, Place, km, Moving, HR; no route-code column, the filter still matches route names and codes; plain text, no sport dots; the how-to is the heading's tooltip and the `?` tips). The activity page has a **Compare** button |
-| `/fitness?d=interval,long,ski&ov=0&b=1&from=&to=&sd=&sk=&q=` | Shape per discipline ([fitness-model.md](fitness-model.md)), no emoji or icons; disciplines are plain text in the tables (coloured dots only on the chart's chips, as its legend). **Current-shape table** (fits without sideways scrolling): Discipline · Current (mean ± sd; `*` = low confidence; hover = with-HR value, unit, % of best, best, confidence, staleness) · Trend (90 days; plain text, no colour) · 5k / 10k / Half equivalents · Last evidence; a shape without a race / hard session for > 90 days is muted. **Shape over time**: weekly shape with ±1 sd bands and every session as a marker (◆ race, ● hard, ○ lower bound, × implausible; hover = details, click = activity; drag = zoom, double-click = reset); Overall % of best is a line on a right-hand axis of the same chart (chip toggle, no separate panel), no readout line above the chart. **By year** and **Performance only vs with heart rate** (eval table, better value bold; the sessions HR demoted) are collapsed `<details>`, their explanations in the summary's tooltip; sortable/filterable session table (newest 50, "show all"; the one-liner wraps, model weight / σ in the score tooltip, "vs shape" = "1.2 above / below"); collapsible "How this is computed". Two model variants: performance only (solid) and with HR (dashed, `hr=0` hides it). `d` = shown disciplines, `ov=0` hides overall, `b=1` shows lower bounds in the chart (off by default), `sd`/`sk` filter the session table by discipline/kind. **Rebuild** re-runs the model Sessions list: **Races + hard** by default (`sk` unset), then race, hard session, lower bound, implausible, All kinds (`sk=all`); "vs shape" of a lower bound below the shape = "easy: no effect". **Personal records** section (`#records`, `RecordsSection`): per distance record, pace, date ("new" when recent), 2nd, 3rd, VDOT, number of PRs, runs; a "<distance>: n records over time" disclosure per distance with the PR history (date, time, pace, better by, run); the note says how many splits were left out and why. |
-| `/predictor?date=YYYY-MM-DD&km=7.5` | **Race predictor** (`/api/fitness/predictor` + `/api/fitness/predict`): predicted race times on a chosen day from the running shape and the personal distance curve (VDOT(km) = θ + slope·log2(km/5)). Header: title, the date of the last race / hard session, '?' help (how it works, range = ±1 sd, marathon extrapolated). **Chart**: VDOT at 5k / 10k / half per day (lines + ±1 sd bands), evidence markers (race = diamond, hard session = dot, paler = lower weight; hover for date, distance, VDOT, weight), a dashed vertical line on the selected day; click anywhere to select that day (nearest day in `daily`), or pick it in the date field; **Today** goes back to the latest (`date` removed from the URL). **Table**: 3k, 5k, 10k, Half, Marathon + the custom distance (`km`, 0.8–100, invalid input is flagged and not sent): predicted time, pace /km, likely range (fast – slow), VDOT ± sd; distances flagged `extrapolated` (beyond the longest evidence, usually the marathon) are muted with a short footnote. **Personal distance curve** checkbox (section tools): the per-person setting `distance_curve` (PUT `/api/settings`, saved in `data/<person>/settings.json`); after saving, the client cache is dropped and both requests refetch. Off = the same VDOT at every distance (Daniels equivalents of the 5 km shape): the chart shows one line ("5k = 10k = half (distance curve off)") and Fitness (long shape, race equivalents, race-prediction row), Home (long shape) and form deltas follow it ([fitness-model.md](fitness-model.md#distance-curve-on--off-per-person-setting)). Below: one plain-text line with the slope used, "+1.3 VDOT per doubling of distance (from 7 races and 6 tempos, ± 1.2)" (counts = race / long-hard items with weight > 0.5 up to the day; interval sessions only set the 5 km level), or "Distance curve off: same VDOT at every distance (your curve would be +1.3 per doubling)", and the basis (days since the last race / hard session, sessions in the 90 days before); more than 60 days without one, or none, says the estimate is uncertain. Endpoint errors (e.g. 404 while the model isn't built) show as plain text. |
-| `/community?cat=<type>&people=<person>&period=90d\|12m\|<year>\|<yyyy-mm>&q=&near=1` | **Community · Sessions** (`pages/CommunityPage.tsx`, `/api/community/sessions`): one dense table, newest first, with a one-line divider row per month ("October 2026 · 3 sessions · 64 km"). Columns: Date · Workout · Type · Place · Who (names as text, guests after "+") · km · Time · Form. **km and time are per person** (the session's collective total ÷ members; the month divider sums those). Form = "A +2.5 · P +0.8" (initial and form delta per member, plain text, coloured only when \|delta\| ≥ 2; score / confidence in the tooltip, "?" = unreliable). Rows without everyone's watch file (summary only) and near-misses are greyed. Filters (all in the URL): Type, Person and Period dropdowns (`yyyy-mm` = one month, the Club chart links there), a search box, a **Near-misses** checkbox (`near=1`), Clear. No cards, emoji, avatars, kudos or season totals. Click a row = `/community/<gid>`. |
-| `/community/<gid>` | **Session** (`pages/TogetherSession.tsx` + `components/CommunitySession*.tsx`): a plain title line ("15×400 · Tue 20 Oct 20:07 · Bislett"), small text links (type, Kudos (n), Share, Compare with my other sessions, ‹ older / newer ›, **Edit**), the note and the generated story, recording caveats as one muted line, then **one table row per person** (activity link, workout, km, moving, reps, avg rep, rep pace — or race time / pace —, HR, vs form, effort; guests as a text line). Intervals: **Rep by rep** (a row per rep, a column per person, fastest of the rep bold, gap behind it) and **Splits**; continuous runs / races: race result and splits per km. Then Last time here / Same place before (plain text). Everything else is under a closed **More detail** (`?more=1`, rendered only when open; the replay opens it): leaderboard, rep pace, rep close-up (map + metres behind), replay, breaks, heart rate, photos; for continuous runs the side-by-side line, gap over distance, distance apart, who led where and the map. Same gid under any person prefix (the prefix = "you"). Query: `more=1`, `rep=<label>` (close-up), `align=clock`, `replay=1&rrep=<label>`. Rep by rep is a Table / Leaderboard toggle (localStorage `session.repView`); details in [together.md](together.md#pages). Positions (`/replay`) load after the session. Unverified / no track: summary only, with why. Title `<title> · <date> · Sessions`; unknown gid = "Session not found". |
-| `/community/club?period=…` | **Club** (`pages/ClubPage.tsx`, `/api/community/club`): one stats line (period or all time: sessions, km, hours, reps, places, first – last \| this year: sessions, km, hours), the **goal** as text lines ("Goal · 12 sessions this autumn: 7 of 12 sessions (58 %) · 30 days left", **edit** opens an inline form: title, target, metric, from–to; Save = `PATCH /api/community/goals/{id}`, add another, delete), the **Members** table (Member · Sessions · km · Hours · Reps · Avg form · Last seen · Best streak; `MembersTable` in `components/CommunityBits.tsx`), **Faster together than alone?** (one line per member; the explanation and the rep-pace comparison behind a `<details>`), **Month by month** (uPlot; last 36 months for all time; stacked bars by type + km line; click = that month's sessions), **Highlights** (one text line each → the session), **Types** and **Places** tables, guests as a text line. No pairs, medals, badges, heatmap or recent sessions |
-| `/community/members` | **Members** (`pages/MemberPage.tsx` `MembersPage`, `/api/community/members`): the same members table as on Club |
-| `/community/members/<person>` | **Member profile** (`MemberPage`, `/api/community/members/<person>`): name and one stats line (sessions, km, hours, reps, m climbed, avg form + "n of m above form", best streak / active weeks, since / last), **All sessions** (Date · Workout · Type · Place · With · Rank ("1 of 2": place in the session by average rep pace or race finish) · Form · km · Time · HR), **Form in club sessions** (stems from 0 per scored session, one slot per session; hover readout, click = session), **Faster together than alone?** (one line + details), training partners and types as text lines |
-| `/community/<gid>` · community parts | **Club layer on the session page** (`components/CommunitySession{Hero,Members,Highlights,Splits,Photos,Share}.tsx`, `lib/communitySession.ts`, `pages/community-session.css`; data `/api/community/sessions/{gid}`, [community.md](community.md); refetched after each edit, shared by the parts). **Hero** = the title line + links: **Kudos** toggles kudos as the URL's person (names in the tooltip), **Share** draws a 1080 × 1350 PNG in the browser (cover photo or the tracks, title, date · place, a row per member with rank / time / form delta, collective numbers; Download, Copy image, system share sheet), **Edit** (a small menu: title, type override "automatic (…)" or one of six, guests add / remove, note). **Members** = the people table (form delta coloured only when \|delta\| ≥ 2) + Last time here (per member fitness score then → now, avg rep for the same workout) and Same place before. **Splits** (intervals): per rep and person time, pace and avg HR, fastest bold, an average row. **Photos** (in More detail): grid, lightbox, set as cover, delete, drag & drop or Add photos. No emoji, medals, avatars, gradient banner or "Together you ran … km" box |
-| `/activities/<id>` → Shape | For scored sessions, two lines: the score with its race equivalents ("52.0 VDOT · 5k 19:17 · 10k … · half …"), and the verdict ("1.7 above your shape that day"; a lower bound below the shape: "Easy effort: doesn't change your shape", the gap in the tooltip). **Details** (collapsed): the one-line meaning ("6×1000 @ 3:27 /km with 2:40 rest ≈ VDOT 52.0 ≈ 5k 19:17"), score label, how it counts, shape that day and now, evidence kind, weight, σ, the with-HR variant, components explained, HR diagnostics (context only, not in the score) |
+| `/?vm=km\|time` | **Home**: current shape, latest active day, 5-week training log, volume vs typical, recent workouts. `vm` = km or hours |
+| `/map?sport=&year=&mode=heat&v=lon,lat,zoom` | All GPS tracks by sport or as a heat map; click a track to open it |
+| `/activities?q=&sport=&from=&to=&adv=1&…&pick=a,b&sel=<id>` | **Activities**: filterable, sortable list with optional map. Search filters as in `/api/search` (`place`, `place_mode=main`, `route`, `signature`, `rep_count`, `rep_len`, `tol`, `rest_s`, `part`, …). `sel` = selected row, `pick` = ticked for Compare. `view=groups&gk=places\|regions\|routes\|workouts&g=<key>` = groups browser. `year=2025` is rewritten to `from`/`to` |
+| `/activities/<id>?color=speed\|hr\|alt&seg=reps\|lengths\|legs\|laps&nk=&np=&go=closest` | **Activity**: summary, map, charts, segments, route rank, records and workout progress, [shape](fitness-model.md) section, closest activities (`nk` = how many, `np` = preset) |
+| `/day` | Redirects to the last active day |
+| `/day/<date>` | **Day**: the day's activities, year calendar, map of every track, daily summary, sleep, intraday HR. ←/→ = previous/next day |
+| `/places?place=<id>&route=<id>&tab=places\|activities&sport=` | **Places & routes**: places map and list; a place's routes and activities; a route's reference line, members and ranking |
+| `/compare?ids=a,b,c&mode=&ref=&start=&rep=&view=reps&…` | **Compare** sessions on one axis (engine and modes: [compare.md](compare.md)). `mode` = distance\|moving\|elapsed\|intervals\|breaks; `ref` = first\|median; `start` = ref\|<id>\|lat,lon\|rep1; `rep`/`view` pick reps. `?suggest=<id>` picks a set; bare `/compare` lists sessions to start from |
+| `/fitness?d=interval,long,ski&ov=0&hr=0&b=1&from=&to=&sd=&sk=&q=` | **Fitness**: shape per discipline ([fitness-model.md](fitness-model.md)), shape over time, sessions, personal records (`#records`). `d` = disciplines, `ov=0` hides overall, `hr=0` hides the with-HR variant, `b=1` shows lower bounds, `sd`/`sk`/`q` filter the session table |
+| `/predictor?date=YYYY-MM-DD&km=7.5` | **Race predictor**: predicted times on a day, VDOT chart, distance-curve setting ([fitness-model.md](fitness-model.md#coupled-distance-curve-race-predictor)) |
+| `/community?cat=&people=&period=90d\|12m\|<year>\|<yyyy-mm>&q=&near=1` | **Community · Sessions**: club sessions, newest first, grouped by month ([community.md](community.md)) |
+| `/community/<gid>?more=1&rep=&align=clock&replay=1&rrep=` | **Session**: one Together group (results, rep by rep, splits; maps, replay, photos under "More detail"). Same under any person prefix. See [together.md](together.md#pages), [community.md](community.md) |
+| `/community/club?period=` | **Club**: totals, goals, members, faster together than alone, month by month, highlights |
+| `/community/members` | **Members** table |
+| `/community/members/<person>` | **Member profile**: stats, all sessions, form in club sessions, partners |
 
-Basemaps (a small dropdown on every map; the choice is remembered app-wide in localStorage `garmin.basemap` and applies to every map): Kartverket topo and grey
-(`cache.kartverket.no`, Norway only), OpenStreetMap, OpenTopoMap. Until you pick one, track-heavy maps (Map, Places &
-routes, Activities, Compare) start on Grey and the activity / day maps on Topo (`MapView defaultBasemap`)
-— Grey in the dark theme, where the tiles are also dimmed slightly (`raster-brightness-max` 0.86). A map whose centre is outside a rough Norway
-outline shows OSM instead of a blank Kartverket map (the dropdown shows OSM, the tooltip says why; the stored choice is
-kept; picking Topo / Grey on that map forces Kartverket).
+Basemaps (dropdown on every map, remembered app-wide): Kartverket topo / grey (Norway only; OSM is used outside
+Norway), OpenStreetMap, OpenTopoMap.
 
 ## Architecture
 ```
 app/server/
-  __main__.py      garmin-app entry (uvicorn, factory=create_app)
-  main.py          FastAPI app: routers under /api, serves app/web/dist with SPA fallback,
-                   background cache refresh at startup
-  store.py         Store(person): lazy loaders with mtime memo (activities_index.json + groups.json +
-                   similarity index (places / route names, store.index()) + tracks.json, daily summaries,
-                   sleep, intraday HR), per-activity series LRU (64), resample() / track_points() for the API
-  fitcache.py      FIT -> data/<p>/cache/series/<id>.npz + cache/tracks.json (garmin-app-cache)
-  deps.py          get_store() dependency: person from the /api/<person>/ prefix (main.PersonPrefix rewrites
-                   it away), else GARMIN_PERSON / --person; people() = folders in data/ with an index
-  routers/         meta, activities, days, home, maps, places, search, compare, fitness, progress (records +
-                   workout progression), settings, together, community
-app/web/
-  src/main.tsx     shell (sidebar) + route table
-  src/lib/         router.ts (history router, setQuery), api.ts (types, memoised fetch, useApi),
-                   format.ts, geo.ts (polyline decode, colour ramp), people.ts (person name / initials / colour
-                   from /api/people `info`), together.ts (Together types, replay interpolation)
-  src/components/  MapView (MapLibre + basemap dropdown), TracksMap, SeriesCharts (uPlot),
-                   Table (sortable), Calendar, ActivityBits, TLine (small uPlot line chart), TogetherMap
-                   (person lines + initial dots), Replay (Together replay player)
-  src/pages/       HomePage (+ home.css), ActivitiesPage (list + filters + groups), ActivityPage, DayPage, MapPage,
-                   PlacesPage, ComparePage, FitnessPage, RacePredictorPage, TogetherSession (+ together.css; the
-                   session page), CommunityPage / ClubPage / MemberPage (+ community.css; components CommunityBits,
-                   ClubCharts, ClubMotivation; lib/community.ts)
+  __main__.py   garmin-app entry (uvicorn, factory=create_app)
+  main.py       FastAPI app: routers under /api, PersonPrefix middleware (/api/<person>/x -> /api/x),
+                serves app/web/dist with SPA fallback, background cache refresh at startup
+  deps.py       get_store(): person from the prefix, else GARMIN_PERSON / --person; people()
+  store.py      Store(person): lazy, mtime-memoised loaders (index, groups.json, similarity index, tracks,
+                daily, sleep, HR), per-activity series LRU, resampling, workout label, distance trust
+  fitcache.py   FIT -> data/<p>/cache/series/<id>.npz + cache/tracks.json (garmin-app-cache)
+  routers/      meta, activities, days, home, maps, places, progress, search, compare, fitness,
+                together, community, settings
+app/web/src/
+  main.tsx      shell (sidebar, person menu) + route table
+  pages/        one file per page (+ page CSS)
+  components/   MapView (MapLibre), TracksMap, SeriesCharts / CompareCharts / ShapeChart (uPlot), Table, …
+  lib/          router.ts, api.ts (types, memoised fetch, useApi), format.ts, search.ts, compare.ts,
+                fitness.ts, together.ts, community.ts, people.ts, theme.ts
 ```
-- Reuse of the analysis code: `app/server/__init__.py` puts `scripts/` on `sys.path`; the FIT reader is
-  `gps_quality._read_fast` (extended with HR/altitude/cadence/power and lap fields, the same way
-  `session_groups.py` extends it), rep/break times come from `run_analysis.analyse` (ski intervals and Bislett
-  indoor laps: from groups.json `reps` + `rep_starts`, `fitcache.reps_from_groups`, so the Reps tab, the chart
-  shading and the workout label use one rep list; meta `reps_source: "groups"`), daily summaries and
-  sleep from `build_report.daily/sleep`. The scripts' CLIs are unchanged.
-- Cache: `series/<id>.npz` holds per-record arrays `t lat lon hr speed alt dist cad power` plus a `meta`
-  JSON (start time, laps, reps/breaks for interval runs). `tracks.json` holds encoded polylines per
-  activity: `poly` (4 m Douglas–Peucker, day and mini maps) and `poly_lo` (20 m, overview map), plus bbox.
-  Incremental via `cache/series_manifest.json` (FIT mtime + size; a new cache format re-parses every FIT but keeps
-  the rep analyses of unchanged ones). A missing, stale or old-format npz is also rebuilt on the fly when an activity
-  is requested. **Pool swims** (FIT sport 5 with length messages): time origin = session start (the records come in
-  bursts and start late, which gave negative lap starts), the series is built from the swum lengths (speed = pool
-  length / length time, NaN in rests; distance; strokes/min as `cad`), `meta.swim` = summary + lengths, laps get
-  `kind` swim / rest and `pace_100m_s` from the swimming time of their lengths.
-- Series in `/api/activities/{id}` are resampled to a regular grid of `ceil(duration / 3600)` s
-  (1 Hz up to an hour); speed, cadence and power are smoothed over 5 s; gaps longer than
-  max(10 s, 3 steps) are null.
-- Frontend: Preact (3 kB, hooks, JSX) + a 60-line history router, no state library. Charts use uPlot
-  (canvas, ~50 kB): thousands of points per series, cursor sync and hooks for chart↔map linking come
-  built in, which would be a lot of hand-written hit-testing with SVG. Maps use MapLibre GL JS 6 (its
-  worker is emitted as a separate asset, see `MapView.tsx`). Colours and type come from the report's
-  CSS tokens (`src/styles.css`, plus `--sport-*` colours).
+- **Reuse**: `app/server/__init__.py` puts `scripts/` on `sys.path`. FIT reading via `gps_quality._read_fast`, reps via
+  `run_analysis.analyse` (ski and indoor Bislett reps from groups.json, `fitcache.reps_from_groups`), daily / sleep
+  via `build_report`. Search, nearest and groups wrap `similarity.py`; Compare wraps `compare.py` (lock + response
+  memo); Fitness serves `fitness.json` from `fitness_model.py`.
+- **Cache**: `series/<id>.npz` = per-record arrays (`t lat lon hr speed alt dist cad power`) + `meta` JSON (laps,
+  reps, swim lengths). `tracks.json` = encoded polylines (`poly` 4 m, `poly_lo` 20 m) + bbox. Incremental via
+  `cache/series_manifest.json`; a missing or stale npz is rebuilt on request.
+- **Series** in `/api/activities/{id}` are resampled to `ceil(duration / 3600)` s steps, speed / cadence / power
+  smoothed over 5 s, long gaps null.
+- **Frontend**: Preact + a small history router, no state library; uPlot for charts, MapLibre GL for maps; colours
+  from the report's CSS tokens (`src/styles.css`). GET responses are memoised per page load.
+- **New router**: a module in `app/server/routers/` with `router = APIRouter()`, listed in `main.py`; frontend types
+  in `lib/api.ts`, pages and nav in `main.tsx`.
 
 ## Workout label
-One name per activity, the same on Home, Activities, Day, Places, Closest, the activity page and the Shape one-liner
-(`store.workout_name` → `workout_label` on every activity row, search row, nearest row and Home row):
+One name per activity, used everywhere (`store.workout_name` → `workout_label` on every row):
 1. its own rep signature when it names the structure ("15×400", "3×1800 + 2×900");
-2. else, when done with others as intervals, the Together group's shared structure (`together.json` group `workout`):
-   adrian's 15 Oct multisport recording becomes "1×1300 + 2×3000", patrik's 6 Oct "8 reps (mixed 1:17–7:40)" becomes
-   "3×1800 + 2×900";
+2. else, for intervals done with others, the Together group's shared structure;
 3. else its own signature ("8 reps (mixed …)");
-4. else the workout family ("Easy run", "Hike", "Ski easy") or the Garmin type.
+4. else the workout family ("Easy run") or the Garmin type.
 
-`workout_detail` keeps the same-workout label with rest / route ("15×400 · rest ~1:00", for tooltips). `together`
-on a row carries `{gid, label, kind, role, with, workout}`.
+`workout_detail` adds rest / route for tooltips.
 
 ## Distance trust
-`groups.json` `dist_trusted` (session_groups `dist_ok`: GPS-backed; pool swims with lengths count as trusted) is on
-every activity / search / Home row as `dist_trusted` (null = not analysed). When false, `dist_km` stays the watch's
-number (backward compatible) but:
-- indoor Bislett sessions (`indoor_bislett` with whole-lap rep laps) get `dist_est_km` = rep laps (n × 546.5 m − 7.5 m)
-  + the moving time before the first and after the last rep at the person's easy pace (median trusted easy run of the
-  365 days before, `store.easy_speed_at`); breaks between reps count as standing; `dist_note` says how (tooltip).
-  17 Feb 2026 6×1086: watch 18.21 km → ≈ 10.5 km. Any rep without a lap count → no estimate;
-- every other untrusted distance shows "—" (`dist_note` = "no trusted distance …");
-- km totals leave them out: Home volume (`store.volume_km`; `n_untrusted` per bucket), the training log and day sums,
-  `/api/calendar` km, `/api/search` `km`; pace / speed is "—" (search `speed_ms` was already null) and the activity
-  page drops the pace chart; `/api/records` ignores their splits.
-Frontend: `components/ActivityBits.tsx` `DistCell` / `distStr` / `distSort` / `trustedKm` / `kmTotal`.
+`dist_trusted` (session_groups `dist_ok`: GPS-backed, or a pool swim by lengths) is on every row. When false,
+`dist_km` stays the watch's number, but indoor Bislett sessions get an estimate `dist_est_km` (rep laps + easy-pace
+warm-up / cool-down; `dist_note` says how), others show "—"; km totals, paces and records leave them out.
+Frontend helpers: `components/ActivityBits.tsx` (`DistCell`, `trustedKm`, `kmTotal`).
 
 ## Vocabulary
-- **Avg rep pace** = total rep distance / total rep time of the main reps (`rep_pace_ms`, `store.rep_pace`; reps
-  without a distance fall back to the index's median rep speed). Shown as "6×1000 @ 3:27 /km".
-- <a id="rep-pace"></a>**Track reps = set distance**: in a track session (groups.json type `intervals_track`:
-  Bislett or the watch's track mode) a rep from 5 % under to 12.5 % over a round track distance (400, 800, 1000,
-  1600 m …) counts as exactly that distance (`session_groups.track_set_dists`): 392–450 m is a 400. A rep in a
-  signature group with a distance label ("3×1800 + 2×900") takes that label when it lies in the window, so the reps
-  agree with the workout label (2026-10-06 Frogner: 1744–1762 m GPS reps are 1800, not the nearest list entry 1600;
-  also 3×2100 sessions and patrik's 1×1300); mixed sessions use the list (`track_set_m`). A track rep is rarely
-  really short; GPS and outer lanes usually make it look longer. The measured value is not shown (the API keeps it as
-  `gps_dist`). This applies to avg rep pace, the activity page's reps and Compare.
-  Together already scores the set distance.
-- **Pace / speed** (`lib/format.ts` `speedText(sport, ms)`): m:ss /km on foot (run, walk, hike), /100 m for swims,
-  km/h for ski, bike and other.
-- Seconds always with a unit (`secs`: "56 s", ≥ 60 s as m:ss); gaps unsigned with words (`gapText`: "12 s behind",
-  "40 m ahead"); reps "Rep 3" with room, "R3" compact (`repLabel`), never a bare number; green / red only for
-  better / worse.
+- **Avg rep pace** = total rep distance / total rep time of the main reps (`rep_pace_ms`), shown as "6×1000 @ 3:27 /km".
+- <a id="rep-pace"></a>**Track reps = set distance**: in a track session a rep from 5 % under to 12.5 % over a round
+  track distance (or the group's distance label) counts as exactly that distance (`session_groups.track_set_dists`);
+  the measurement stays in `gps_dist`. Applies to avg rep pace, the activity's reps, Compare and Together.
+- **Pace / speed** (`format.ts` `speedText`): /km on foot, /100 m for swims, km/h otherwise. Seconds always with a
+  unit; gaps in words ("12 s behind"); reps "Rep 3" / "R3"; green / red only for better / worse.
 
 ## Place model
-One definition for every page and endpoint (source: the similarity index, [similarity.md](similarity.md)):
-- **Place id** = stable key in URLs and filters (`Bislet`, `Marienlyst`, `Oslo-3`); **name** = what to show
-  (`Bislett`, user overrides). Filters (`place=`) accept either. Names come from one function,
-  `session_groups.name_places`: user override (`data/<p>/places.json`) > curated list (KNOWN spots, LANDMARKS) >
-  cached reverse geocode (`data/<p>/cache/geocode.json`, optional) > `<Garmin location>-<rank>`.
-- An activity's **place** is its **main place**: the named place with ≥ 40 % of its time, else its start cluster.
-  `start_place` is the start cluster (detail only).
-- Counts: `n_main` (main place; the Places page and `/api/groups?kind=place` sort by it), `n_touched` (starts,
-  ends or spends ≥ 5 % / 3 min there = what `/api/search?place=` returns by default), `n_start` (start cluster).
-  Bislett: 94 main, 108 touched, 107 start cluster. 216 places have a main-place activity (218 incl. touched-only).
-- **Route names** come from the index (start place → end place via named places, climbs): `R3 Holmenkollen climb:
-  Marienlyst → Frognerseteren via Holmenkollen 9.1 km`. groups.json route names are only a fallback.
-- **HR**: `hr` / `avg_hr` on rows = whole-activity average (Garmin); Compare's `hr_avg` = moving seconds only
-  (`hr_avg_moving`, plus `hr_avg_activity` for the header value). **Rest**: `rest_s` = this session's median rest,
-  `rest_group_s` = median of its same-workout group (the "rest ~2:30" in `exact_key`).
+From the similarity index ([similarity.md](similarity.md)):
+- **Place id** (`Bislet`) is the key in URLs and filters, **name** (`Bislett`) is what's shown; `place=` accepts
+  either. Names: user override > curated list > cached geocode > `<Garmin location>-<rank>` (`session_groups.name_places`).
+- An activity's **place** is its main place (named place with ≥ 40 % of its time, else its start cluster).
+- Counts: `n_main` (sort key), `n_touched` (starts, ends or ≥ 5 % / 3 min there; default for `/api/search?place=`),
+  `n_start`. Route names come from the index.
+- **HR** on rows = whole-activity average; Compare's `hr_avg` = moving seconds only. **Rest**: `rest_s` = this
+  session's median rest, `rest_group_s` = its same-workout group's.
 
 ## Endpoints
-All GET unless noted; interactive docs at `/api/docs`. Every endpoint also answers under `/api/<person>/...`
-(the frontend always uses that form); without the prefix it's the default person.
+All GET unless noted; interactive docs at `/api/docs`. Each also answers under `/api/<person>/…` (the frontend's form).
 
-| Endpoint | Returns |
+| Endpoint | Purpose |
 |---|---|
-| `/api/people` | `{default, people, info}`: everyone with data (the sidebar person menu); `info` = `{person: {name, initials, colour, colour_dark, auto}}` from `data/people.json`, automatic for anyone not in it |
-| `/api/meta` | person, counts, years, sports, types, groups.json build time |
-| `/api/activities?sport=run,ski&type=&from=&to=&q=&place=&route=` | `{n, activities: [...]}` newest first; row = Garmin summary (`hr` = whole-activity average HR), `together` (`{gid, label, kind, role, with, workout}` when run with others, [together.md](together.md); else null), `workout_label` ([the one workout name](#workout-label)), `workout_detail`, `rep_pace_ms` (avg rep pace, m/s) + `type_label`, `place` (main place id) / `place_name`, `start_place(_name)` (start cluster), `region`, `route` / `route_name` (similarity index), groups.json area/type/sig, `swim` (pool swims: pool_m, lengths, active_s, rest_s, pace_100m_s, n_rests, …) + `fit`, `track` flags. `place` = main place, id or name. `q` matches all words in name, type, place, route (name), signature, date, id + `dist_trusted`, `dist_est_km`, `dist_note` ([distance trust](#distance-trust)), `rep_hr` (time-weighted mean HR of the main reps) |
-| `/api/activities/{id}?max_points=3600` | `activity`, `group` (groups.json entry without arrays), `legs`, `pauses` (objects), `similar`, `route` (`name` from the index), `laps` (FIT; pool swims add `kind` swim/rest, `swim_s`, `pace_100m_s`), `reps`/`breaks` (with start/end s), `series` (columnar: t, lat, lon, hr, speed, alt, dist, cad, power), `swim` (pool swims: summary + `lengths` [{start, time, strokes, stroke}]), `newer`/`older` ids `route.rank` = time on the route and rank (`{route_time_s, time_src, rank, of, best_s, best_id, best_date, delta_s, is_pb, dir, group}`, places.route_rankings; null for laps routes) |
-| `/api/activities/{id}/track?format=geojson\|columns&max_points=4000` | GPS track with per-point `t`, `speed` (m/s, 5 s smoothed), `hr`, `alt`; geojson = Feature(LineString) with the arrays in `properties` |
-| `/api/days/{date}` | that day's activities, `tracks` (4 m polylines), daily `summary`, `sleep`, intraday `hr`, `prev_active` / `next_active` |
-| `/api/home?date=YYYY-MM-DD` | Home page payload (anchor = `date`, default today or the last activity if later; memoised per anchor + data version, ~10 ms warm): `anchor`, `latest` (latest active day ≤ anchor), `periods` (month / log [from, to]), `latest_day` (= `/api/days/{latest}` without `hr`, `tracks`, `prev_active`, `next_active`, + `summary_date` / `sleep_date`: the day the summary / sleep come from, ≤ 3 days back when the latest day has none yet), `volume` (per sport + `all`: `week`, `prev4` (average week of the 4 weeks before), `month` (30 days), `year30` (average 30 days of the 12 months before) as `{n, km, s, n_untrusted}` (km = trusted distances only, `n_untrusted` = activities whose km were left out); sports without activity for a year are left out), `days` (date → activity ids, 5 Monday-aligned weeks), `recent` (search rows without poly + `dur_s`, `type_label`, `fit`, `track`, `load`, `te`, `swim`, `dist_trusted`, `dist_est_km`, `dist_note`: everything since the log start / last 30 days, at least 15), `fitness` (interval / long / ski: label, unit, mean, sd, date, `last_evidence_date`; null without fitness.json). Only fields HomePage reads. |
-| `/api/calendar?from=&to=&sport=` | per active day: `n`, `km` (trusted distances only), `s`, `sports` counts |
-| `/api/map/tracks?bbox=w,s,e,n&sport=&type=&from=&to=&q=&detail=lo\|hi` | simplified polylines (`poly`) with id, date, sport, type, name, km, bbox |
-| `/api/places?touched=0\|1` | places with ≥ 1 main-place activity (touched=1: also places only started at / passed through): id, `name`, lat/lon, `n` (= `n_main`), `n_touched`, `n_start`, kind, src (named / start), types, area, routes, last; plus `definition`. Same set and counts as `/api/groups?kind=place` (see [Place model](#place-model)) |
-| `/api/routes?place=&sport=` | routes with ≥ 2 sessions: id, name, place / start_place / end_place / via (ids) + `*_name`, region, sport, shape, km, climb, n, first/last, has_legs (names from the similarity index) + `pb` = fastest time on the route `{id, route_time_s, best_date, of, group}` (main direction; null for laps routes) |
-| `/api/routes/{id}` | route row + reference polyline (`ref` lat/lon/km/alt), waypoints, `legs_table`, `members` (activity rows + route_dir, pause_s, `poly` 20 m) + `ranked`, `pbs` (the PB per ranking group: both directions of a point-to-point route), `trend` (`[{id, date, route_time_s, group}]` oldest first), `rank_definition`; members + `route_time_s`, `time_src` (legs / moving), `rank`, `of`, `best_s`, `best_id`, `best_date`, `delta_s`, `is_pb`, `dir`, `group`. Time on the route = the moving time over the route's legs (legs_table, start line to end, lead-in excluded; the session's moving time when a leg is missing, or for 2-session routes without a legs table) |
-| `POST /api/cache/refresh` | starts an incremental cache build in the background |
-| `/api/search?<filters>&sort=-date&limit=&poly=1` | `{n, km (trusted distances only), truncated, filters, families, rows}`; filters = every `similarity.Index.search` filter under its own name (lists `a\|b`; ranges `lo-hi`, `lo-`, `-hi`, m:ss allowed; one number = exact for counts, ± `tol` for km/time/HR/rep length, ± 5 s for paces) plus `sport` (app families, comma list), `q` (all words in name, date, place(s), region(s), route, workout), `from`/`to`. Row = id, date, start, name, sport, distances/times/HR/climb/speed, `together`, `workout_label`, `workout_detail`, `rep_pace_ms` (as on `/api/activities`, `search.app_fields`; also on `/api/nearest` and Home rows), place (+ touched `places`), region (+ `regions`), route, workout (family, label, category, signature, main_sig, exact_key, rep_count, rep_dist_m, rep_time_s, rest_s, …), bbox, `poly` (≤ 200-pt encoded polyline) |
-| `/api/nearest/{id}?k=10&preset=balanced\|workout\|route\|place&weights=route:0.5,pace:0.2&same_sport=1&<filters>` | `{query, preset, weights (used), components, presets, results}`; result = search row + `score`, `components` {c: 0..1}, `reasons` [{c, s, text}]. `weights` overrides the preset's weights (without `preset`: only those components). Search filters restrict the candidates |
-| `/api/groups?kind=place\|start_place\|region\|route\|family\|signature\|exact\|workout&touched=0\|1&min_n=1&<filters>` | `{kind, groups}`: `{key, label, n, first, last, ids, sports}` + place lat/lon/kind/src/n_main/n_touched/`shape` (circle or polygon), region kind/`shape`, route sport/shape/km/climb/`poly`; `workout` = tree `{key, label, n, first, last, places, children: [signature {…, children: [exact {…, ids}]}]}` |
-| `/api/search/options` | values for the filter controls with counts: sports (+ `label`), places (`{id, name, n = n_touched, n_main, n_start}`), regions, routes, families, categories, interval signatures and exact keys, types (+ `label`), rest modes, presets |
-| `/api/compare?ids=a,b,c&mode=distance\|route_position\|moving\|elapsed\|intervals\|breaks&reference=first\|median&axis=auto\|route\|own&rep_axis=absolute\|normalized&gap_s=60&rep_gap_s=30&match=auto\|index&step_m=&smooth_s=&max_points=1500&tracks=1&start=ref\|<id>\|lat,lon\|rep1&start_radius_m=40&rep_series=0&rep_lead_s=15&rep_post_s=30` | `scripts/compare.py` `compare()` output as documented in [compare.md](compare.md) (sessions + deltas, axis, series per session, legs / slots / reps / breaks / rep_summary / median), plus `sessions[].hr_avg_moving` (= the engine's `hr_avg`, moving seconds only) and `hr_avg_activity` (whole activity, as in the header), `activities` (app rows by id, + sessions the common start excluded) and `tracks` (`{id: {t, lat, lon}}`, ≤ 1500 points, for the map markers). `start` (elapsed / moving / distance; 10–150 m `start_radius_m`) adds the common start line: sessions cut at it, totals aligned (`sessions[].whole` = whole session), `align` block per session (status anchor / aligned / late / excluded, offset s / m, distance to the line, join_m, reason), both in the memo key ([compare.md](compare.md#common-start-line-start)). `start=rep1`: t = 0 at each session's rep 1 instead (`align.start.kind = "rep1"`, late = first matched rep is a later one, excluded = no reps; distance mode on the own distance; [compare.md](compare.md#t--0-at-rep-1-startrep1)). `rep_series=1` (intervals): every rep on its own real-time axis from `rep_lead_s` (0–60) before its start to `rep_post_s` (0–120) after its end, 1 s grid; all three in the memo key. ≤ 40 ids; 422 with the engine's message for unusable input (e.g. no reps in any session). Engine calls are serialised by a lock (its in-process cache isn't thread-safe); cold rep detection runs in its process pool (4 workers) and is cached in `cache/compare.pkl`; the last 12 responses are memoised (key includes groups.json mtime). Warm: 0.02–0.1 s |
-| `/api/compare/suggest?id=&n=8` | `{id, date, mode, sets, activities}`: comparison sets for one activity from the similarity index, each `{key, label, n_total, ids, mode, why}` with this activity first, then the most recent others on or before its date (topped up with later ones): `exact` (same exact workout key), `best` (same rep signature: your 3 fastest by avg rep pace, any date), `last_year` (same signature: closest to one year before, ± 60 days, up to 3), `route_best` / `route_last_year` (non-laps route: the 3 fastest times on it in the same direction / closest to a year before), `sig_place`, `sig` (same rep signature; intervals only), `route` (all members up to 40 for non-laps routes), `nearest` (similarity, `workout` weights for intervals else `balanced`). `mode` = suggested view (intervals / distance for a non-laps route / moving; sessions without distance: intervals / elapsed), `modes` = modes that work for this session, `no_distance`, `comparable` + `why_not` (no FIT, or neither distance nor HR → no sets). Set members are limited to sessions the engine can read |
-| `/api/records` | Personal records from Garmin's fastest splits (`activities_index.json` `fastestSplit_1000/1609/5000/10000/21098/42195`, whichever exist; 40000 is only on a ride): runs with `dist_trusted` true (not treadmill / indoor), split ≤ activity distance, VDOT ≤ max(interval, long personal best) + 3 (`vdot_cap`; above = GPS glitch, e.g. a 2:33 "1 km" in an easy run). `{records: [{key, label, dist_m, n, best, top (5, with rank), history (each new PR, newest first, improved_s), rejected (≤ 10, with reason), n_rejected}], by_activity: {id: [{key, label, rank, of, time_s}]} (top 3), vdot_cap, definition}`; a row = id, date, time_s, pace_s_km, vdot, name, workout_label, place_name. Memoised per activity list + fitness.json mtime |
-| `/api/progress/{id}` | Workout progression ([progress.py](../app/server/routers/progress.py)) at this occurrence: `{id, workout}`, workout = interval workouts of the same sport + rep signature ("6×1000", any rest / place): `{key, sport, signature, n, first, last, current (this one: {id, date, speed = avg rep pace m/s, hr = rep HR, rest_s, place_name, label, together}), best, best_before (fastest earlier one), is_best, rank, trend {arrow ↗/→/↘, word, vs_median_pct, n_prev, median_speed} (vs the median of the 4 before; ± 1 % = level), points (oldest first)}`; `workout` null without a clean rep signature or when it is the only one; 404 for an unknown id |
-| `/api/fitness?discipline=interval,long,ski,overall&from=&to=&hr=1` | fitness.json (reloaded on mtime) filtered by discipline / date: `disciplines` (current + `trend_90d`, `last_evidence`; yearly; weekly), `sessions` (+ `explain`, activity `name`, `dist_km`, `sport`), `predictor` (its parameters only; the daily curve is `/api/fitness/predictor`), `rebuild` status, `distance_curve` (the person's setting: false = `disciplines` / `variants.hr.disciplines` are fitness.json `curve_off`); `hr=1` adds `hr_diagnostics`; `variants` (labels + `hr.disciplines`, same filters) and `eval_variants` (from fitness_eval.json, null if missing). 404 if fitness.json is missing |
-| `/api/fitness/session/{id}` | `{scored, sessions: [...], hr_diagnostics, hr_used_in_score}`; a session = score, kind, weight, `hr` (with-HR variant: kind, sigma, weight, p_max, note, shape, current), `explain`, `components_explained` (label, text, meaning), `shape` that week (mean, sd), race equivalents of the score and of the shape, `current`. A 10k race is one long / race item. `scored: false` for unscored activities, with `not_scored: {key, text}` saying why (sport, indoor / treadmill pace not trusted, no GPS distance, race distance, no ≥ 20 min stretch, …) |
-| `/api/settings` (GET, PUT) | Per-person app settings (`data/<person>/settings.json`, scripts/person_settings.py): `{person, distance_curve}` (default true). PUT a JSON object with the keys to change → all settings; unknown keys / wrong types → 422. `distance_curve: false` switches the personal distance curve off for `/fitness`, `/fitness/session`, `/fitness/predictor`, `/fitness/predict`, `/home` and form deltas (no rebuild: fitness.json holds both read-outs) |
-| `/api/fitness/predictor` | Race-predictor chart data from fitness.json `predictor` ([fitness-model.md](fitness-model.md#coupled-distance-curve-race-predictor)): `{ref_km (5), evidence_km [min, max] (km range of the race / hard evidence, weight > 0.5), daily: [{date, vdot_5k, vdot_10k, vdot_half, sd_5k, sd_10k, sd_half}] (every day from the first running evidence to the build day, RTS smoothed; sd = state sd only, for the band), evidence: [{date, id (string), km (effective distance), vdot, kind, weight, discipline, sigma}] (race / hard items + lower bounds with weight ≥ 0.05), last_evidence_date, today, distance_curve}` (curve off: the three lines are θ, sd = θ's sd). 404 if fitness.json has no `predictor` (no running evidence or model_version 1) |
-| `/api/fitness/predict?date=YYYY-MM-DD&km=3,5,10,21.0975,42.195` | Predictions on one day (`date` default = the latest day = build day; before the first evidence, after the latest day or malformed → 400; `km` comma list, each 0.8–100, else 400; default 3, 5, 10, 21.0975, 42.195): `{date, predictions: [{km, label (3k / 5k / 10k / Half / Marathon / "7.5 km"), vdot, sd (state ⊕ race-day sd 1.0 ⊕ 1.0 per doubling outside evidence_km), sd_state, time_s (`fitness_model.race_time`), pace_s_per_km, range_s [fast, slow] (times at vdot ± sd), extrapolated (outside evidence_km by > 0.05 doublings)}], distance_curve, shape: {theta (VDOT at 5 km), slope (VDOT per doubling of distance; 0 with the curve off), slope_sd, curve_slope / curve_slope_sd (the model's slope either way), slope_text ("+1.3 VDOT per doubling of distance: relatively stronger at longer races" / "Distance curve off: …")}, basis: {last_evidence_date, days_since_evidence, n_evidence_90d, n_races, n_tempos, n_intervals} (race / hard curve items with weight > 0.5, on or before `date`)}`; curve off: every distance at θ |
-| `POST /api/fitness/rebuild`, `GET /api/fitness/rebuild` | re-run `fitness_model.build` in a background thread (≈0.1 s with cached features, ≈10 s cold) and atomically rewrite fitness.json; GET = status `{running, started, finished, seconds, error}` |
-| `/api/together?person=&sport=&kind=&label=&near=1&place=&from=&to=&q=` | Workouts run with others ([together.md](together.md#api)), cross-person (same under any `/api/<person>/` prefix, which only sets `viewer`): `{n, viewer, people (display), groups [{gid, date, place, kind, label, workout, people, participants (+ reps_done / of), headline {text: "15×400 · 2 members · fastest rep 1:15.6", n_members, reps, fastest}}]}`; near-misses hidden unless `near=1` |
-| `/api/together/{gid}` | one group's session: `group`, `participants` (+ display colours, `hr_norm`, sampling, shape score), `caveats`, `headline`, `intervals` (slots with set distance, `reps` per person per slot = time for the set distance + rank / gap / tie / effort, `standings`, `leaderboard`, `cumulative`, `breaks`, `rep_closeups` (metres behind the leader, own-start and clock alignment)), `continuous` (gap over distance, who led, km splits, race result, distance apart per pair) |
-| `/api/together/{gid}/replay?step_s=2&max_points=4000` | positions per participant on the group clock (`t` s since `t0_utc`, lat, lon, hr, dist_m) + rep windows, segments and passes ([together.md](together.md#api)) |
-| `/api/community/…` | Club layer, all documented in [community.md](community.md#api): `sessions` (list), `sessions/{gid}` (GET, PATCH), `sessions/{gid}/photos` (POST, DELETE `…/{id}`), `sessions/{gid}/kudos` (POST, DELETE), `photos/{gid}/{file}`, `club`, `members`, `members/{person}`, `goals` (GET, POST; PATCH / DELETE `goals/{id}`) |
-
-## Extension points
-- **Search / nearest / groups**: `routers/search.py` wraps `scripts/similarity.py` (`load_index`
-  caches the index in-process and reloads it when `similarity_index.json` changes; it rebuilds it when
-  older than groups.json). Index ids are ints, the API uses strings; `sport` is mapped to the app's
-  families (`store.family(atype)`). Page `pages/ActivitiesPage.tsx` (simple + advanced filters, results with an optional map + preview, groups browser),
-  `components/GroupsMap.tsx` (points / shapes / lines / member tracks), `components/NearestPanel.tsx`
-  (activity page), types + URL helpers in `lib/search.ts`.
-- **Compare**: `routers/compare.py` wraps `scripts/compare.py` (lock + response memo) and
-  `similarity.Index` for the suggestions. Page `pages/ComparePage.tsx` (picker, mode bar, legend, tables;
-  styles in `pages/compare.css`), `components/CompareCharts.tsx` (stacked uPlot on one shared x grid:
-  band + focus drawn in hooks, nearest-line pick, zoom sync), `components/CompareMap.tsx` (tracks, route
-  reference, cursor markers), `lib/compare.ts` (types, grid interpolation, quartiles, colours, axis labels).
-  All sessions are interpolated client-side onto one grid (the distance bins as they are, else ≤ 1500
-  evenly spaced x); display smoothing: ±2 grid points in the aligned views, ~1/200 of the range in the time
-  views (the engine's own smoothing is unchanged).
-- **Fitness**: `routers/fitness.py` serves `data/<p>/fitness.json` (`scripts/fitness_model.py`); page `pages/FitnessPage.tsx` + `components/ShapeChart.tsx` (uPlot, markers drawn in a draw hook, own hit-testing), activity section `components/ShapeSection.tsx`, types in `lib/fitness.ts`, styles in `src/fitness.css`. Session one-liners and component meanings are generated server-side (`explain`, `COMPONENT_LABELS`).
-- New routers: add a module in `app/server/routers/` with `router = APIRouter()` and list it in
-  `main.py`. Types for the frontend go in `src/lib/api.ts`; pages and nav entries in `main.tsx`.
+| `/api/people` | everyone with data + display info (name, initials, colour) |
+| `/api/meta` | person, counts, years, sports, types, build time |
+| `POST /api/cache/refresh` | start an incremental cache build |
+| `/api/activities?sport=&type=&from=&to=&q=&place=&route=` | activity rows, newest first |
+| `/api/activities/{id}?max_points=` | one activity: summary, group, legs, laps, reps, resampled series, route rank, neighbours |
+| `/api/activities/{id}/track?format=geojson\|columns` | GPS track with t / speed / hr / alt |
+| `/api/days/{date}` | a day's activities, tracks, summary, sleep, intraday HR |
+| `/api/calendar?from=&to=&sport=` | per active day: count, km, time, sports |
+| `/api/home?date=` | Home payload (latest day, volume, log, recent, shape) |
+| `/api/map/tracks?bbox=&sport=&type=&from=&to=&q=&detail=lo\|hi` | simplified polylines for the map |
+| `/api/places?touched=0\|1` | places with counts ([Place model](#place-model)) |
+| `/api/routes?place=&sport=` | routes with ≥ 2 sessions + PB |
+| `/api/routes/{id}` | route detail: reference line, legs, members, ranking, trend |
+| `/api/search?<filters>&sort=&limit=&poly=1` | filtered activity search ([similarity.md](similarity.md)) |
+| `/api/search/options` | filter values with counts |
+| `/api/nearest/{id}?k=&preset=&weights=&same_sport=` | closest activities with scores and reasons ([similarity.md](similarity.md)) |
+| `/api/groups?kind=&touched=&min_n=&<filters>` | groups (places, regions, routes, workout tree) |
+| `/api/compare?ids=&mode=&…` | comparison ([compare.md](compare.md)) + app rows and map tracks |
+| `/api/compare/suggest?id=&n=` | suggested comparison sets for one activity |
+| `/api/records` | personal records from Garmin's fastest splits (trusted runs only) |
+| `/api/progress/{id}` | progression of this interval workout (same signature) |
+| `/api/fitness?discipline=&from=&to=&hr=` | fitness.json: shapes, sessions, variants ([fitness-model.md](fitness-model.md)) |
+| `/api/fitness/session/{id}` | one activity's scores and explanation, or why it isn't scored |
+| `/api/fitness/predictor` | race-predictor chart data ([fitness-model.md](fitness-model.md#coupled-distance-curve-race-predictor)) |
+| `/api/fitness/predict?date=&km=` | predicted times on a day |
+| `POST /api/fitness/rebuild`, `GET /api/fitness/rebuild` | rebuild fitness.json in the background / status |
+| `/api/settings` (GET, PUT) | per-person settings (`distance_curve`; [fitness-model.md](fitness-model.md#distance-curve-on--off-per-person-setting)) |
+| `/api/together?person=&sport=&kind=&label=&near=1&place=&from=&to=&q=` | workouts done with others ([together.md](together.md#api)) |
+| `/api/together/{gid}` | one Together session's results |
+| `/api/together/{gid}/replay?step_s=&max_points=` | positions per participant for maps and replay |
+| `/api/community/sessions` | club sessions list ([community.md](community.md#api), as all below) |
+| `/api/community/sessions/{gid}` (GET, PATCH) | session with club layer / edit title, type, guests, note |
+| `POST /api/community/sessions/{gid}/photos`, `DELETE …/photos/{photo_id}` | add / delete photos |
+| `POST`, `DELETE /api/community/sessions/{gid}/kudos` | give / take back kudos |
+| `/api/community/photos/{gid}/{file}` | photo file |
+| `/api/community/club?from=&to=` | club dashboard |
+| `/api/community/members`, `/api/community/members/{person}` | members table / member profile |
+| `/api/community/goals` (GET, POST), `/api/community/goals/{goal_id}` (PATCH, DELETE) | club goals |
 
 ## Tests
-`uv run pytest -q` runs API smoke tests (`tests/test_api.py`, FastAPI `TestClient` against the real data in
-`data/adrian`; skipped when that folder is missing): every GET endpoint answers 200, plus invariants — Bislett 6×1000
-same-workout group = 17, route R3 = 19 sessions, `/api/home` (latest day = last activity date, 7 / 30-day counts, Monday-aligned 5-week log, no unused fields), Compare › Intervals reps start at the same x (`axis.slot_x0`),
-fitness.json loads, untrusted distances (estimate fields, km totals), `/api/records` (trusted only, ranks, PR history), `/api/progress/{id}` (6×1000 ≥ 17, trend / rank / best), route ranking (R3 ranks 1..19, PB, activity `route.rank`, no PB on laps routes), Compare suggest `best` set (the fastest 6×1000 included whatever its date). They read the data and caches only (no rebuilds).
+`uv run pytest -q`. `tests/test_api.py` runs smoke tests with FastAPI `TestClient` against the real data in
+`data/adrian` (skipped when missing): every GET answers 200, plus invariants (Bislett 6×1000 group = 17, route R3 = 19
+sessions and its ranking, Home, Compare rep alignment, distance trust, records, progress, suggestions). It reads
+data and caches only. Other files cover community, together, the predictor, form delta, the distance-curve setting
+and classification.
 
 ## Visual QA (screenshots)
-Check UI changes in a real browser at desktop size, both themes and a phone width, for both people: 1600 or 1440 px
-wide, dark and light, plus 390 × 844 for mobile. Screenshots go in `data/<person>/screenshots/<date>/` (gitignored).
-With cmux, a browser opened as a split next to a terminal is only ~310 px wide, and one in a background workspace is
-`document.visibilityState = "hidden"` and renders blank. So give the browser its own window:
+Check UI changes in a real browser for both people, dark and light: 1600 or 1440 px wide, plus 390 × 844 for mobile.
+Screenshots go in `data/<person>/screenshots/<date>/` (gitignored). With cmux, a browser split is only ~310 px wide
+and one in a background workspace renders blank, so give it its own window:
 ```sh
 uv run garmin-app &                                                 # http://127.0.0.1:8765
 cmux workspace create --name garmin-qa --focus false                # -> workspace:N
@@ -262,21 +192,13 @@ cmux browser surface:S eval 'JSON.stringify([innerWidth, innerHeight, document.v
 Images over 2000 px are downsized when read back; crop them (PIL) to inspect details.
 
 ## Known gaps
-- Compare: hovering the map doesn't move the chart cursor (only highlights a session); the route-position
-  markers use the first time each session reached the reference's time, so long stops show as a marker
-  waiting; reversed sessions on a route keep their own direction (engine limitation); no per-session
-  rep / leg detail beyond the matrices (open the activity for that); suggestion sets are capped at 8 (40
-  for a route; "your 3 fastest" / "same time last year" sets reach older sessions) and the picker caps the selection at 40.
-- Activities: place / region / route filters are single-select in the UI (the API takes `a|b`); garmin
-  municipalities have no shape on the regions map (only their members' tracks when selected); the
-  workout tree's open/closed state isn't in the URL (only the selected node `g`); results list every
-  match (≤ 717 rows, ~0.8 MB uncompressed with polylines, gzip on).
-- Closest activities (activity page) is
-  limited to the same sport (the API has `same_sport=0`, the UI doesn't expose it, nor custom weights).
-- No auth, binds to 127.0.0.1 only. The Fitness rebuild runs one at a time across people.
-- Frontend GET responses are memoised for the session; reload the page after new data arrives.
-- The overview map draws all tracks as one GeoJSON layer (fine for ~1000 tracks; a vector-tile or
-  pre-rendered heat layer would be needed for many more).
-- Reps exist only for runs that `session_groups.py` classified as intervals and for ski_intervals sessions
-  (`ski_intervals.py`: lap workouts and hard efforts such as hard Holmenkollen climbs); other skiing has pauses/legs only.
+- Compare: hovering the map doesn't move the chart cursor; route-position markers wait during long stops; reversed
+  sessions keep their own direction; selections capped at 40 (suggestion sets at 8, 40 for a route).
+- Activities: place / region / route filters are single-select in the UI (the API takes `a|b`); Garmin
+  municipalities have no shape on the regions map; the workout tree's open state isn't in the URL; results aren't paged.
+- Closest activities is limited to the same sport; custom weights aren't exposed in the UI.
+- No auth; binds to 127.0.0.1 only. One Fitness rebuild at a time across people.
+- Frontend GET responses are memoised for the session; reload after new data arrives.
+- The overview map draws all tracks as one GeoJSON layer (fine for ~1000 tracks).
+- Reps exist only for runs classified as intervals and for `ski_intervals.py` sessions; other skiing has pauses/legs.
 - Sleep and intraday HR exist only for days fetched with `fetch_daily.py`.
