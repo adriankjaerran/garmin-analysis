@@ -73,6 +73,7 @@ PACE_RATIO = 0.7       # other's speed in the rep >= this x own rep speed
 REP_POS_M = 60         # positions at the rep start within this (if both have GPS)
 SHARED_FULL = 0.75     # shared rep time / own rep time (in the overlap), best side -> same workout
 SHARED_MIN = 2
+ANCHOR_FOLLOW_SHARE = 0.8   # intervals anchor: members followed >= 80 % as much as the most-followed one compete on sampling
 RACE_START_S, RACE_START_M = 120, 150
 IDX_START_M, IDX_START_S = 500, 900   # index-only (no FIT) plausibility
 CLOCK_FIX_S = 60       # FIT record span exceeds the elapsed time by more than this: index start is wrong
@@ -94,11 +95,22 @@ MATCH_TOL_S = 8.0      # cross-person rep pairing: |clock start difference| <= m
 MATCH_OVERLAP = 0.5    # ... and the reps overlap > 50 % of the shorter one
 TAIL_TOL = 0.04        # a detected rep > 4 % longer than the set distance (x GPS scale): time at the set distance
 FULL_TOL = 0.08        # a rep within +-8 % of the set distance is the full rep (GPS error: time = detector time)
+FINISH_DIR_S = 3       # position finish: the anchor's direction over its last 3 s defines the finish line (across it)
+FINISH_BACK_M = 20     # ... time taken 20 m before the line (still running hard) + those metres at own speed
+FINISH_V_S = 8         # ... own speed over the 8 s before that point
+FINISH_LAT_M = 30      # ... within 30 m sideways of the anchor's finish point (lanes + GPS; the far straight is ~70 m)
+LAP_TRUST_SAMPLE_S = 2 # coarse watches (recording every >= 2 s): a manual lap matching the rep is the time ...
+LAP_START_S = 8        # ... (starts within 8 s of the anchor's rep start, watch distance within 15 %, a plausible time)
+LAP_DIST_TOL = 0.15
+LAP_OFF_S, LAP_OFF_SHARE = 10, 0.04   # ... unless position says it's off by more than max(10 s, 4 % of the rep)
+START_SAME_S = 3       # common start: own start within max(3 s, 2 x sample interval) of the anchor's -> the anchor's start
 PARTIAL = 0.92         # shorter than 92 % of the set distance: partial (shown, not ranked)
 MERGE_PACE = 0.7       # a split rep is merged only if the stretch to the set distance was run at >= 70 % of rep speed
 TIME_TOL = 0.15        # time-target reps (0:45): own duration within +-15 % of the set time
 WARM_SLOW = 0.08       # warm-up / cool-down: a rep only one person ran, outside the main set (before the first / after the
 WARM_EFFORT = 8        # last rep 2+ ran), >= 8 % slower than the person's main-set reps and >= 8 effort points below them
+WARM_SHORT = 0.5       # strides: shorter than half the main-set rep distance ...
+WARM_GAP_S = 180       # ... and at least 3 min before / after the main set: warm-up / cool-down
 SUSPECT_FAST = 0.10    # a rep > 10 % faster than the person's median for the same set distance: implausible (flagged)
 TIE_MIN_S = 1.0        # dead heat: |gap| <= max(1 s, half the coarser recording interval)
 NICE_M = (100, 150, 200, 250, 300, 400, 500, 600, 800, 1000, 1200, 1500, 1600, 2000, 2500, 3000, 4000, 5000)
@@ -192,16 +204,23 @@ def people_info(ps=None) -> dict:
     return out
 
 
-def hr_norm(person) -> dict:
-    """{max, rest, mode: hrr|hrmax, source, warn}: data/<p>/profile/hr_settings.json {max_hr, rest_hr} (hand-edited),
-    else the watch's heart_rate_zones.json (max from the zones; rest HR rarely set: then % of max HR, with a warning)."""
+def hr_norm(person, activity_id=None) -> dict:
+    """{max, rest, mode: hrr|hrmax, source, warn[, flags]}: data/<p>/profile/hr_settings.json {max_hr, rest_hr}
+    (scripts/hr_settings.py, per person), else the watch's heart_rate_zones.json (max from the zones; rest HR rarely
+    set: then % of max HR, with a warning). With an activity id: `flags` when hr_settings.json marks that activity's
+    HR implausible (cadence lock, dropout, far above the person's usual at that pace): effort isn't computed."""
     P = DATA / person / "profile"
     try:
         h = json.loads((P / "hr_settings.json").read_text())
-        mx, rs = h.get("max_hr"), h.get("rest_hr")
+        man = h.get("manual") or {}   # hand-set single values (kept by scripts/hr_settings.py on rebuild)
+        mx, rs = man.get("max_hr") or h.get("max_hr"), man.get("rest_hr") or h.get("rest_hr")
         if mx:
-            return {"max": int(mx), "rest": int(rs) if rs else None, "mode": "hrr" if rs else "hrmax",
-                    "source": "hr_settings", "warn": None if rs else "no resting HR: effort = % of max HR"}
+            out = {"max": int(mx), "rest": int(rs) if rs else None, "mode": "hrr" if rs else "hrmax",
+                   "source": "hr_settings", "warn": None if rs else "no resting HR: effort = % of max HR"}
+            fl = ((h.get("activities") or {}).get(str(activity_id)) or {}).get("flags") if activity_id is not None else None
+            if fl:
+                out.update(flags=list(fl), warn=f"heart rate looks implausible ({', '.join(f.replace('_', ' ') for f in fl)}): effort not shown")
+            return out
     except Exception:  # noqa: BLE001, S110
         pass
     try:
@@ -218,7 +237,7 @@ def hr_norm(person) -> dict:
 
 
 def _effort(hr, H):
-    if hr is None or not H.get("max"):
+    if hr is None or not H.get("max") or H.get("flags"):
         return None
     if H["mode"] == "hrr":
         return _r(100 * (hr - H["rest"]) / max(1, H["max"] - H["rest"]), 0)
@@ -932,7 +951,11 @@ def _group(nodes, es, others, acts, hidden):
         fd = e.get("follow") or {}
         fol[tuple(e["a"])] = max(fol.get(tuple(e["a"]), 0), fd.get("b_in_a", 0))
         fol[tuple(e["b"])] = max(fol.get(tuple(e["b"]), 0), fd.get("a_in_b", 0))
-    anchor = max(nodes, key=lambda n: (fol.get(n, 0), -acts[n]["s"])) if kind == "intervals" else nodes[0]
+    # among members followed about as much as the most-followed one, the densest recording wins (1 s beats 4 s: its
+    # detector reps are clean, and the others are timed on their own stream from its rep starts), then the earliest start
+    top = max((fol.get(n, 0) for n in nodes), default=0)
+    anchor = max(nodes, key=lambda n: (fol.get(n, 0) >= ANCHOR_FOLLOW_SHARE * top, -(acts[n].get("sample_s") or 99),
+                                       fol.get(n, 0), -acts[n]["s"])) if kind == "intervals" else nodes[0]
     parts = []
     for n in nodes + sorted(others, key=lambda n: acts[n]["s"]):
         a = acts[n]
@@ -1140,7 +1163,7 @@ def _ptab(P, info):
         rows.append({k: p.get(k) for k in ("key", "person", "activity_id", "role", "anchor", "name", "type", "sport",
                                            "signature", "workout", "dist_km", "dur_s", "start_utc", "start_local",
                                            "offset_s", "clock_fixed", "has_fit", "product", "together")}
-                    | {"display": info.get(p["person"]), "hr_norm": hr_norm(p["person"]),
+                    | {"display": info.get(p["person"]), "hr_norm": hr_norm(p["person"], p.get("activity_id")),
                        "sample_s": _r(T["sample_s"], 1) if T else None, "sample_p90_s": _r(T["sample_p90_s"], 1) if T else None,
                        "has_gps": bool(T and T["gps"].any()),
                        "shape": {"score": fs.get("score"), "discipline": fs.get("discipline"), "kind": fs.get("kind")} if fs else None})
@@ -1163,7 +1186,7 @@ def _caveats(P):
             out.append({"kind": "clock", "person": p["key"], "text": f"{nm}'s recording shifted by {-p['offset_s']:+.1f} s to the group clock"})
         if T and not T["gps"].any():
             out.append({"kind": "no_gps", "person": p["key"], "text": f"{nm}: no GPS positions (map / gaps unavailable)"})
-        H = hr_norm(nm)
+        H = hr_norm(nm, p.get("activity_id"))
         if H.get("warn"):
             out.append({"kind": "hr", "person": p["key"], "text": f"{nm}: {H['warn']}"})
         if p.get("clock_fixed"):
@@ -1228,6 +1251,120 @@ def _kept_running(D, r, te):
     v_rep = (np.interp(b, gi, D) - np.interp(a, gi, D)) / (b - a)
     v_ext = (np.interp(te, gi, D) - np.interp(b, gi, D)) / (te - b)
     return v_ext >= MERGE_PACE * v_rep
+
+
+def _manual_laps(T) -> list[tuple[float, float, float]]:
+    """manual laps of a participant's FIT on its grid clock: [(start, duration, watch distance m)] (cached on T)"""
+    if "laps" not in T:
+        T["laps"] = []
+        f = T["S"] and T["S"].get("fit")
+        if f:
+            try:
+                T["laps"] = [(float(l["t"]), float(l["dur"]), float(l["dist"])) for l in sg.read_series(Path(f))["laps"]
+                             if l.get("trigger") in (0, "manual") and l.get("dur")]   # FIT lap_trigger 0 = manual
+            except (ValueError, OSError, KeyError):
+                pass
+    return T["laps"]
+
+
+def _position_finish(slots, byk, anchor, absorbed):
+    """others' results in the anchor's distance reps, measured on the anchor's start and finish line (position, not
+    their own GPS distance or lap presses).
+    Start: someone who started within START_SAME_S of the anchor (a common start) gets the anchor's start; 4 s watches
+    find their own start up to a sample early, by different amounts (2026-11-03: patrik ~3 s, rise ~1.5 s before
+    adrian, though all three set off together), which skews the comparison by seconds.
+    Finish: the line through the anchor's position at its rep end, across its direction over the last FINISH_DIR_S. The
+    time is taken FINISH_BACK_M before it (everyone still running hard there) + those metres at own speed over the
+    previous FINISH_V_S: easing off, a lap pressed before the line or the anchor's finish point being a few m past it
+    don't matter, and the result doesn't need the person to reach the line at all. On the anchor itself this
+    reproduces its detector times within ~0.5 s (2026-11-03). Lap presses are not used: on 2026-11-03 patrik and rise
+    pressed 10-20 m before the line in three reps. 4 s watches put the line +-5-10 m: gaps under ~2-3 s between two such
+    watches are uncertain (`unsure_s`, shown in the app)."""
+    A = anchor["T"]
+    if not A["gps"].any():
+        return
+    for si, s in enumerate(slots):
+        if not s["anchor"] or not s["target"] or s["target"][0] != "dist":
+            continue
+        ra = s["cells"].get(anchor["key"])
+        if not ra or ra["source"] != "detector" or not ra.get("end") or not ra.get("time"):
+            continue
+        tv, ta = s["target"][1], float(ra["time"])
+        if tv < 2 * FINISH_BACK_M:
+            continue
+        ce = A["base"] + float(ra["end"])
+        tt = np.array([ce - FINISH_DIR_S, ce])
+        la_, lo_ = at(A, tt, "lat"), at(A, tt, "lon")
+        if not (np.isfinite(la_).all() and np.isfinite(lo_).all()) or not gps_at(A, [ce])[0]:
+            continue
+        o = (float(la_[1]), float(lo_[1]))
+        bx, by = xy(la_[0], lo_[0], o)
+        n = math.hypot(bx, by)
+        if n < 3:   # anchor hardly moving at the finish: no direction
+            continue
+        ux, uy = -bx / n, -by / n
+        for key, r in list(s["cells"].items()):
+            if key == anchor["key"] or key not in s["res"]:
+                continue
+            p, c = byk[key], s["res"][key]
+            T = p["T"]
+            st0 = float(r["start"])
+            common = abs(r["clock"] - ra["clock"]) <= max(START_SAME_S, 2 * T["sample_s"])
+            if common:
+                st0 = ra["clock"] - T["base"]
+            # coarse watch (>= LAP_TRUST_SAMPLE_S) with a manual lap matching the rep: the lap press is the time
+            lap = None
+            if T["sample_s"] >= LAP_TRUST_SAMPLE_S:
+                lap = next((l for l in _manual_laps(T) if abs(T["base"] + l[0] - ra["clock"]) <= LAP_START_S
+                            and abs(l[2] / tv - 1) <= LAP_DIST_TOL and 0.75 * ta <= l[1] <= 1.6 * ta), None)
+            t_pos = _finish_by_position(T, st0, ta, tv, o, ux, uy)
+            off = max(LAP_OFF_S, LAP_OFF_SHARE * ta)
+            if lap and (t_pos is None or abs((t_pos - st0) - lap[1]) <= off):
+                st0, t_fin, method, common = lap[0], lap[0] + lap[1], "lap", False
+            elif t_pos is not None:
+                t_fin, method = t_pos, "position"
+            else:
+                continue
+            ti = t_fin - st0
+            if not (0.75 * ta <= ti <= 1.6 * ta):
+                continue
+            c.update(time_s=_r(ti, 1), result_s=_r(ti, 1), dist_m=tv, method=method, partial=False, scale=None,
+                     common_start=common, unsure_s=1.0 if method == "lap" else _r(max(1.0, T["sample_s"] / 2), 1),
+                     lap_s=_r(lap[1], 1) if lap else None, pos_s=_r(t_pos - st0, 1) if t_pos is not None else None)
+            c["start_s"], c["clock_s"] = _r(st0, 1), T["base"] + st0
+            r["start"], r["clock"] = st0, T["base"] + st0
+            H = hr_norm(p["person"], p.get("activity_id"))
+            h_mean, h_peak, h_start = _rep_hr(T["G"], st0, t_fin)
+            c.update(hr=h_mean, hr_peak=h_peak, hr_start=h_start, effort_pct=_effort(h_peak, H))
+            r["end"], r["time"], r["clock_end"] = t_fin, ti, T["base"] + t_fin
+            for sj, s2 in enumerate(slots):   # own extra pieces inside the rep (detector split at a slowdown)
+                r2 = s2["cells"].get(key)
+                if sj != si and not s2["anchor"] and r2 and r2["source"] == "detector" and st0 <= r2["start"] < t_fin:
+                    absorbed.add((key, sj))
+
+
+def _finish_by_position(T, st0, ta, tv, o, ux, uy):
+    """own grid time at the anchor's finish line (o, direction u): crossing FINISH_BACK_M before it + those metres at
+    own speed over the previous FINISH_V_S; None without a clean crossing. A track rep passes the line every lap: the
+    crossing where the own watch distance is closest to the set distance counts (passes are a lap apart, GPS ~5 %)."""
+    g = np.arange(st0 + 0.6 * ta, min(st0 + 1.8 * ta, T["T"]), 0.5)
+    if len(g) < 8 or not T["gps"][np.round(g).astype(int)].mean() > 0.8:
+        return None
+    gi = np.arange(T["T"] + 1)
+    X, Y = xy(np.interp(g, gi, T["G"]["lat"]), np.interp(g, gi, T["G"]["lon"]), o)
+    along, lat = X * ux + Y * uy, np.abs(X * uy - Y * ux)
+    k = np.where((along[:-1] < -FINISH_BACK_M) & (along[1:] >= -FINISH_BACK_M) & (lat[:-1] < FINISH_LAT_M)
+                 & np.isfinite(along[:-1] + along[1:]))[0]
+    if not len(k):
+        return None
+    D = T["G"]["d"]
+    d0 = float(np.interp(st0, gi, D))
+    j = int(min(k, key=lambda i: abs(float(np.interp(g[i], gi, D)) - d0 - (tv - FINISH_BACK_M))))
+    tc = g[j] + (-FINISH_BACK_M - along[j]) / (along[j + 1] - along[j]) * (g[j + 1] - g[j])
+    jb = max(0, j - int(FINISH_V_S / 0.5))
+    v = (along[j] - along[jb]) / max(0.5, g[j] - g[jb])
+    t = float(tc + FINISH_BACK_M / v) if v > 1.0 else None
+    return t if t is not None and 0.75 * ta <= t - st0 <= 1.6 * ta else None   # implausible: no say
 
 
 def _t_at_dist(D, st, m):
@@ -1417,10 +1554,11 @@ def _intervals(P):
                         r["end"], r["time"], r["clock_end"] = r["start"] + tv, float(tv), T["base"] + r["start"] + tv
                 else:
                     c.update(partial=True, method="partial", time_s=_r(r["time"], 1), dist_m=_r(r["dist"], 0))
-            H = hr_norm(p["person"])
+            H = hr_norm(p["person"], p.get("activity_id"))
             h_mean, h_peak, h_start = _rep_hr(T["G"], r["start"], r["start"] + (c["time_s"] or r["time"] or 0))
             c.update(hr=h_mean, hr_peak=h_peak, hr_start=h_start, effort_pct=_effort(h_peak, H), effort_mode=H.get("mode"))
             s["res"][key] = c
+    _position_finish(slots, byk, anchor, absorbed)
     for key, sj in absorbed:
         slots[sj]["cells"].pop(key, None)
         slots[sj]["res"].pop(key, None)
@@ -1547,7 +1685,7 @@ def _intervals(P):
                    "suspect": [slots[i]["label"] for i, c in mine if c.get("suspect")],
                    "best": {"slot": best[0], "label": slots[best[0]]["label"], "result_s": best[1]["result_s"]} if best else None,
                    "fade_s_km": fade, "fade_s": fade_s, "avg_effort_pct": _r(np.mean(eff), 0) if eff else None,
-                   "effort_mode": hr_norm(p["person"]).get("mode")})
+                   "effort_mode": hr_norm(p["person"], p.get("activity_id")).get("mode")})
     lead = min((x["pace_s_km"] for x in lb if x["pace_s_km"] is not None), default=None)
     for x in lb:
         x["gap_s_km"] = _r(x["pace_s_km"] - lead, 1) if x["pace_s_km"] is not None and lead is not None else None
@@ -1573,14 +1711,14 @@ def _intervals(P):
     for p in act:
         key = p["key"]
         S = p["T"]["S"]
-        H = hr_norm(p["person"])
+        H = hr_norm(p["person"], p.get("activity_id"))
         rows = []
         seq = [(i, s["cells"][key]) for i, s in enumerate(slots) if key in s["cells"] and s["cells"][key].get("end") is not None]
         for (i, r), (j2, r2) in itertools.pairwise(seq):
             if S is None or r2["start"] <= r["end"]:
                 continue
             b = cmp._break_stats(S, r["end"], r2["start"], r2["start"])
-            rng = (H["max"] - (H["rest"] or 0)) if H.get("max") else None
+            rng = (H["max"] - (H["rest"] or 0)) if H.get("max") and not H.get("flags") else None
             b.update(after_slot=i, after_label=slots[i]["label"], next_slot=j2, next_label=slots[j2]["label"],
                      drop_30_pct=_r(100 * b["drop_30"] / rng, 0) if b.get("drop_30") is not None and rng else None,
                      hr_next_start_pct=_effort(b.get("hr_next_start"), H))
@@ -1650,11 +1788,21 @@ def _mark_warmup(slots, byk):
         effs = [c2["effort_pct"] for _, c2 in main if c2.get("effort_pct") is not None]
         e_ref = float(np.median(effs)) if effs else None
         drop = e_ref - c["effort_pct"] if e_ref is not None and c.get("effort_pct") is not None else None
+        where = "before" if i < lo else "after"
         if slow >= WARM_SLOW and (drop is None or drop >= WARM_EFFORT):
             c["warmup"] = "warm-up" if i < lo else "cool-down"
-            c["warmup_reason"] = (f"alone {'before' if i < lo else 'after'} the main set, {100 * slow:.0f} % slower than "
+            c["warmup_reason"] = (f"alone {where} the main set, {100 * slow:.0f} % slower than "
                                   f"{key.split('#')[0]}'s main reps" + (f", effort {c['effort_pct']} % vs {e_ref:.0f} %"
                                                                        if drop is not None else ""))
+            continue
+        # strides: a short piece alone, minutes away from the main set (2026-11-03 Bislett: a 230 m stride at near rep
+        # pace 10 min before the 6x1000)
+        tg_m = [s2["target"][1] for s2, _ in main if s2.get("target") and s2["target"][0] == "dist"]
+        own_m = c.get("own_dist_m") or c.get("dist_m")
+        gap = (slots[lo]["clock"] - (s.get("clock_end") or s["clock"])) if i < lo else (s["clock"] - (slots[hi].get("clock_end") or slots[hi]["clock"]))
+        if tg_m and own_m and own_m < WARM_SHORT * float(np.median(tg_m)) and gap >= WARM_GAP_S:
+            c["warmup"] = "warm-up" if i < lo else "cool-down"
+            c["warmup_reason"] = f"a {own_m:.0f} m stride alone, {gap / 60:.0f} min {where} the main set"
 
 
 def _cell_out(c, t0):
@@ -1922,7 +2070,7 @@ def _fingerprint(g, P):
             if f:
                 h.update(repr(fkey(f)).encode())
             h.update(json.dumps(st.act(int(p["activity_id"])) or {}, sort_keys=True, default=str).encode())
-        h.update(json.dumps(hr_norm(p["person"]), sort_keys=True).encode())
+        h.update(json.dumps(hr_norm(p["person"], p.get("activity_id")), sort_keys=True).encode())
         fp = DATA / p["person"] / "fitness.json"
         h.update(repr(fp.stat().st_mtime_ns if fp.exists() else 0).encode())
     pj = PEOPLE_JSON.stat().st_mtime_ns if PEOPLE_JSON.exists() else 0

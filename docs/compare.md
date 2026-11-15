@@ -38,13 +38,19 @@ cmp.validate(person)                                                          # 
   ~10 ms per file; the same detector session_groups uses, so ski reps equal groups.json reps). Route projections
   come from `session_groups.project` onto the medoid's 20 m reference. All are cached in
   `data/<p>/cache/compare.pkl`, keyed by FIT mtime+size (+ detector version for ski).
-  Track sessions (intervals_track or the watch's track mode): each rep counts as its set distance,
-  `session_groups.snap_track_reps` (the signature group's label, e.g. 1754 m in a 3×1800 = 1800 m; else the
-  `TRACK_SET_M` list; `gps_dist` keeps the measurement), see [app.md](app.md#rep-pace).
+  Track sessions (intervals_track or the watch's track mode, `session_groups.on_track`): each rep counts as its set
+  distance, `session_groups.snap_track_reps` (the signature group's label when the rep lies within 5 % under to
+  12.5 % over it; else the `TRACK_SET_M` list; `gps_dist` keeps the measurement), see [app.md](app.md#rep-pace).
+  Sessions on the Frogner stadion loop are road sessions (`intervals_road`) and keep their GPS rep distances here;
+  only the activity page snaps them to whole laps (890 / 1780 m).
 - Sessions **without distance** (no-GPS lap workouts, HR only) work in `elapsed`, `intervals` and `breaks`
   (speed / distance / pace fields are null, pauses = timer stops only, reps are matched by duration). In
   `distance` and `moving` they are skipped with `why: "no distance ..."`. With a warm cache a call takes 0.01–0.1 s
   (all 19 R3 sessions: 0.1 s). Cold: about 0.5 s plus the rep detector.
+- **Erg sessions** (Concept2 `row` / `skierg`): the engine works on them as usual (reps = the erg's work intervals;
+  `distance` = own distance, no route, no map tracks); a common start line (`start=ref|<id>|lat,lon`) is a 422
+  ("has no GPS"), `start=rep1` works. The page shows pace per 500 m (engine s/km × 0.5, tenths: "1:49.1",
+  Δ "s/500 m"), defaults to pace, hides the map, climb and the Common start option.
 - An in-process `_Store` per person caches the grids of up to 64 sessions. It isn't thread-safe.
 
 ## Common output (all modes)

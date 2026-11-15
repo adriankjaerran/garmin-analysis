@@ -10,6 +10,8 @@ import { PlacesPage } from "./pages/PlacesPage";
 import { HomePage } from "./pages/HomePage";
 import { FitnessPage } from "./pages/FitnessPage";
 import { RacePredictorPage } from "./pages/RacePredictorPage";
+import { RacesPage } from "./pages/RacesPage";
+import { CommunityRacesPage } from "./pages/CommunityRacesPage";
 import { ComparePage } from "./pages/ComparePage";
 import { TogetherSession } from "./pages/TogetherSession";
 import { CommunityPage } from "./pages/CommunityPage";
@@ -32,9 +34,11 @@ const ROUTES: { path: string; nav?: string; render: (p: Record<string, string>) 
   { path: "/compare", nav: "compare", render: () => <ComparePage /> },
   { path: "/fitness", nav: "fitness", render: () => <FitnessPage /> },
   { path: "/predictor", nav: "predictor", render: () => <RacePredictorPage /> },
+  { path: "/races", nav: "races", render: () => <RacesPage /> },
   // Community (the running club): sessions feed, club dashboard, members; a session = the Together session page
   { path: "/community", nav: "community", render: () => <CommunityPage /> },
   { path: "/community/club", nav: "club", render: () => <ClubPage /> },
+  { path: "/community/races", nav: "community-races", render: () => <CommunityRacesPage /> },
   { path: "/community/members", nav: "members", render: () => <MembersPage /> },
   { path: "/community/members/:person", nav: "member", render: (p) => <MemberPage person={p.person} /> },
   { path: "/community/:gid", nav: "community", render: (p) => <TogetherSession gid={p.gid} /> },
@@ -150,10 +154,12 @@ function Nav({ current, meta, activityId, person, path }:
       {tab("compare", "/compare", "Compare")}
       {tab("fitness", "/fitness", "Fitness")}
       {tab("predictor", "/predictor", "Race predictor")}
+      {tab("races", "/races", "Races")}
       {club && <>
         <span class="group community" title="The running club: joint sessions, the club dashboard, members">Community</span>
         {tab("community", "/community", "Sessions", nTogether, `${nTogether ?? 0} club sessions with you in the last 30 days`)}
         {tab("club", "/community/club", "Club")}
+        {tab("community-races", "/community/races", "Races")}
         {tab("members", "/community/members", "Members")}
         {current === "member" && memberName && <a class="tab sub current" href={path}>{memberName}</a>}
       </>}

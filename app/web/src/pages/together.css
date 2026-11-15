@@ -187,6 +187,7 @@ main.tg .small, .tg .small { font-size: var(--fs-12); }
 .tg-tbl.reps td.rc { white-space: nowrap; font-variant-numeric: tabular-nums; padding-right: var(--space-4); }
 .tg-tbl.reps td.rc.unranked { color: var(--text-muted); }
 .tg-tbl.reps .rv { display: inline-block; min-width: 3.6em; text-align: right; }
+.tg-tbl.reps .rv.close { text-decoration: underline dotted var(--text-muted); text-underline-offset: 3px; cursor: help; }
 .pdot { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 18px; padding: 0 3px;
   margin-right: 6px; border-radius: 9px; font-size: 10px; font-weight: var(--fw-semibold); color: #fff; vertical-align: middle; }
 .tg-tbl.reps { width: auto; }

@@ -92,7 +92,7 @@ function standingsAt(s: TSession, r: RX, t: number): Board {
       title: next ? `Break · Rep ${next.label} in ${dur(next.start_s - t)}` : prev ? "Finished" : "Warm-up",
       cols: prev ? [`Rep ${prev.label}`, "Gap"] : [],
       rows: prev ? prev.order.map((o) => ({ key: o.person, hr: hrOf(o.person),
-        cells: [repTime(o.result_s), o.rank === 1 && !o.tie ? "fastest" : o.tie ? "dead heat" : behind(o.gap_s)] }))
+        cells: [repTime(o.result_s), o.gap_s < 0.05 ? "fastest" : behind(o.gap_s)] }))
         : keys.map((k) => ({ key: k, cells: [], hr: hrOf(k) })),
     };
   }
@@ -138,7 +138,7 @@ function SoFar({ s, t, w0 }: { s: TSession; t: number; w0: number }) {
             if (!isDone(st.slot)) return <tr key={st.slot} class="todo"><td>{repLabel(st.label, true)}</td><td colSpan={3} class="muted">—</td></tr>;
             return (
               <tr key={st.slot}><td>{repLabel(st.label, true)}</td>
-                <td><i class="sw" style={{ background: personColour(w.person) }} />{w.tie ? "dead heat" : personInfo(w.person).name}</td>
+                <td><i class="sw" style={{ background: personColour(w.person) }} />{personInfo(w.person).name}</td>
                 <td class="num">{repTime(w.result_s)}</td><td class="num muted">{n2 ? behind(n2.gap_s) : ""}</td></tr>
             );
           })}</tbody>

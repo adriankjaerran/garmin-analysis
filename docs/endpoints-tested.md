@@ -14,14 +14,14 @@ Latency: median 150–200 ms per request, the token exchange ~1.3 s, FIT downloa
 | `GET /activity-service/activity/{id}/workouts` | - | 200 `[]` | - | |
 | `GET /activity-service/activity/{id}/{splits,laps,typedsplits,hrTimeInZones,weather}` | - | **404** | - | not exposed in the Personal API |
 | `GET /download-service/files/activity/{id}` | Accept: zip types | 200 / **406** with only `application/octet-stream` | - | ZIP with FIT |
-| `GET /wellness-service/wellness/dailyHeartRate` | `date` | 200 | 1 day | samples only from 2026-06-01 |
+| `GET /wellness-service/wellness/dailyHeartRate` | `date` | 200 | 1 day | samples only from 2026-06-01, every 120 s. Extra params (`interval`, `resolution`, `granularity`, `raw`) are ignored |
 | `GET /sleep-service/sleep/dailySleep` | `date` | 200 (nulls if no sleep) | 1 day | |
 | `GET /sleep-service/sleep/dailySleepSummariesByDate` | `startDate`, `endDate` | 200 / 400 | 32 OK, 60 -> 400 | rows of nulls for nights without data |
 | `GET /usersummary-service/v2/dailysummaries` | `startDate`, `endDate` | 200 | **366 OK**, 3000 -> 400 | best daily source |
 | `GET /usersummary-service/stats/steps/daily/{s}/{e}` | path | 200 / 400 | 28 OK, 31 -> 400 | |
 | `GET /usersummary-service/stats/stress/daily/{s}/{e}` | path | 200 / 400 | 28 OK, 31 -> 400 | |
 | `GET /usersummary-service/stats/hydration/daily/{s}/{e}` | path | 200 `[]` | | nothing logged |
-| `GET /wellness-service/wellness/bodyBattery/reports/daily` | `startDate`, `endDate` | 200 / 400 | 31 OK, 32 -> 400 | |
+| `GET /wellness-service/wellness/bodyBattery/reports/daily` | `startDate`, `endDate`, `chunks` | 200 / 400 | 31 OK, 32 -> 400 | default ~6 points/day; with `chunks` (e.g. 288, 1440) min/max per chunk, underlying points **every 3 min** |
 | `GET /wellness-service/wellness/daily/spo2acclimation/{date}` | path | 200 | 1 day | |
 | `GET /hrv-service/hrv/{date}` and `/hrv-service/hrv/daily/{s}/{e}` | path | **204** always | | no HRV data on this account |
 | `GET /weight-service/weight/range/{s}/{e}` | path | 200 | 3000 days OK | |
@@ -65,3 +65,20 @@ empty body for 400s on range overruns.
 | position | 86–100 % | 99 % (0 % on a no-GPS run 2026-03-03) |
 | power, GCT, VO, step_length | none | yes |
 | `details.json` metrics | HR, RunCadence, DoubleCadence, FractionalCadence, Speed, Elevation, VerticalSpeed, Lat/Lon, AirTemperature, PerformanceCondition, sum* (~250 rows) | + Power, AccumulatedPower, StrideLength, VerticalOscillation/Ratio, GroundContactTime, GradeAdjustedSpeed, BodyBattery, Potential/AvailableStamina; no AirTemperature |
+
+## Probe: finer HR or location outside activities? (2026-11-03)
+Adrian's key, date 2026-11-02, 26 calls. Result: **no**. Outside activities there is no GPS, and HR stops at 120 s.
+
+| Probe | Status | Result |
+|---|---|---|
+| `dailyHeartRate?date=` | 200 | 251 samples, 247 gaps of exactly 120 s (one ~7.6 h gap, watch off) |
+| `dailyHeartRate` + `interval=1` / `resolution=1s` / `granularity=minute` / `raw=true` | 200 | identical response: params ignored |
+| `bodyBattery/reports/daily` + `chunks=288` / `1440` | 200 | 576 / 2,880 rows (min+max per chunk); unique timestamps 3 min apart (null count not checked) |
+| `wellnessactivity-service/.../range/2026-10-01/2026-11-02` | 200 | `[]` |
+| `hrv-service/hrv/{date}` | 204 | no data |
+| Connect-web paths: `wellness/dailyHeartRate/{date}`, `dailyStress/{date}`, `daily/respiration/{date}`, `daily/spo2/{date}`, `dailySummaryChart`, `epoch/request/{date}`, `dailyEvents`, `bodyBattery/events/{date}`, `hrv/beat/{date}` | **404** | not exposed |
+| Device / location guesses: `device-service/deviceregistration/devices`, `livetrack-service/sessions`, `location-service/location/{date}`, `gps-service/track/{date}`, `usersummary/hourly/{date}` | **404** | not exposed |
+
+The OpenAPI spec agrees: location fields (`start/endLatitude/Longitude`, `locationName`, `hasPolyline`) exist only
+in activity schemas, and `dailyHeartRate` takes only `date`. The Personal API serves exactly its spec; Connect-web
+endpoints return 404.

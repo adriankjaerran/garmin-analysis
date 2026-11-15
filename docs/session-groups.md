@@ -18,7 +18,7 @@ a session elapsed time, gaps > 6 h are taken out. The same rule shifts lap and t
 share one time base. Timestamps after the jump are shifted back: the date stays Garmin's (from the pre-jump
 clock, which may itself be off). `read_series(...)["clock_jumps"]` = `[(t, s taken out)]`. Backwards jumps
 aren't seen in the data (records are sorted by time). `READER_VERSION` (2) is part of the caches built on
-the reader (similarity tracks, fitness features, compare) and the rep cache version is 2.
+the reader (similarity tracks, fitness features, compare) and the rep cache version is 3 (3: rep starts for every run).
 
 ## Grouping
 - **Places**: first GPS fix of each session, greedy density clustering (densest point + everything
@@ -75,22 +75,52 @@ the reader (similarity tracks, fitness features, compare) and the rep cache vers
     the rep before it (45/15 s sets: yes); at least half of the breaks must be recoveries (watch workouts with ≥ 3
     `active` laps always count). This stops the detector splitting one continuous effort at traffic
     lights / lap presses / GPS slowdowns into "intervals" (e.g. patrik 2026-10-27: 1625 m, 9.5 s, 792 m, 11.8 s,
-    4902 m, 12.1 s, 581 m, a steady run with ~400 m lap presses, is tempo). Open: patrik 2026-09-10 (reps at
-    2:47–3:27 /km with HR 115–158, probably not on foot) has 6 of 9 recovery breaks and stays intervals_road.
+    4902 m, 12.1 s, 581 m, a steady run with ~400 m lap presses, is tempo). patrik 2026-09-10 (reps at
+    2:47–3:27 /km with HR 115–158, not on foot) has 6 of 9 recovery breaks; the rules keep it intervals_road, a user
+    correction makes it easy / excluded (below).
+  - **Track or road: where the reps happen** (`run_track`, `track_of`), not where the run starts (Rise's Bislett
+    sessions start at Marienlyst, Patrik's at St. Hanshaugen, and some sessions start at Bislett and run their reps
+    elsewhere). Known tracks `TRACKS` {name: (centre, radius)}: **Bislet** (the 400 m oval, centre = median of 674 reps,
+    radius 130 m), **Øya stadion** (Trondheim, 400 m oval, centre = median of adrian's 13 rep sessions 2020–2022
+    (63.42653, 10.38021), 95th / 99th-percentile rep distance 81 / 84 m → radius 120 m; user decision 2026-11-04) and
+    **Frogner stadion** (the ~890 m loop the reps there run, 330 × 220 m, radius 210 m). Frogner is a **loop**
+    (`LOOPS` {name: lap m} = 890; user decision 2026-11-04): not a 400 m oval and ~12 m up and down per lap, so its
+    sessions are `intervals_road` (grade-adjusted, road σ; `flat_track()` is false), but its GPS reps still snap to whole
+    laps (below). The Dubai track (25.2149, 55.2743) is not a track (soft surface, heat; user decision): road. The worker stores
+    `track_spans` (time spans within each track's radius and with a GPS fix) per run; a run is on a track when ≥ 60 %
+    of the GPS time of its reps (≥ 35 s, ≥ 2 reps; runs without reps: ≥ 80 % of its moving time) is on it. Reps with
+    < 50 % GPS (indoors) fall back to the old rule (a start within 400 m of Bislet); Bislett indoor sessions are on
+    Bislet. The watch's track mode / `track_running` still counts as track anywhere. Output `track` {name, share,
+    basis: reps / moving / indoor / start} (null: not on a track); the fitness model reads it (`flat_track`: any track
+    but a loop) for flat (no grade) and the track σ. Rep starts for every run (rep cache version 3).
+    Changes 2026-11-04 (type intervals_road ↔ intervals_track): adrian 8 road → track (Frogner loop, Bislett reps from
+    other starts) and 1 track → road (2025-05-20: start at Bislet, reps elsewhere), rise 42 road → track (Bislett from
+    Marienlyst etc., Frogner), patrik 1 road → track (Frogner 2026-10-06). Runs whose flat / track flag in the fitness
+    model changed vs the old start-place rule: adrian 42, rise 46, patrik 7. Later 2026-11-04 (Øya added, Frogner a
+    loop): adrian 13 Øya sessions road → track (incl. 3 easy / steady runs on the oval now `track`), adrian 9 / rise 8 /
+    patrik 1 Frogner sessions track → road.
+  - **User corrections** (`data/<person>/session_overrides.json`, [data-layout.md](data-layout.md)): `type` replaces
+    the rule's type after all rules (the old one in `override.type_from`), `fitness` (exclude / bound) and `note` go to
+    `override` in groups.json for the fitness model. patrik (2026-11-04): 2026-09-10 → easy + exclude, 2025-06-28 →
+    easy (16 min run + 60 min walk), 2024-04-14 → intervals_road (3×1000 with adrian on a ~1000 m road loop ~2.5 km
+    north of Bislett; `track` null), 2025-05-15 and 2026-02-05 → bound (sub-maximal).
   - **Steady vs easy** (`steady_or_easy`, after the other rules): a continuous run classified easy is `steady` when its
     mean HR is ≥ 68 % of the HR reserve (`profile/hr_settings.json` max / rest) at ≥ 1.05 × the person's easy pace, or
     it is ≥ 1.15 × the easy pace (HR ≥ 60 % HRR or no HR); ≥ 15 min moving. Easy pace = median speed of the person's
     own continuous runs (≥ 3 km, trusted distance) with mean HR < 65 % HRR within ±180 days (≥ 5 runs, else no
     steady). The median of *all* runs (the reference for tempo / race? / structured) is pulled up by fast runs, so it
-    would leave runs like 2026-10-03 (4:34 /km, HR 167) "easy". Result: adrian 227 easy + 45 steady, patrik 41 easy +
-    10 steady. Steady runs are lower bounds in the fitness model, like easy ones. Label "Steady run".
+    would leave runs like 2026-10-03 (4:34 /km, HR 167) "easy". Result (2026-11-04): adrian
+    196 easy + 77 steady, rise 48 + 31, patrik 40 + 13. HR-flagged runs (`hr_settings.json` `activities[].flags`) use
+    the pace rule only. Steady runs are lower bounds in the fitness model, like easy ones. Label "Steady run".
   - **Multisport files** (`multisport_family`): a `multi_sport` activity whose FIT sessions are ≥ 80 % of the time one
     family (FIT sport 1 = run) gets that sport and is classified like any run (adrian 2026-10-15, two running legs at
     Bislett: `run` / intervals_track, scored by the fitness model). Without a summary HR the mean HR comes from the
     records (`avg_hr` in groups.json, `avg_hr_src: records`). Ski → **ski_intervals** (≥ 3 reps from the ski detector below; detail
   `lap workout` / `uphill reps` / `reps`, `short|medium|long reps`) / ski_easy / ski_hard (≥ 25 % time in
   Z4–5) / ski_long (≥ 150 min or ≥ 35 km); `surface` guess roller? (May–Oct) / snow — classic vs skate
-  isn't in the files (all sport 12). Other sports keep their sport / activity type as type (hike,
+  isn't in the files (all sport 12). Concept2 ergs (sport `row` / `skierg`) → **erg_intervals** (a Concept2 interval
+  workout; reps = its work laps with the erg's targets, signature "12×2:00" / "4×500") / erg_piece (continuous ≤ 12 min) /
+  erg_steady; distance trusted, no legs / pauses from the records ([concept2.md](concept2.md)). Other sports keep their sport / activity type as type (hike,
   cycling, lap_swimming, rowing_v2, …) with `type_detail` tags: `no GPS`, `over 24 h (multi-day or timer left running)`, and for hikes `hilly` (≥ 25 m/km) / `steep` (≥ 60 m/km), `long` (≥ 20 km or ≥ 5 h),
   `fast: part by vehicle / bike?` (moving ≥ 7.5 km/h for ≥ 30 min: 5 hikes, e.g. a 112 km "hike").
   No-GPS distances are `dist_trusted: false`. **Bislett indoor** (GPS track < 30 % of the watch distance at Bislet, or
@@ -106,6 +136,22 @@ the reader (similarity tracks, fitness features, compare) and the rep cache vers
   Track sessions: each rep counts as its set distance, `track_set_dists(times, dists)` (the signature group's distance
   label when the rep is 5 % under .. 12.5 % over it, else `TRACK_SET_M` via `track_set_m`); `snap_track_reps` applies
   it to rep dicts (compare, the activity page, avg rep pace).
+  **`track_reps`** [start_s, dur_s, measured_m, set_m] (`track_reps()`, for the fitness model's speed): GPS-mode
+  intervals_track sessions on a known track and intervals_road sessions on a loop (Frogner) (not the watch's track mode, whose laps are already the set distance, and
+  not Bislett indoor). Rep windows = the manual laps when the lap presses are the reps (≥ 3 manual / non-timed active
+  laps each overlapping detected reps for ≥ half their time, ≥ 75 % of the median such lap's speed, together ≥ 70 % of
+  the detected rep time; Patrik's 2026-11-03 detector split two 1000s, the laps don't), else the detector's reps. Per
+  group of similar reps (`rep_groups`, ≥ 2 reps, distances within 15 % and times within 25 % of the median) the set
+  distance (`group_set_m`) is its 100 m multiple when steady (≤ 6 %) and within 4 % (the signature's label: 3×1800 at
+  Frogner), else on a 400 m oval (`OVALS` = Bislet, Øya stadion) the nearest `TRACK_SET_M` within 10 % if the next is ≥ twice as far;
+  reps of the group from −15 % to +20 % of it count as it. On a loop (`LOOPS`) only whole laps: n × 890 m within 5 %
+  of the group median, reps from −7 % to +5 % of it (`LOOP_TOL`, `LOOP_LO`, `LOOP_HI`; GPS laps there 847–897 m, two
+  laps 1685–1803 m → 890 / 1780): ~1000 m reps there (adrian 2026-06-09 988–1017 m, rise 942–986 m the same day) and
+  rise's 1521 m rep in a 2-lap set keep their GPS distance. Not snapped: time-triggered laps (time reps), groups with
+  unclear distance (Rise's winter Bislett sessions: 173–595 m for ~105 s reps). Examples: patrik 2026-11-03 953 / 955 /
+  921 / 944 / 938 / 969 m → 6 × 1000; rise 2026-10-20 411–467 m → 10 × 400 (a 145 m recovery lap the detector merged
+  is skipped); adrian 2026-09-08 914 m (GPS cold start) → 1000. 2026-11-04 (with Øya and the Frogner loop): adrian 52
+  sessions, rise 40, patrik 5 have `track_reps`.
 - **Pool swims** (`pool_swim()`, FIT sport 5 with length messages and a pool length): the records of a pool swim
   come in bursts and their distance steps per length, so pauses / legs from records are garbage (12:40 "moving",
   8 km/h). Instead: moving = swimming time of the active lengths, distance = valid lengths × pool length (lengths

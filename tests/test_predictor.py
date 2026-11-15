@@ -141,6 +141,114 @@ def test_predict_bad_input(client):
 def test_fitness_payload_has_no_daily_predictor(client):
     d = client.get("/api/fitness").json()
     assert "daily" not in (d.get("predictor") or {}) and not any(k.startswith("_") for k in d.get("predictor") or {})
-    assert d["disciplines"]["long"]["model"] == "distance_curve"
+    assert d["disciplines"]["run"]["model"] == "distance_curve" and d["disciplines"]["long"]["model"] == "distance_curve"
     # the 10k counts once: no interval item copies a 10k race
     assert not any(s["discipline"] == "interval" and (s.get("components") or {}).get("race") == "10k" for s in d["sessions"])
+
+
+# ---------------------------------------------------------------- official races (data/races.json) + ski plausibility
+def _ski_feat(speed, climb_m, dur_s=1200, vdot=50.0):
+    return {"ski": {"vdot": vdot, "dur_s": dur_s, "start": 0, "end": dur_s, "demand": 45.0, "climb_m": climb_m,
+                    "speed": speed, "hrr": 0.8}}
+
+
+def test_ski_plausibility_filter():
+    act = {"type": "ski_easy", "sport": "ski", "surface": "snow"}
+    assert fm.score_session(act, _ski_feat(4.0, 200))[0]["kind"] == "bound"
+    fast = fm.score_session(act, _ski_feat(8.3, 36, vdot=87.0))[0]      # rise 2024-03-03: lift / car
+    climb = fm.score_session(act, _ski_feat(4.4, 481, vdot=120.0))[0]   # rise 2025-01-25: barometer
+    assert fast["kind"] == "implausible" and "km/h" in fast["components"]["implausible"]
+    assert climb["kind"] == "implausible" and "climb" in climb["components"]["implausible"]
+
+
+def test_official_races(tmp_path):
+    f = tmp_path / "races.json"
+    f.write_text(json.dumps({"races": [
+        {"name": "Ski", "date": "2026-03-01", "sport": "ski", "km": 90, "results": {"p": {"official_s": 22000, "activity_id": 1}}},
+        {"name": "Run", "date": "2026-10-23", "sport": "run", "km": 10, "results": {"p": {"official_s": 2390, "activity_id": 2},
+                                                                                  "q": {"official_s": 2500, "activity_id": None}}}]}))
+    assert fm.load_official_races("q", f) == {} and fm.load_official_races("x", tmp_path / "missing.json") == {}
+    acts = {"1": {"type": "ski_long", "sport": "ski", "surface": "snow"},
+            "2": {"type": "tempo", "sport": "run", "dist_trusted": True}}
+    fm.apply_official_races("p", acts, f)
+    ski = fm.score_session(acts["1"], _ski_feat(3.8, 100))
+    assert [(e["kind"], e["sigma"]) for e in ski] == [("hard", fm.SIG["ski_race"])]
+    assert fm.apply_hr_intent([{**ski[0], "date": "2026-03-01", "components": {**ski[0]["components"], "hrr": 0.4}}])[0]["kind"] == "hard"
+    # a run typed tempo whose watch distance is off: scored from the official 10 km / chip time, one race on the curve
+    run = fm.score_session(acts["2"], {"T": 2400, "moving_s": 2388, "dist_m": 10510.0, "cont": {"vdot": 55.0, "dur_s": 1800, "speed": 4.4}})
+    race = [e for e in run if e["kind"] == "race"]
+    assert len(race) == 1 and race[0]["discipline"] == "long"
+    assert race[0]["score"] == pytest.approx(fm.vdot_from_race(10000, 2390))
+    assert fm.evidence_km(race[0]) == 10.0
+    assert not any(e["kind"] == "hard" and e["discipline"] == "long" for e in run)     # no tempo item
+    assert [e for e in run if not fm.is_10k_dup({**e, "type": "tempo"})] == race
+
+
+def test_tests_are_race_evidence_at_their_own_distance(tmp_path):
+    f = tmp_path / "races.json"
+    f.write_text(json.dumps({"races": [], "tests": {"p": [{"activity_id": 1, "date": "2026-03-31", "km": 3.0, "time_s": 627}]}}))
+    acts = {"1": {"type": "easy", "sport": "run", "dist_trusted": True}}
+    fm.apply_official_races("p", acts, f)
+    assert fm.load_tests("q", f) == {} and fm.load_official_races("p", f) == {}   # not an official race
+    ev = fm.score_session(acts["1"], {"T": 630, "moving_s": 627, "dist_m": 3001.0, "cont": {"vdot": 50.0, "dur_s": 600, "speed": 4.8}})
+    assert len(ev) == 1 and ev[0]["kind"] == "race" and ev[0]["sigma"] == fm.SIG["race"]
+    assert ev[0]["score"] == pytest.approx(fm.vdot_from_race(3000, 627)) and ev[0]["components"]["test"] == "3k test"
+    assert fm.evidence_km(ev[0]) == 3.0
+
+
+def test_not_races(tmp_path):
+    f = tmp_path / "races.json"
+    f.write_text(json.dumps({"races": [], "not_races": {"p": [{"activity_id": 1, "note": "track 5k, not a race"}]}}))
+    acts = {"1": {"type": "race?"}, "2": {"type": "race?"}, "3": {"type": "tempo"}}
+    fm.apply_official_races("p", acts, f)
+    assert acts["1"]["type"] == "steady" and acts["1"]["not_race"]
+    assert acts["2"]["type"] == "race?" and acts["3"]["type"] == "tempo"
+    assert fm.load_not_races("q", f) == set() and fm.load_not_races("p", tmp_path / "missing.json") == set()
+
+
+# ---------------------------------------------------------------- one run number (`run` = the curve at 10 km)
+@needs_pred
+def test_run_discipline_is_the_curve_at_10k(client):
+    raw = json.loads((DATA / "fitness.json").read_text())
+    assert "curve_off" not in raw and raw["model_version"] >= 3
+    run = raw["disciplines"]["run"]
+    t = raw["predictor"]["daily"][-1]
+    assert run["ref_km"] == 10 and run["model"] == "distance_curve"
+    # the weekly series = theta + slope (x = log2(10/5) = 1); today's value = the 10k race prediction (VDOT ± sd)
+    assert run["weekly"][-1]["mean"] == pytest.approx(t["theta"] + t["slope"], abs=0.02)
+    pred = raw["disciplines"]["overall"]["current"]["race_prediction"]
+    assert run["current"]["mean"] == pytest.approx(pred["vdot"], abs=0.01) and run["current"]["sd"] == pytest.approx(pred["sd"], abs=0.01)
+    assert run["current"]["sd_state"] <= run["current"]["sd"]
+    for name in ("interval", "long"):
+        assert raw["disciplines"][name].get("legacy") is True
+    assert "run" in raw["variants"]["hr"]["disciplines"]
+    # every running session carries its 10k equivalent: score - shape_at + the curve at 10 km that day
+    days = {r["date"]: r for r in raw["predictor"]["daily"]}
+    s = next(s for s in reversed(raw["sessions"]) if s["discipline"] == "interval" and s["kind"] == "hard" and s["date"] in days)
+    r = days[s["date"]]
+    assert s["score_10k"] == pytest.approx(s["score"] - s["shape_at"] + r["theta"] + r["slope"], abs=0.05)
+    # the chart's 10k line is the run series
+    ch = client.get("/api/fitness/predictor").json()
+    assert ch["daily"][-1]["vdot_10k"] == pytest.approx(run["weekly"][-1]["mean"], abs=0.02)
+    assert "distance_curve" not in ch
+
+
+@needs_pred
+def test_session_shape_at_its_own_distance(client):
+    """a running session is compared with the curve at its own distance; "now" is the run number"""
+    raw = json.loads((DATA / "fitness.json").read_text())
+    s = next(s for s in reversed(raw["sessions"]) if s["discipline"] == "interval" and s["kind"] == "hard" and s.get("km"))
+    r = client.get(f"/api/fitness/session/{s['id']}").json()
+    x = next(x for x in r["sessions"] if x["discipline"] == "interval")
+    assert x["shape"]["mean"] == pytest.approx(s["shape_at"], abs=0.01) and x["shape"]["km"] == s["km"]
+    assert x["current"]["mean"] == raw["disciplines"]["run"]["current"]["mean"]
+    assert x["label"].startswith("Run fitness")
+    # the session's own race equivalents follow the curve: at 5 km (its distance) it is the plain Daniels time
+    assert abs(x["race_equivalents_s"]["5k"] - fm.race_time(s["score"], 5000)) <= 1
+
+
+def test_no_distance_curve_setting(client):
+    assert client.get("/api/settings").status_code == 404
+    d = client.get("/api/fitness/predict").json() if (DATA / "fitness.json").exists() else {}
+    assert "distance_curve" not in d and "curve_slope" not in d.get("shape", {})
+    assert fm._model([], __import__("datetime").date(2026, 1, 1)) == ({}, None, None)

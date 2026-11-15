@@ -1,0 +1,139 @@
+set,person,model,n,mae,bias
+official,adrian,production,5,0.915,-0.148
+official,adrian,V9 P+tests,5,0.915,-0.557
+official,adrian,V9 S+tests,5,0.814,-0.52
+official,adrian,V9 C+tests,5,0.902,-0.447
+official,adrian,V9 T1+tests,5,0.959,-0.389
+official,adrian,"V10 P+dI,tight slope",5,1.229,-0.203
+official,rise,production,5,1.753,-0.181
+official,rise,V9 P+tests,5,1.753,-0.181
+official,rise,V9 S+tests,5,1.638,-0.023
+official,rise,V9 C+tests,5,1.307,0.416
+official,rise,V9 T1+tests,5,1.313,-0.142
+official,rise,"V10 P+dI,tight slope",5,1.768,-0.448
+official,patrik,production,1,10.874,-10.874
+official,patrik,V9 P+tests,1,10.874,-10.874
+official,patrik,V9 S+tests,1,10.874,-10.874
+official,patrik,V9 C+tests,1,7.135,-7.135
+official,patrik,V9 T1+tests,1,7.135,-7.135
+official,patrik,"V10 P+dI,tight slope",1,10.874,-10.874
+official,a+r,production,10,1.334,-0.165
+official,a+r,V9 P+tests,10,1.334,-0.369
+official,a+r,V9 S+tests,10,1.226,-0.272
+official,a+r,V9 C+tests,10,1.105,-0.016
+official,a+r,V9 T1+tests,10,1.136,-0.265
+official,a+r,"V10 P+dI,tight slope",10,1.498,-0.325
+official,all,production,11,2.201,-1.138
+official,all,V9 P+tests,11,2.201,-1.324
+official,all,V9 S+tests,11,2.103,-1.236
+official,all,V9 C+tests,11,1.653,-0.663
+official,all,V9 T1+tests,11,1.681,-0.89
+official,all,"V10 P+dI,tight slope",11,2.351,-1.284
+official+high,adrian,production,8,1.257,-0.68
+official+high,adrian,V9 P+tests,8,1.176,-0.856
+official+high,adrian,V9 S+tests,8,1.124,-0.685
+official+high,adrian,V9 C+tests,8,1.831,-1.18
+official+high,adrian,V9 T1+tests,8,1.812,-1.196
+official+high,adrian,"V10 P+dI,tight slope",8,1.21,-0.353
+official+high,rise,production,5,1.753,-0.181
+official+high,rise,V9 P+tests,5,1.753,-0.181
+official+high,rise,V9 S+tests,5,1.638,-0.023
+official+high,rise,V9 C+tests,5,1.307,0.416
+official+high,rise,V9 T1+tests,5,1.313,-0.142
+official+high,rise,"V10 P+dI,tight slope",5,1.768,-0.448
+official+high,patrik,production,1,10.874,-10.874
+official+high,patrik,V9 P+tests,1,10.874,-10.874
+official+high,patrik,V9 S+tests,1,10.874,-10.874
+official+high,patrik,V9 C+tests,1,7.135,-7.135
+official+high,patrik,V9 T1+tests,1,7.135,-7.135
+official+high,patrik,"V10 P+dI,tight slope",1,10.874,-10.874
+official+high,a+r,production,13,1.448,-0.488
+official+high,a+r,V9 P+tests,13,1.398,-0.597
+official+high,a+r,V9 S+tests,13,1.322,-0.43
+official+high,a+r,V9 C+tests,13,1.63,-0.566
+official+high,a+r,V9 T1+tests,13,1.62,-0.791
+official+high,a+r,"V10 P+dI,tight slope",13,1.424,-0.389
+official+high,all,production,14,2.121,-1.23
+official+high,all,V9 P+tests,14,2.075,-1.331
+official+high,all,V9 S+tests,14,2.004,-1.176
+official+high,all,V9 C+tests,14,2.023,-1.035
+official+high,all,V9 T1+tests,14,2.014,-1.244
+official+high,all,"V10 P+dI,tight slope",14,2.099,-1.138
+extra_high,adrian,production,3,1.826,-1.568
+extra_high,adrian,V9 P+tests,3,1.613,-1.355
+extra_high,adrian,V9 S+tests,3,1.639,-0.959
+extra_high,adrian,V9 C+tests,3,3.381,-2.401
+extra_high,adrian,V9 T1+tests,3,3.235,-2.541
+extra_high,adrian,"V10 P+dI,tight slope",3,1.178,-0.602
+extra_high,a+r,production,3,1.826,-1.568
+extra_high,a+r,V9 P+tests,3,1.613,-1.355
+extra_high,a+r,V9 S+tests,3,1.639,-0.959
+extra_high,a+r,V9 C+tests,3,3.381,-2.401
+extra_high,a+r,V9 T1+tests,3,3.235,-2.541
+extra_high,a+r,"V10 P+dI,tight slope",3,1.178,-0.602
+extra_high,all,production,3,1.826,-1.568
+extra_high,all,V9 P+tests,3,1.613,-1.355
+extra_high,all,V9 S+tests,3,1.639,-0.959
+extra_high,all,V9 C+tests,3,3.381,-2.401
+extra_high,all,V9 T1+tests,3,3.235,-2.541
+extra_high,all,"V10 P+dI,tight slope",3,1.178,-0.602
+interval,adrian,production,122,2.379,0.728
+interval,adrian,V9 P+tests,122,2.445,0.848
+interval,adrian,V9 S+tests,122,2.445,0.78
+interval,adrian,V9 C+tests,122,2.432,0.098
+interval,adrian,V9 T1+tests,122,2.425,0.122
+interval,adrian,"V10 P+dI,tight slope",122,2.383,0.768
+interval,rise,production,68,2.467,0.657
+interval,rise,V9 P+tests,68,2.467,0.657
+interval,rise,V9 S+tests,68,2.475,0.574
+interval,rise,V9 C+tests,68,2.403,0.427
+interval,rise,V9 T1+tests,68,2.411,0.413
+interval,rise,"V10 P+dI,tight slope",68,2.419,0.684
+interval,patrik,production,6,2.336,-1.06
+interval,patrik,V9 P+tests,6,2.336,-1.06
+interval,patrik,V9 S+tests,6,2.32,-1.06
+interval,patrik,V9 C+tests,6,2.782,-2.005
+interval,patrik,V9 T1+tests,6,2.692,-1.908
+interval,patrik,"V10 P+dI,tight slope",6,2.354,-1.076
+interval,a+r,production,190,2.411,0.703
+interval,a+r,V9 P+tests,190,2.453,0.78
+interval,a+r,V9 S+tests,190,2.456,0.706
+interval,a+r,V9 C+tests,190,2.422,0.216
+interval,a+r,V9 T1+tests,190,2.42,0.226
+interval,a+r,"V10 P+dI,tight slope",190,2.396,0.738
+interval,all,production,196,2.409,0.649
+interval,all,V9 P+tests,196,2.449,0.723
+interval,all,V9 S+tests,196,2.452,0.652
+interval,all,V9 C+tests,196,2.433,0.148
+interval,all,V9 T1+tests,196,2.428,0.161
+interval,all,"V10 P+dI,tight slope",196,2.395,0.682
+hard_effort,adrian,production,13,3.511,2.69
+hard_effort,adrian,V9 P+tests,13,3.556,2.804
+hard_effort,adrian,V9 S+tests,13,3.46,2.91
+hard_effort,adrian,V9 C+tests,13,3.294,0.794
+hard_effort,adrian,V9 T1+tests,13,3.412,0.695
+hard_effort,adrian,"V10 P+dI,tight slope",13,3.581,2.966
+hard_effort,rise,production,2,2.672,-2.672
+hard_effort,rise,V9 P+tests,2,2.672,-2.672
+hard_effort,rise,V9 S+tests,2,2.672,-2.672
+hard_effort,rise,V9 C+tests,2,2.455,-2.455
+hard_effort,rise,V9 T1+tests,2,2.456,-2.456
+hard_effort,rise,"V10 P+dI,tight slope",2,2.998,-2.998
+hard_effort,patrik,production,4,6.993,6.993
+hard_effort,patrik,V9 P+tests,4,6.993,6.993
+hard_effort,patrik,V9 S+tests,4,6.959,6.959
+hard_effort,patrik,V9 C+tests,4,4.437,4.437
+hard_effort,patrik,V9 T1+tests,4,4.452,4.452
+hard_effort,patrik,"V10 P+dI,tight slope",4,6.92,6.92
+hard_effort,a+r,production,15,3.399,1.975
+hard_effort,a+r,V9 P+tests,15,3.438,2.074
+hard_effort,a+r,V9 S+tests,15,3.355,2.165
+hard_effort,a+r,V9 C+tests,15,3.182,0.361
+hard_effort,a+r,V9 T1+tests,15,3.284,0.275
+hard_effort,a+r,"V10 P+dI,tight slope",15,3.503,2.171
+hard_effort,all,production,19,4.156,3.031
+hard_effort,all,V9 P+tests,19,4.187,3.11
+hard_effort,all,V9 S+tests,19,4.114,3.175
+hard_effort,all,V9 C+tests,19,3.446,1.219
+hard_effort,all,V9 T1+tests,19,3.53,1.154
+hard_effort,all,"V10 P+dI,tight slope",19,4.223,3.171

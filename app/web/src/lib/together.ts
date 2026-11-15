@@ -28,7 +28,7 @@ export interface TParticipant {
   type: string; sport: string; signature: string | null; workout: string; dist_km: number | null; dur_s: number | null;
   start_utc: string; start_local: string; offset_s: number; clock_fixed: boolean; has_fit: boolean; has_gps: boolean;
   product: number | null; sample_s: number | null; sample_p90_s: number | null; together: TogetherSpan | null;
-  display: PersonInfo; hr_norm: { max: number | null; rest: number | null; mode: string; source: string; warn: string | null } | null;
+  display: PersonInfo; hr_norm: { max: number | null; rest: number | null; mode: string; source: string; warn: string | null; flags?: string[] } | null;
   shape: { score: number; discipline: string; kind: string } | null;
 }
 interface Slot { slot: number; label: string; anchor: boolean; owner: string; target: { kind: "dist" | "time"; value: number; text: string } | null;
@@ -37,6 +37,8 @@ export interface Cell {
   source: "detector" | "onset"; method: string; partial: boolean; result_s: N; time_s: N; dist_m: N; own_time_s: N; own_dist_m: N;
   start_s: number; clock_start_s: number; scale: N; rank: N; gap_s: N; tie: boolean; tie_s?: number; suspect?: string; warmup?: "warm-up" | "cool-down"; warmup_reason?: string;
   hr: N; hr_peak: N; hr_start: N; effort_pct: N; effort_mode: string | null;
+  /** measurement uncertainty of the result (s): lap press ~1 s, coarse GPS half the recording interval */
+  unsure_s?: N; lap_s?: N; pos_s?: N; common_start?: boolean;
 }
 interface Standing { slot: number; label: string; partial: string[]; missing: string[];
   order: { person: string; result_s: number; rank: number; gap_s: number; gap_m: N; tie: boolean; tie_s: number }[] }

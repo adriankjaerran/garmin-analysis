@@ -1,14 +1,12 @@
 /* Fitness page + activity "Shape" section (imported by pages/FitnessPage.tsx and components/ShapeSection.tsx) */
 /* discipline colours (lib/fitness.ts DISC_COLOR): deliberately not the --sport-* hues */
 :root {
-  --disc-interval: #7b3fc4;   /* violet */
-  --disc-long: #e0761b;       /* orange */
+  --disc-run: #7b3fc4;        /* violet */
   --disc-ski: #e0407f;        /* pink */
   --disc-overall: #3d4650;    /* slate */
 }
 :root[data-theme="dark"] {
-  --disc-interval: #a77ae6;
-  --disc-long: #f0924a;
+  --disc-run: #a77ae6;
   --disc-ski: #f06ba0;
   --disc-overall: #b4bcc6;
 }
@@ -37,6 +35,7 @@ details.howto[open] summary::before { content: "▾"; }
 /* model variants: solid = performance only, dashed = with HR (ShapeChart withHr) */
 .line-sw { display: inline-block; width: 20px; border-top: 2px solid var(--text-muted); vertical-align: middle; margin-right: 6px; }
 .line-sw.dash { border-top-style: dashed; }
+.race-sw { display: inline-block; font-size: 14px; line-height: 1; color: var(--text-muted); vertical-align: -1px; margin-right: 4px; }
 .variant-eval th.grp { text-align: center; }
 .variant-eval td.better { font-weight: var(--fw-semibold); }
 /* activity Shape section: model internals behind "Details" */

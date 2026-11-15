@@ -1,7 +1,7 @@
 """/api/home: everything the Home page needs in one response — the latest active day, a 5-week training log,
 volume per sport (last 7 / 30 days vs typical), recent workouts (search rows with workout fields) and the current
-shape per discipline. Built from the same sources as the other endpoints (store activities, similarity index rows,
-fitness.json); memoised per anchor date and data version. Only what HomePage.tsx reads."""
+shape per discipline (+ the erg trend per machine, erg_fitness.json). Built from the same sources as the other endpoints
+(store activities, similarity index rows, fitness.json); memoised per anchor date and data version. Only what HomePage.tsx reads."""
 
 from __future__ import annotations
 
@@ -43,13 +43,21 @@ def _scale(x: dict, f: float) -> dict:
     return {k: round(v * f, 1) for k, v in x.items()}
 
 
-def _fitness(store: Store) -> dict | None:
+def _erg(store: Store) -> dict | None:
+    """erg_fitness.json (Concept2), or None; never fails Home"""
     try:
-        doc = fitness_router._view(store)   # the person's distance-curve setting decides the long shape
-    except HTTPException:
+        return fitness_router.erg_doc(store)
+    except Exception:  # noqa: BLE001
         return None
+
+
+def _fitness(store: Store) -> dict | None:
     out = {}
-    for k in fitness_router.DISC:
+    try:
+        doc = fitness_router._doc(store)
+    except HTTPException:
+        doc = None
+    for k in fitness_router.DISC if doc else ():
         d = doc["disciplines"].get(k)
         if not d:
             continue
@@ -57,7 +65,13 @@ def _fitness(store: Store) -> dict | None:
         ev = c.get("last_evidence")
         out[k] = {"label": d.get("label"), "unit": d.get("unit"), "mean": c.get("mean"), "sd": c.get("sd"),
                   "date": c.get("date"), "last_evidence_date": ev.get("date") if ev else None}
-    return out
+    # erg trend per machine: mean / sd = 2k-equivalent pace in s /500 m (own scale, `erg: true`)
+    for k, d in ((_erg(store) or {}).get("machines") or {}).items():
+        c = d["current"]
+        out[k] = {"label": d["label"], "unit": "/500 m (2k-equivalent)", "mean": c["pace"], "sd": c["sd"],
+                  "date": c["date"], "last_evidence_date": c.get("last_evidence_date"), "erg": True,
+                  "watts": c.get("watts")}
+    return out or None
 
 
 def build(store: Store, anchor: dt.date) -> dict:
@@ -154,10 +168,10 @@ def home(date: str | None = Query(None, description="anchor date (default: today
     acts = store.activities()
     fit_v = None
     try:
-        fit_v = id(fitness_router._view(store))
+        fit_v = id(fitness_router._doc(store))
     except HTTPException:
         pass
-    key = (anchor, id(acts), id(store.index()), fit_v, id(store.daily()), id(store.sleep()))
+    key = (anchor, id(acts), id(store.index()), fit_v, id(_erg(store)), id(store.daily()), id(store.sleep()))
     with store._lock:
         hit = store._memo.get("home")
     if hit and hit[0] == key:

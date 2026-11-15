@@ -250,7 +250,24 @@ class _Store:
             ind = (self.act(i) or {}).get("indoor_bislett")
             if ind and ind.get("rep_laps"):
                 out[int(i)] = self._indoor_reps(i, ind)
+        for i in ids:   # Concept2 ergs: reps = the erg's work intervals (groups.json reps / rep_starts, concept2.erg_ana)
+            a = self.act(i) or {}
+            if a.get("type") == "erg_intervals" and a.get("reps") and a.get("rep_starts"):
+                out[int(i)] = self._erg_reps(i, a)
         return out
+
+    def _erg_reps(self, i, a):
+        hr = self.session(i)["G"].get("hr")
+        reps = []
+        for t0, (dur, m, _sp, _h) in zip(a["rep_starts"], a["reps"]):
+            x0, x1 = int(round(t0)), int(round(t0 + dur))
+            h = hr[x0:x1] if hr is not None else np.array([])
+            h = h[np.isfinite(h)] if len(h) else h
+            reps.append({"start": t0, "end": t0 + dur, "time": dur, "dist": m, "speed": m / dur if m and dur else None,
+                         "hr": round(float(h.mean())) if len(h) > 5 else None, "maxhr": round(float(h.max())) if len(h) > 5 else None,
+                         "hr_start": round(float(h[0])) if len(h) else None, "hr_end": round(float(h[-1])) if len(h) else None,
+                         "dist_source": "concept2"})
+        return {"mode": "erg", "reps": reps, "laps": []}
 
     def _indoor_reps(self, i, ind):
         hr = self.session(i)["G"].get("hr")

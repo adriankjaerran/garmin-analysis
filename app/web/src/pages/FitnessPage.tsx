@@ -1,10 +1,11 @@
-// Fitness: shape per discipline (interval / long-distance running / ski) and overall over the years,
+// Fitness: shape per discipline (run fitness = the personal distance curve at 10 km, ski) and overall over the years,
 // from scripts/fitness_model.py (fitness.json via /api/fitness). URL state:
 // Two model variants: "pace" (performance only; top-level disciplines) and "hr" (variants.hr: HR decides how
 // maximal each hard session was), compared with fitness_eval.json (eval_variants).
-// ?d=interval,long,ski&ov=0&b=1&hr=0&from=2023-01-01&to=2026-10-31&sd=interval&sk=race&q=
-// (b=1: show lower bounds in the chart, default off; sk: default races + hard sessions; sk=all = every kind).
-// #records = the personal records section
+// ?d=run,ski&ov=0&b=1&hr=0&from=2023-01-01&to=2026-10-31&sd=run&sk=race&q=
+// (d / sd: the old interval / long values still work: d maps them to run, sd filters that session type)
+// (b=1: show lower bounds in the chart, default off; races=0: hide the official-race lines, default on; sk: default races + hard sessions; sk=all = every kind).
+// #records = the personal records section; #erg = the Concept2 erg trend (components/ErgSection.tsx, hidden without erg data)
 import { useMemo, useState } from "preact/hooks";
 import { apiUrl, useApi } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
@@ -13,10 +14,11 @@ import { Table, type Col } from "../components/Table";
 import { PageHeader } from "../components/PageHeader";
 import { ShapeChart } from "../components/ShapeChart";
 import { RecordsSection } from "../components/ProgressCard";
+import { ErgSection } from "../components/ErgSection";
 import "../fitness.css";
 import {
-  DISCS, DISC_LABEL, KIND_HELP, KIND_LABEL, daysAgo, discColor, pm, raceT, signed, unitShort,
-  type Disc, type EvalDisc, type FitSession, type FitnessDoc, type Kind, type Yearly,
+  DISCS, DISC_LABEL, KIND_HELP, KIND_LABEL, daysAgo, discColor, parseDiscs, pm, raceT, signed, unitShort,
+  type Disc, type EvalDisc, type SessDisc, type FitSession, type FitnessDoc, type Kind, type Yearly,
 } from "../lib/fitness";
 
 /** a shape without a race / hard session for more than this many days is greyed */
@@ -57,11 +59,13 @@ export function FitnessPage() {
   const [hover, setHover] = useState<string | null>(null);
   const [rb, setRb] = useState<string | null>(null);
   const [allSess, setAllSess] = useState(false);   // the session list grows with the page: the newest 50 first
-  const discs = (query.get("d") ?? "interval,long,ski").split(",").filter((d): d is Disc => (DISCS as string[]).includes(d));
+  const discs = parseDiscs(query.get("d"));
   const overall = query.get("ov") !== "0";
   const bounds = query.get("b") === "1";
   const hasHr = !!doc?.variants?.hr?.disciplines;
   const withHr = hasHr && query.get("hr") !== "0";
+  const hasRaces = !!doc?.races?.length;
+  const showRaces = hasRaces && query.get("races") !== "0";
   const from = query.get("from"), to = query.get("to");
   // session kind filter: default = races + hard sessions (the evidence that moves the shape); "all" = every kind
   const sd = query.get("sd") ?? "", sk = query.get("sk") ?? "rh", q = (query.get("q") ?? "").toLowerCase();
@@ -75,7 +79,7 @@ export function FitnessPage() {
 
   const curRows = useMemo<CurRow[]>(() => {
     if (!doc) return [];
-    const ref = doc.disciplines.interval?.current.date ?? doc.built.slice(0, 10);
+    const ref = doc.disciplines.run?.current.date ?? doc.built.slice(0, 10);
     const H = doc.variants?.hr?.disciplines;
     const rows: CurRow[] = DISCS.filter((k) => doc.disciplines[k]).map((k) => {
       const d = doc.disciplines[k], c = d.current, eq = c.race_equivalents_s;
@@ -84,13 +88,6 @@ export function FitnessPage() {
         last: c.last_evidence?.date ?? null, lastId: c.last_evidence ? String(c.last_evidence.id) : null,
         lastDays: c.last_evidence ? daysAgo(c.last_evidence.date, ref) : null };
     });
-    // one race prediction from the distance curve (fitness.json overall.current.race_prediction; vdot/sd at 10k)
-    const pr = (doc.disciplines.overall?.current as any)?.race_prediction as { vdot: number; sd: number;
-      race_equivalents_s: Record<string, number> } | null | undefined;
-    if (pr) rows.push({ key: "pred", label: "Race prediction", mean: pr.vdot, sd: pr.sd, hrMean: null, hrSd: null, conf: null, pct: null, pb: null,
-      r5: pr.race_equivalents_s["5k"], r10: pr.race_equivalents_s["10k"], rh: pr.race_equivalents_s.half, trend: null,
-      last: doc.distance_curve === false ? "same VDOT at every distance (distance curve off on Race predictor)"
-        : "VDOT at 10k, from the distance curve", lastId: null, lastDays: null });
     const o = doc.disciplines.overall;
     if (o) rows.push({ key: "overall", label: DISC_LABEL.overall, mean: o.current.mean, sd: o.current.sd,
       hrMean: H?.overall?.current.mean ?? null, hrSd: H?.overall?.current.sd ?? null, conf: null, pct: o.current.mean,
@@ -105,7 +102,7 @@ export function FitnessPage() {
   const demoted = useMemo(() => (doc?.sessions ?? []).filter((s) => s.hr?.note).sort((a, b) => b.date.localeCompare(a.date)), [doc]);
 
   const sessions = useMemo(() => (doc?.sessions ?? []).filter((s) =>
-    (!sd || s.discipline === sd) && (sk === "all" || (sk === "rh" ? s.kind === "race" || s.kind === "hard" : s.kind === sk)) && (!from || s.date >= from) && (!to || s.date <= to) &&
+    (!sd || s.discipline === sd || (sd === "run" && s.discipline !== "ski")) && (sk === "all" || (sk === "rh" ? s.kind === "race" || s.kind === "hard" : s.kind === sk)) && (!from || s.date >= from) && (!to || s.date <= to) &&
     (!q || `${s.name ?? ""} ${s.type} ${s.explain} ${s.date}`.toLowerCase().includes(q))), [doc, sd, sk, from, to, q]);
 
   if (error) return (
@@ -113,13 +110,14 @@ export function FitnessPage() {
       <div class="empty-state"><p><b>No fitness estimate yet.</b></p>
         <p class="muted">{/fitness\.json/.test(error) ? "The model hasn't been built for this person. Build it once (≈ 10 s):" : `The server said: ${error}`}</p>
         <button onClick={() => rebuild((m) => alert(m))}>Build the fitness model</button></div>
+      <ErgSection />
     </main>
   );
   if (!doc) return <main><div class="empty">Loading…</div></main>;
 
   const toggle = (k: Disc) => {
     const next = discs.includes(k) ? discs.filter((d) => d !== k) : DISCS.filter((d) => d === k || discs.includes(d));
-    setQuery({ d: next.length === 3 ? null : next.join(",") || "none" });
+    setQuery({ d: next.length === DISCS.length ? null : next.join(",") || "none" });
   };
   // stale: no race / hard session that counted for > STALE_DAYS (the model carries the value forward, its sd grows)
   const stale = (r: CurRow) => DISCS.includes(r.key as Disc) && (r.lastDays === null || r.lastDays > STALE_DAYS);
@@ -133,8 +131,8 @@ export function FitnessPage() {
     stale(r) ? `no race or hard session for ${r.lastDays === null ? "ever" : `${r.lastDays} days`}: the value is carried forward and its uncertainty grows` : null,
   ].filter(Boolean).join("\n");
   const curCols: Col<CurRow>[] = [
-    { key: "label", label: "Discipline", render: (r) => r.key === "pred"
-      ? <span title="one prediction for today: the interval and long-distance shapes averaged by how certain each is (1/sd²); a shape without recent evidence has a wide band and counts less. The band includes the disagreement between the two.">{r.label}</span>
+    { key: "label", label: "Discipline", render: (r) => r.key === "run"
+      ? <span title="your running level as a 10k-equivalent VDOT: your personal distance curve read at 10 km (± the 10k race prediction's sd). The 5k / 10k / half times are read from the same curve at each distance, as on Race predictor.">{r.label}</span>
       : r.label },
     { key: "mean", label: "Current", num: true, render: (r) => (
       <span class={stale(r) ? "muted" : ""} title={curTitle(r)}>
@@ -146,9 +144,8 @@ export function FitnessPage() {
     { key: "r5", label: "5k", num: true, render: (r) => r.key === "ski" ? <span class="muted" title="ski is on its own VDOT-equivalent scale; no running times">—</span> : raceT(r.r5) },
     { key: "r10", label: "10k", num: true, render: (r) => r.key === "ski" ? <span class="muted">—</span> : raceT(r.r10) },
     { key: "rh", label: "Half", num: true, render: (r) => r.key === "ski" ? <span class="muted">—</span> : raceT(r.rh) },
-    { key: "last", label: "Last evidence", render: (r) => r.key === "pred" ? <span class="muted" title="share of each shape in the blended prediction">{r.last}</span>
-      : r.last ? <><a href={`/activities/${r.lastId}`}>{r.last}</a> <span class="muted">{r.lastDays} d ago</span></> : <span class="muted">{r.key === "overall" ? "" : "none"}</span>,
-      title: "latest race or hard session with weight > 0.5 (prediction row: the weight of each shape)" },
+    { key: "last", label: "Last evidence", render: (r) => r.last ? <><a href={`/activities/${r.lastId}`}>{r.last}</a> <span class="muted">{r.lastDays} d ago</span></> : <span class="muted">{r.key === "overall" ? "" : "none"}</span>,
+      title: "latest race or hard session with weight > 0.5" },
   ];
 
   const yc = (k: string, label: string): Col<any>[] => [
@@ -159,19 +156,21 @@ export function FitnessPage() {
   ];
   const yearCols: Col<any>[] = [
     { key: "y", label: "Year" },
-    ...yc("interval", "Interval"), ...yc("long", "Long"), ...yc("ski", "Ski"),
+    ...yc("run", "Run"), ...yc("ski", "Ski"),
     { key: "overall", label: "Overall", num: true, render: (r) => (r.overall === null ? "—" : `${(r.overall as number).toFixed(1)} %`) },
   ];
 
   const sessCols: Col<FitSession>[] = [
     { key: "date", label: "Date" },
-    { key: "discipline", label: "Discipline", render: (s) => DISC_LABEL[s.discipline] },
+    { key: "discipline", label: "Discipline", render: (s) => DISC_LABEL[s.discipline],
+      title: "the kind of evidence: interval sessions / 5k races, or distance (tempo runs, 10k+ races, long runs); both feed the one run curve" },
     { key: "kind", label: "Kind", render: (s) => <span title={KIND_HELP[s.kind]}>{KIND_LABEL[s.kind]}</span> },
     { key: "name", label: "Activity", render: (s) => <span class="clip" style={{ maxWidth: "200px" }} title={s.name ?? s.type}>{s.name ?? s.type}</span> },
     { key: "explain", label: "What it shows", render: (s) => <span class="wrap-cell">{s.explain}</span> },
     { key: "score", label: "Score", num: true, render: (s) => <span title={`model weight ${num(s.weight, 2)} (0–1), σ ${s.sigma.toFixed(1)}`}>{s.score.toFixed(1)}</span>,
       title: "fitness score of the session (VDOT; ski: VDOT-equivalent); hover for the model weight" },
-    { key: "shape_at", label: "Your shape", num: true, render: (s) => (s.shape_at === null ? "—" : s.shape_at.toFixed(1)), title: "your smoothed shape that day" },
+    { key: "shape_at", label: "Your shape", num: true, render: (s) => (s.shape_at === null ? "—" : s.shape_at.toFixed(1)),
+      title: "your smoothed shape that day; running: your run curve at this session's distance (so a 5k-level interval session is compared with your 5 km level, a half with your half level)" },
     { key: "delta", label: "vs shape", num: true, sort: (s) => (s.shape_at === null ? null : s.score - s.shape_at),
       render: (s) => { if (s.shape_at === null || s.kind === "implausible") return "—"; const d = s.score - s.shape_at, r = Math.abs(d).toFixed(1);
         if (s.kind === "bound" && d < 0) return <span class="muted" title={`${r} below: a lower bound (easy / long run) only counts when it is above your shape`}>easy: no effect</span>;
@@ -210,6 +209,9 @@ export function FitnessPage() {
               <button class={"chip" + (bounds ? " on" : "")} onClick={() => setQuery({ b: bounds ? "0" : null })} title={KIND_HELP.bound}>Bounds</button>
               {hasHr && <button class={"chip" + (withHr ? " on" : "")} onClick={() => setQuery({ hr: withHr ? "0" : null })}
                 title={doc.variants?.hr?.label}><span class="line-sw dash" />With HR</button>}
+              {hasRaces && <button class={"chip" + (showRaces ? " on" : "")} onClick={() => setQuery({ races: showRaces ? "0" : null })}
+                title="Official races (Races page): green = faster than predicted, red = slower, hollow = ski / no prediction. Hover for the time, click to open">
+                <span class="race-sw">★</span>Races</button>}
             </div>
             <span class="muted">Years</span>
             <select value={yFrom} onChange={(e) => setQuery({ from: (e.target as HTMLSelectElement).value ? (e.target as HTMLSelectElement).value + "-01-01" : null })}>
@@ -224,19 +226,25 @@ export function FitnessPage() {
             <button disabled={!from && !to} onClick={() => setQuery({ from: null, to: null })}>All years</button>
           </div>
         </div>
-        <ShapeChart doc={doc} discs={discs} overall={overall} bounds={bounds} from={from} to={to} highlight={hover} withHr={withHr}
+        <ShapeChart doc={doc} discs={discs} overall={overall} bounds={bounds} from={from} to={to} highlight={hover} withHr={withHr} races={showRaces}
           onZoom={(a, b) => setQuery({ from: a, to: b })} />
         {withHr && <div class="legend-row muted">
           <span><span class="line-sw" />{doc.variants?.pace?.label ?? "Performance only"} (± 1 sd band)</span>
           <span><span class="line-sw dash" />{doc.variants?.hr?.label ?? "With HR"}</span>
         </div>}
         <div class="legend-row muted">
-          <span><KindMark kind="race" disc="interval" />race</span>
-          <span title="paler = lower weight"><KindMark kind="hard" disc="interval" />hard session</span>
-          <span><KindMark kind="bound" disc="interval" />lower bound</span>
-          <span><KindMark kind="implausible" disc="interval" />implausible</span>
+          <span><KindMark kind="race" disc="run" />race</span>
+          <span title="paler = lower weight"><KindMark kind="hard" disc="run" />hard session</span>
+          <span><KindMark kind="bound" disc="run" />lower bound</span>
+          <span><KindMark kind="implausible" disc="run" />implausible</span>
+          {discs.includes("run") && <span title="each running session is drawn at its 10k equivalent: its score moved along your distance curve to 10 km, so its height above or below the line is its difference to your shape at its own distance">running sessions at their 10k equivalent</span>}
+          {showRaces && <span title="official result vs the prediction from data before race day; ski: no prediction">
+            <span class="race-sw" style={{ color: "var(--state-good)" }}>★</span><span class="race-sw" style={{ color: "var(--state-duplicate)" }}>★</span>official race: faster / slower than predicted</span>}
+          {showRaces && discs.includes("ski") && <span><span class="race-sw" style={{ color: "var(--disc-ski)" }}>☆</span>ski race</span>}
         </div>
       </section>
+
+      <ErgSection />
 
       <RecordsSection anchor={doc.built.slice(0, 10)} />
 
@@ -253,7 +261,7 @@ export function FitnessPage() {
           <div class="tools">
             <input type="search" placeholder="Filter…" value={query.get("q") ?? ""} onInput={(e) => setQuery({ q: (e.target as HTMLInputElement).value })} />
             <div class="seg">
-              {["", ...DISCS].map((k) => <button key={k} class={sd === k ? "on" : ""} onClick={() => setQuery({ sd: k })}>{k ? DISC_LABEL[k] : "All"}</button>)}
+              {["", ...DISCS].map((k) => <button key={k} class={sd === k ? "on" : ""} onClick={() => setQuery({ sd: k })}>{k === "run" ? "Run" : k ? DISC_LABEL[k] : "All"}</button>)}
             </div>
             <div class="seg">
               {(["rh", "race", "hard", "bound", "implausible", "all"] as const).map((k) => <button key={k} class={sk === k ? "on" : ""} onClick={() => setQuery({ sk: k === "rh" ? null : k })}
@@ -270,14 +278,17 @@ export function FitnessPage() {
         <details class="howto">
           <summary><h2>How this is computed</h2></summary>
           <div class="prose">
-            <p>Each session becomes evidence for one discipline, on the <b>Daniels VDOT</b> scale (one number ↔ equivalent race times;
+            <p>Each session becomes evidence on the <b>Daniels VDOT</b> scale (one number ↔ equivalent race times;
               VDOT 55 ≈ 5k 18:22, 10k 38:06).</p>
             <ul>
-              <li><b>Interval</b>: critical-speed / W′-balance model. CS and D′ follow from VDOT; W′ drains above CS and recovers in the
+              <li><b>Run fitness</b>: all running evidence feeds one personal distance curve (your level plus how much stronger or weaker you
+                are at longer races, VDOT per doubling of distance). The number shown is that curve at 10 km; race times at
+                5k / 10k / half are read from the curve at each distance (Race predictor).</li>
+              <li><b>Run · interval</b> sessions: critical-speed / W′-balance model. CS and D′ follow from VDOT; W′ drains above CS and recovers in the
                 rests (Skiba τ × {doc.params.tau_scale}). The score is the lowest VDOT for which the whole session was just possible,
-                so <i>the same pace on shorter rest scores higher</i>. Offset {doc.params.interval_offset} calibrated on races. Races ≤ 7 km count here too.</li>
-              <li><b>Long distance</b>: best grade-adjusted 20–90 min window; tempo runs are hard evidence (+{doc.params.tempo_offset}),
-                races 10k+ are races, every other run is only a lower bound. Long evidence far above the interval shape is marked implausible.</li>
+                so <i>the same pace on shorter rest scores higher</i>. Offset {doc.params.interval_offset} calibrated on races; they count at 5 km, as do 5k races.</li>
+              <li><b>Run · distance</b> sessions: best grade-adjusted 20–90 min window; tempo runs are hard evidence (+{doc.params.tempo_offset}),
+                races 10k+ are races, every other run is only a lower bound. Distance evidence far above your 5 km level is marked implausible.</li>
               <li><b>Ski</b>: mechanical power (climb + rolling resistance + air drag) → O₂ demand at efficiency {doc.params.ski_eff},
                 best 20–90 min of moving time. Same unit, but the absolute level depends on the assumed efficiency.</li>
               <li><b>Smoothing</b>: a daily random walk (Kalman + RTS smoother) with robust, asymmetric weights: a training session far below
@@ -288,7 +299,9 @@ export function FitnessPage() {
                 “Performance only vs with heart rate” compares both variants on held-out data.</li>
               <li><b>Heart rate as a direct score correction</b> was tested and made race prediction worse (MAE 1.86 → 2.37 VDOT): the
                 FR935 wrist sensor under-reads hard intervals erratically and the watch change shifted HR by ~0.17 HRR. So HR only judges
-                intent in the With HR variant, and FR935 HR alone can never demote a session. Settings are tuned on few cases (in-sample).</li>
+                intent in the With HR variant. How much the HR counts depends on the watch and sensor (wrist / chest strap): each device
+                gets a trust from how well its HR follows the reps, and runs with implausible HR (dropouts, far too high for the pace) are
+                ignored. Max and resting HR are each person&apos;s own. Settings are tuned on few cases (in-sample).</li>
             </ul>
             <p class="muted">Full model, evaluation and limitations: <span class="mono">docs/fitness-model.md</span>. Engine:
               <span class="mono"> scripts/fitness_model.py</span> → <span class="mono">data/&lt;person&gt;/fitness.json</span>.</p>
@@ -308,7 +321,7 @@ export function FitnessPage() {
 
 type Better = "low" | "high";
 const EVAL_COLS: { key: keyof EvalDisc; label: string; better: Better; d: number; title: string }[] = [
-  { key: "race_mae", label: "Race MAE", better: "low", d: 2, title: "mean absolute error predicting race VDOT from the shape before the race, in VDOT (lower is better; interval / long only)" },
+  { key: "race_mae", label: "Race MAE", better: "low", d: 2, title: "mean absolute error predicting race VDOT from the shape before the race, in VDOT (lower is better; running only)" },
   { key: "forecast_mae", label: "Forecast MAE", better: "low", d: 2, title: "mean absolute error of the next hard session / race from the prior shape, in VDOT (lower is better)" },
   { key: "loglik", label: "Log-lik", better: "high", d: 3, title: "mean predictive log-likelihood of the next evidence (higher = better calibrated)" },
   { key: "r3_corr_prior_shape_vs_log_speed", label: "R3 corr", better: "high", d: 3,
@@ -338,7 +351,7 @@ function VariantSection({ doc, demoted }: { doc: FitnessDoc; demoted: FitSession
                     <th key={k.key + "h"} class="num" title={hl}>HR</th>])}</tr>
                 </thead>
                 <tbody>
-                  {DISCS.filter((d) => ev.pace?.[d] || ev.hr?.[d]).map((d) => {
+                  {(["interval", "long", "ski"] as SessDisc[]).filter((d) => ev.pace?.[d] || ev.hr?.[d]).map((d) => {
                     const p = ev.pace?.[d], h = ev.hr?.[d];
                     return (
                       <tr key={d}>

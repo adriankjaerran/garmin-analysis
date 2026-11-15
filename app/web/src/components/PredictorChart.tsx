@@ -1,4 +1,5 @@
-// Race predictor chart: daily VDOT at 5k / 10k / half (line + ±1 sd band) from /api/fitness/predictor, the
+// Race predictor chart: one line = Run fitness (the curve's VDOT at 10 km, ±1 sd band) from /api/fitness/predictor;
+// hovering a day shows the predicted 5k / 10k / half / marathon times (each from the curve at its own distance); evidence is drawn at its 10k equivalent (moved along that day's curve). The
 // evidence behind it as markers (race = diamond, other evidence = dot, paler = lower weight) and a vertical
 // marker on the selected day. Hover a marker -> what it was; click anywhere -> select that day (snapped to the
 // nearest day in `daily`).
@@ -10,18 +11,40 @@ import { useTheme } from "../lib/theme";
 import { dateAxis } from "../lib/chartAxes";
 
 interface PredDaily { date: string; vdot_5k: number; vdot_10k: number; vdot_half: number; sd_5k: number; sd_10k: number; sd_half: number }
-interface PredEvidence { date: string; id: string | number; km: number; vdot: number; kind: string; weight: number }
+interface PredEvidence { date: string; id: string | number; km: number; vdot: number; kind: string; weight: number; own?: number }
 export interface PredictorDoc {
   ref_km: number; evidence_km: [number, number]; daily: PredDaily[]; evidence: PredEvidence[];
-  last_evidence_date: string | null; today: string; distance_curve?: boolean;
+  last_evidence_date: string | null; today: string;
 }
 
-/** the three lines: key suffix in PredDaily, label, colour variable (predictor.css) */
+/** the drawn line: Run fitness = VDOT at 10 km (key suffix in PredDaily, label, colour variable in predictor.css) */
 export const PRED_LINES = [
-  { k: "5k", label: "5k", color: "--pred-5k" },
-  { k: "10k", label: "10k", color: "--pred-10k" },
-  { k: "half", label: "Half", color: "--pred-half" },
+  { k: "10k", label: "Run fitness (10k level)", color: "--pred-10k" },
 ] as const;
+/** distances in the hover: key suffix in PredDaily (VDOT at that distance; marathon uses the half's), metres */
+const HOVER_DIST = [
+  { k: "5k", label: "5k", m: 5000 },
+  { k: "10k", label: "10k", m: 10000 },
+  { k: "half", label: "Half", m: 21097.5 },
+] as const;
+
+/** Daniels & Gilbert: race time (s) over `m` metres at `vdot` (bisection on VO2(v) / %VO2max(t) = vdot) */
+export function raceTimeS(vdot: number, m: number): number {
+  const f = (t: number) => {
+    const v = (m / t) * 60, mins = t / 60;
+    const vo2 = -4.6 + 0.182258 * v + 0.000104 * v * v;
+    const pct = 0.8 + 0.1894393 * Math.exp(-0.012778 * mins) + 0.2989558 * Math.exp(-0.1932605 * mins);
+    return vo2 / pct - vdot;
+  };
+  let a = m / 10, b = m * 2;   // 10 m/s .. 0.5 m/s
+  for (let i = 0; i < 60; i++) { const c = (a + b) / 2; if (f(c) > 0) a = c; else b = c; }
+  return (a + b) / 2;
+}
+const hms = (s: number) => {
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`;
+};
 
 const ts = (d: string) => Date.parse(d + "T12:00:00Z") / 1000;
 function rgba(hex: string, a: number) {
@@ -69,7 +92,15 @@ export function PredictorChart({ doc, selected, onSelect, height = 340 }:
         { stroke: "transparent", width: 0, scale: "v", points: { show: false } });
       bands.push({ series: [base + 1, base + 2], fill: rgba(c, 0.09) });
     }
-    const pts = doc.evidence.map((e) => ({ e, t: ts(e.date) }));
+    // evidence at its 10k equivalent: own VDOT moved along that day's curve (slope from the 5k / 10k lines)
+    const byDate = new Map(days.map((d) => [d.date, d]));
+    const to10k = (e: PredEvidence) => {
+      const d = byDate.get(e.date);
+      if (!d || !e.km) return e.vdot;
+      const slope = d.vdot_10k - d.vdot_5k;   // per doubling
+      return e.vdot + slope * (1 - Math.log2(e.km / 5));
+    };
+    const pts = doc.evidence.map((e) => ({ e: { ...e, own: e.vdot, vdot: to10k(e) }, t: ts(e.date) }));
     // evidence widens the y range at most 3 VDOT beyond the bands; markers further out are clipped at the edge
     const wlo = lo, whi = hi;
     for (const p of pts) { lo = Math.min(lo, Math.max(p.e.vdot, wlo - 3)); hi = Math.max(hi, Math.min(p.e.vdot, whi + 3)); }
@@ -143,10 +174,10 @@ export function PredictorChart({ doc, selected, onSelect, height = 340 }:
       if (best) {
         const p = best.e;
         el.innerHTML = `<div class="t1"><b>${p.date}</b> ${p.kind === "race" ? "race" : esc(p.kind.replace(/_/g, " "))}, ${kmText(p.km)}</div>
-          <div class="muted">VDOT ${p.vdot.toFixed(1)} · weight ${(p.weight ?? 0).toFixed(2)}</div><div class="muted">click to select this day</div>`;
+          <div class="muted">VDOT ${(p.own ?? p.vdot).toFixed(1)} at ${kmText(p.km)} ≈ ${p.vdot.toFixed(1)} at 10k · weight ${(p.weight ?? 0).toFixed(2)}</div><div class="muted">click to select this day</div>`;
       } else if (dd) {
-        el.innerHTML = `<div class="t1"><b>${day}</b></div>
-          <div class="muted">${PRED_LINES.map((l) => `${l.label} ${((dd as any)["vdot_" + l.k] as number).toFixed(1)}`).join(" · ")}</div>`;
+        el.innerHTML = `<div class="t1"><b>${day}</b> Run fitness ${dd.vdot_10k.toFixed(1)} ± ${dd.sd_10k.toFixed(1)}</div>
+          <table class="pred-tip">${HOVER_DIST.map((h) => `<tr><td>${h.label}</td><td class="num">${hms(raceTimeS((dd as any)["vdot_" + h.k], h.m))}</td></tr>`).join("")}</table>`;
       } else { el.style.display = "none"; return; }
       el.style.display = "block";
       const px = best ? best.x : mx, py = best ? best.y : my;

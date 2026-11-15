@@ -1,7 +1,7 @@
 // Types and pure helpers for the Compare page (/api/compare, /api/compare/suggest): common x grid,
 // interpolation, median / quartile band, colours, x-axis labels per mode.
 import type { Activity } from "./api";
-import { dur } from "./format";
+import { dur, isErg } from "./format";
 
 export type Mode = "distance" | "moving" | "elapsed" | "intervals" | "breaks";
 export const MODES: { id: Mode; label: string; title: string }[] = [
@@ -219,6 +219,22 @@ export function pRange(vals: N[], lo = 0.03, hi = 0.97, pad = 0.12): [number, nu
 }
 
 export const kmhToPace = (v: N) => (v !== null && v >= 3 ? Math.min(3600 / v, 900) : null);
+
+/** pace display unit of a comparison (from the first session's sport). The engine's paces are s/km; `k` scales them
+ *  (1 = per km, 0.5 = per 500 m for Concept2 ergs: row, skierg). `fmt` = a scaled pace ("4:05" / "1:49.1"), `d` = an
+ *  absolute pace difference without unit ("3" / "1.4"), `tick` = axis ticks (no tenths) */
+export interface PaceUnit { erg: boolean; k: number; unit: string; su: string; mu: string; fmt: (v: number) => string; d: (a: number) => string; tick: (v: number) => string }
+/** seconds -> "m:ss.t" (erg pace, tenths like the monitor) */
+export function durT(s: number): string {
+  if (!isFinite(s)) return "—";
+  const neg = s < 0, t = Math.round(Math.abs(s) * 10) / 10, m = Math.floor(t / 60);
+  return (neg ? "−" : "") + `${m}:${(t - m * 60).toFixed(1).padStart(4, "0")}`;
+}
+const PU_KM: PaceUnit = { erg: false, k: 1, unit: "/km", su: "s/km", mu: "min/km", fmt: (v) => dur(v), d: (a) => `${Math.round(a)}`, tick: (v) => dur(v) };
+const PU_500: PaceUnit = { erg: true, k: 0.5, unit: "/500 m", su: "s/500 m", mu: "min/500 m", fmt: durT, d: (a) => a.toFixed(1), tick: (v) => dur(v) };
+export const paceUnit = (sport: string | null | undefined): PaceUnit => (isErg(sport) ? PU_500 : PU_KM);
+/** an engine pace (s/km) in the display unit */
+export const scaleP = (pu: PaceUnit, v: N | undefined): N | undefined => (v === null || v === undefined ? v : v * pu.k);
 
 /** rep slot label: anchor slots "Rep 3"; extra reps (a session had more reps than the anchor) "extra after R1" */
 export function slotName(s: { label: string; anchor: boolean }, short = false): string {

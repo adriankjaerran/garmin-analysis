@@ -38,7 +38,12 @@ Adrian has used two watches (from FIT `file_id`, checked on 32 files). The switc
 - Power and running dynamics exist only on the 4315 (from 2026-02-24). The FR935's `temperature` is the wrist sensor
   (biased by body heat), so it isn't the weather. No file has weather.
 - Patrik's watch (product 3077) records every 4–6 s (median gap 3–4 s) with HR, cadence and GPS-only
-  `enhanced_altitude`. It has no power, dynamics or temperature.
+  `enhanced_altitude`. It has no power, dynamics or temperature. Adrian's account has 6 runs of 2021 recorded on it
+  (same serial, 3350348757): his runs on a borrowed watch (`hr_settings.json` `borrowed_from`).
+- Rise's watch is a fenix 3 HR (product 2413, `fenix3_hr`), wrist HR, and from 2024-10 sometimes a chest strap.
+- **Which watch and HR sensor:** `file_id` gives the watch (product + serial); an external HR sensor shows up as a
+  `device_info` entry of ANT+ / BLE device type 120 (heart rate). `hr_settings.py` keys devices this way
+  (`fr935/wrist`, `fenix3_hr/strap`, ...; [data-layout.md](data-layout.md#profilehr_settingsjson-scriptshr_settingspy-version-2)).
 - HR and cadence are in **every** run file from both watches (and in every run's summary in the list).
 - GPS mode (GPS only / all systems / multi-band) is **not decodable** from either watch's FIT.
 - Without downloading: in the activity list, `avgPower` present ⇔ the new watch (holds for all 492 runs).
@@ -62,6 +67,7 @@ from structured workouts) and **`lap_trigger`** (manual / distance / session_end
 | `position_lat/long` | In track mode snapped to the track model (constant offset), so lane changes aren't visible |
 | `cadence` | Late and noisy at transitions (median +5 s, −5..+8 s) |
 | `heart_rate` | Physiological lag of tens of seconds |
+| `altitude` (FR935 barometer) | From 2024 reads 10–35 m high during hard reps and sinks back while standing; the fitness model levels it on revisited positions (`level_alt`, [fitness-model.md](fitness-model.md#per-session-scores)) |
 
 Use Δ`distance` per second as speed for timing, never `enhanced_speed`.
 

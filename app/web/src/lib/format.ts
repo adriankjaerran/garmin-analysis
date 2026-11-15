@@ -1,7 +1,9 @@
 import type { Sport } from "./api";
 
-export const SPORT_LABEL: Record<string, string> = { run: "Run", ski: "Ski", hike: "Hike", bike: "Bike", swim: "Swim", other: "Other" };
-export const SPORTS: Sport[] = ["run", "ski", "hike", "bike", "swim", "other"];
+export const SPORT_LABEL: Record<string, string> = { run: "Run", ski: "Ski", row: "Row", skierg: "SkiErg", hike: "Hike", bike: "Bike", swim: "Swim", other: "Other" };
+export const SPORTS: Sport[] = ["run", "ski", "row", "skierg", "hike", "bike", "swim", "other"];
+/** Concept2 erg sports (RowErg, SkiErg): pace /500 m; machine metres don't count in km totals */
+export const isErg = (sport: string | null | undefined) => sport === "row" || sport === "skierg";
 
 const cssCache: Record<string, string> = {};
 export function cssVar(name: string): string {
@@ -26,6 +28,12 @@ export function pace100(ms: number | null | undefined): string {
   if (!ms || ms <= 0.1) return "—";
   return dur(100 / ms);
 }
+/** m/s -> "m:ss.t" per 500 m (Concept2 erg pace, tenths like the monitor: "1:49.1") */
+export function pace500(ms: number | null | undefined): string {
+  if (!ms || ms <= 0.3) return "—";
+  const t = Math.round((500 / ms) * 10) / 10;
+  return `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
+}
 /** m/s -> "m:ss" per km */
 export function pace(ms: number | null | undefined): string {
   if (!ms || ms <= 0.3) return "—";
@@ -47,7 +55,8 @@ export const time = (start: string) => start.slice(11, 16);
 /** Session type ids from groups.json -> readable */
 export function stypeLabel(t: string | null | undefined): string {
   if (!t) return "";
-  return t.replace("intervals_", "intervals ").replace("ski_", "ski ").replace("run_", "").replace(/_/g, " ").replace("?", "");
+  if (t === "erg_piece") return "short piece";
+  return t.replace("intervals_", "intervals ").replace("ski_", "ski ").replace("erg_", "").replace("run_", "").replace(/_/g, " ").replace("?", "");
 }
 export const typeLabel = (t: string) => t.replace("_ws", "").replace("_v2", "").replace(/_/g, " ");
 /** seconds -> "h:mm" (rounded to whole minutes; negative -> "−h:mm") */
@@ -69,14 +78,14 @@ export const isoLocal = (d = new Date()) => `${d.getFullYear()}-${String(d.getMo
 export const daysBetween = (a: string, b: string) => Math.round((new Date(b + "T12:00:00").getTime() - new Date(a + "T12:00:00").getTime()) / 864e5);
 
 // ------------------------------------------------------------------ shared vocabulary (docs/app.md#vocabulary)
-/** sports shown as pace (m:ss /km): on foot (run, walk, hike). Ski, bike and other are km/h, swims /100 m. */
+/** sports shown as pace (m:ss /km): on foot (run, walk, hike). Ski, bike and other are km/h, swims /100 m, ergs /500 m. */
 export const onFoot = (sport: string | null | undefined) => sport === "run" || sport === "hike" || sport === "walk";
 /** unit of the speed / pace of a sport: "/km", "/100 m", "km/h" */
-export const speedUnit = (sport: string | null | undefined) => (onFoot(sport) ? "/km" : sport === "swim" ? "/100 m" : "km/h");
+export const speedUnit = (sport: string | null | undefined) => (onFoot(sport) ? "/km" : sport === "swim" ? "/100 m" : isErg(sport) ? "/500 m" : "km/h");
 /** speed / pace value without the unit, in the sport's unit: "3:29" (/km), "1:52" (/100 m), "12.1" (km/h) */
 export function speedVal(sport: string | null | undefined, ms: number | null | undefined): string {
   if (!ms || !isFinite(ms) || ms <= 0) return "—";
-  return onFoot(sport) ? pace(ms) : sport === "swim" ? pace100(ms) : kmh(ms);
+  return onFoot(sport) ? pace(ms) : sport === "swim" ? pace100(ms) : isErg(sport) ? pace500(ms) : kmh(ms);
 }
 /** speed / pace with its unit: "3:29 /km" for run / walk / hike, "1:52 /100 m" for swims, "12.1 km/h" else */
 export function speedText(sport: string | null | undefined, ms: number | null | undefined): string {
@@ -84,7 +93,7 @@ export function speedText(sport: string | null | undefined, ms: number | null | 
   return v === "—" ? v : `${v} ${speedUnit(sport)}`;
 }
 /** "Pace" or "Speed" for a column / axis header */
-export const speedLabel = (sport: string | null | undefined) => (onFoot(sport) || sport === "swim" ? "Pace" : "Speed");
+export const speedLabel = (sport: string | null | undefined) => (onFoot(sport) || sport === "swim" || isErg(sport) ? "Pace" : "Speed");
 /** seconds with a unit: "45 s", "9.4 s" (d decimals below 60 s), ≥ 60 s as "1:17" / "1:02:03" */
 export function secs(s: number | null | undefined, d = 0): string {
   if (s === null || s === undefined || !isFinite(s)) return "—";

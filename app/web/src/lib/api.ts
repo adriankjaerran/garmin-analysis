@@ -3,7 +3,23 @@
 import { useEffect, useState } from "preact/hooks";
 import { currentPerson, splitPerson } from "./router";
 
-export type Sport = "run" | "ski" | "hike" | "bike" | "swim" | "other";
+export type Sport = "run" | "ski" | "row" | "skierg" | "hike" | "bike" | "swim" | "other";
+/** one Concept2 split / interval (seconds, metres) */
+export interface ErgInterval { type?: string; time_s: number; dist_m?: number; spm?: number; kcal?: number; rest_s?: number; rest_m?: number; hr?: number; target_pace_s?: number; machine?: string }
+/** Concept2 erg extras of an activity (store.erg_info) */
+export interface ErgInfo {
+  machine: string | null; workout_type: string | null; pace_500_s: number | null; pace_unit: string; watts: number | null; spm: number | null;
+  drag_factor: number | null; stroke_count: number | null; work_s: number | null; rest_s: number | null; rest_m: number | null;
+  comments: string | null; intervals: ErgInterval[] | null; splits: ErgInterval[] | null; logbook_url: string | null;
+  /** shared machine (concept2.clean): friends took turns; the activity is this person's turns only */
+  shared?: { slot_s: number; pattern: string; on_s: number; off_s: number; others_pace_500_s: number; logbook_time_s: number;
+    logbook_dist_m: number; forced: boolean; contrast: number; n_turns: number;
+    /** a second, unrecorded machine in the rotation: its Logbook total, this person's metres there (estimated) */
+    second_machine?: { logbook_dist_m: number; ratio: number; est_m: number; time_s: number; on_here_s: number; off_here_s: number } | null } | null;
+  /** hand-logged session (concept2 manual.json): not recorded, the monitors' totals; no per-person split */
+  manual?: { source: string; people: string[]; on_s: number; off_s: number; rounds: number; session_s: number;
+    machines: { dist_m: number; time_s: number; pace_500_s: number }[]; total_m: number } | null;
+}
 
 export interface Activity {
   id: string; start: string; date: string; name: string | null; type: string; sport: Sport;
@@ -25,6 +41,8 @@ export interface Activity {
   /** false = the watch distance isn't trusted (indoor / no GPS): dist_km is kept but lists show dist_est_km
    *  ("≈ 9.2", lap-based estimate, why in dist_note) or "—"; km totals and pace leave it out */
   dist_trusted?: boolean | null; dist_est_km?: number | null; dist_note?: string | null;
+  /** Concept2 erg session (RowErg / SkiErg): machine, pace /500 m, watts, stroke rate, intervals; null otherwise */
+  erg?: ErgInfo | null;
 }
 export interface TogetherLink { gid: string; label: string; kind: string; role: string; with: string[]; workout?: string | null }
 interface SwimSummary { pool_m: number | null; lengths?: number; n_lengths?: number; dist_m: number | null; active_s: number | null;
@@ -41,7 +59,7 @@ export interface Series { cols: string[]; t: number[]; lat?: (number | null)[]; 
 export interface Lap { start: number | null; time: number | null; timer: number | null; dist: number | null; speed: number | null;
   hr: number | null; maxhr: number | null; climb: number | null; desc: number | null; intensity: string | null; trigger: string | null;
   kind?: "swim" | "rest" | null; swim_s?: number | null; pace_100m_s?: number | null }
-interface Rep { start?: number; end?: number; time?: number; time_s?: number; dist?: number; dist_m?: number;
+export interface Rep { start?: number; end?: number; time?: number; time_s?: number; dist?: number; dist_m?: number;
   speed?: number; speed_ms?: number; hr: number | null; maxhr?: number | null;
   gps_dist?: number; dist_source?: string }  // dist_source "track_set": track rep counted as its set distance, gps_dist = measured
 export interface Leg { t: number; dur_s: number; dist_m: number; kmh: number; hr: number | null; hr_max: number | null;
@@ -111,9 +129,6 @@ export function get<T>(url: string): Promise<T> {
   return p;
 }
 
-/** drop every memoised GET (after a setting changes what the server returns, e.g. PUT /api/settings) */
-export function forgetAll(): void { memo.clear(); }
-
 export function qs(params: Record<string, string | number | null | undefined>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined && v !== "") q.set(k, String(v));
@@ -134,4 +149,36 @@ export function useApi<T>(url: string | null): { data: T | null; error: string |
     return () => { live = false; };
   }, [url]);
   return st;
+}
+
+// ------------------------------------------------------------------ erg trend (Concept2 RowErg / SkiErg)
+// GET /api/fitness/erg -> data/<p>/erg_fitness.json (scripts/erg_fitness.py, docs/erg.md). Paces in s /500 m
+// (2k-equivalent by Paul's law), watts = 2.80 / (s per m)³. `machines` is empty without Concept2 data.
+export type ErgMachine = "row" | "skierg";
+export type ErgKind = "test" | "piece" | "intervals" | "warmup" | "ignored";
+export interface ErgPoint { date: string; pace: number; sd: number; pace_fast: number; pace_slow: number; watts: number }
+export interface ErgCurrent extends ErgPoint {
+  pace_text: string; watts_fast: number; watts_slow: number; time_2k_s: number;
+  last_evidence_date: string | null; days_since_evidence: number | null; stale: boolean; trend_90d_s: number | null;
+}
+export interface ErgPbDistance { m: number; pace: number; time_s: number; watts: number; id: string; date: string; label: string;
+  what: string; piece_m: number; piece_s: number; exact: boolean }
+export interface ErgPbDuration { s: number; watts: number; pace: number; id: string; date: string; label: string; what: string;
+  piece_s: number; exact: boolean }
+export interface ErgMachineDoc {
+  label: string; unit: string; current: ErgCurrent; daily: ErgPoint[]; weekly: ErgPoint[];
+  personal_bests: { best_2k_equivalent: { pace: number; watts: number; id: string; date: string; label: string; kind: ErgKind } | null;
+    distances: ErgPbDistance[]; durations: ErgPbDuration[] };
+  n_sessions: number; n_scored: number; first_date: string; last_date: string;
+}
+export interface ErgSession {
+  id: string; date: string; start: string; machine: ErgMachine; label: string; workout_type: string | null; kind: ErgKind;
+  reason?: string; work_s: number; work_m: number; rest_s?: number; n_reps?: number; work_share?: number;
+  pace?: number; watts?: number; d_eff_s?: number; d_eff_m?: number; pace_2k?: number; watts_2k?: number;
+  pace_text?: string; pace_2k_text?: string; sigma?: number; weight?: number; trend_pace?: number; delta_s?: number;
+  drag_factor?: number | null; stroke_rate?: number | null;
+}
+export interface ErgDoc {
+  built: string | null; today?: string; model_version?: number; params?: Record<string, unknown>; scale?: string;
+  machines: Partial<Record<ErgMachine, ErgMachineDoc>>; sessions: ErgSession[];
 }

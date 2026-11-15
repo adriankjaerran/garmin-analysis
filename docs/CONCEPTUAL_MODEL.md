@@ -6,18 +6,21 @@ All data is local (`data/`, gitignored). The app and the report only read files 
 ## 1. Data flow
 
 ```
- Garmin Personal API
-        │  fetch_index.py / fetch_activities.py / fetch_daily.py   (scripts/garmin_client.py: tokens, throttle, 429s)
-        ▼
- data/<person>/  activities_index.json   activities/<date>_<id>_<type>/{activity,details,…}.json + <id>.fit
+ Garmin Personal API                                     Concept2 Logbook API (RowErg, SkiErg; docs/concept2.md)
+        │  fetch_index.py / fetch_activities.py / fetch_daily.py     │  fetch_concept2.py → concept2/ + concept2.sync
+        ▼  (scripts/garmin_client.py: tokens, throttle, 429s)        ▼  (Garmin-style rows, FIT links in activities/)
+ data/<person>/  activities_index.json + concept2/activities_index.json (concept2.load_index merges them)
+                 activities/<date>_<id>_<type>/{activity,details,…}.json + <id>.fit
                  daily/<date>/…   ranges/…   profile/{user_settings,heart_rate_zones}.json
         │
-        ├─ session_groups.py ──► groups.json            places, areas, routes, legs, pauses, session types, reps
-        │        │                                     (uses run_analysis.py + ski_intervals.py rep detectors)
+        ├─ session_groups.py ──► groups.json            places, areas, routes, legs, pauses, session types, reps,
+        │        │                                     tracks (uses run_analysis.py + ski_intervals.py rep detectors;
+        │        │                                     + session_overrides.json, hr_settings.json flags)
         │        ├─ similarity.py ──► similarity_index.json + tracks.json   workout hierarchy, main place, nearest
-        │        └─ fitness_model.py ──► fitness.json   shape per discipline, distance curve, race prediction
+        │        ├─ hr_settings.py ──► profile/hr_settings.json  max / resting HR, per-device trust, HR flags
+        │        └─ fitness_model.py ──► fitness.json   shape per discipline, distance curve, race prediction, races
+        │                 │   (+ data/races.json, hr_settings.json)
         │                 └─ form_delta.py ──► cache/form_delta.json        session score − form (on demand)
-        ├─ hr_settings.py ──► profile/hr_settings.json  max / resting HR (session types, Together effort)
         └─ garmin-app-cache (app/server/fitcache.py) ──► cache/series/<id>.npz + cache/tracks.json
                                                                                    │
  all people ─► together.py build ──► data/together.json   (+ data/_together/*.pkl)  │
@@ -31,9 +34,11 @@ All data is local (`data/`, gitignored). The app and the report only read files 
 | `data/<p>/activities_index.json`, `activities/…/<id>.fit` | `scripts/fetch_index.py`, `scripts/fetch_activities.py` | everything |
 | `data/<p>/groups.json` (`places`, `areas`, `routes`, `activities`) | `scripts/session_groups.py` | similarity, fitness, compare, together, app, report |
 | `data/<p>/similarity_index.json`, `tracks.json` | `scripts/similarity.py build` | app (place model, route names, search, nearest) |
-| `data/<p>/fitness.json` | `scripts/fitness_model.py` (also the app's `POST /api/fitness/rebuild`) | app Fitness / Race predictor / Shape, `form_delta` |
-| `data/<p>/profile/hr_settings.json` | `scripts/hr_settings.py` (`"source": "manual"` is never overwritten) | session types (steady vs easy), Together effort |
-| `data/<p>/settings.json` (optional) | the app, `PUT /api/<p>/settings` (`scripts/person_settings.py`) | fitness model / form delta (`distance_curve` on/off) |
+| `data/<p>/fitness.json` | `scripts/fitness_model.py` (also the app's `POST /api/fitness/rebuild`) | app Fitness / Race predictor / Races / Shape, `form_delta` |
+| `data/<p>/profile/hr_settings.json` | `scripts/hr_settings.py` (after session_groups; `"source": "manual"` is never overwritten, `manual` values survive) | fitness model (HR variant: max / rest HR, device trust), session types (steady vs easy), Together effort |
+| `data/<p>/session_overrides.json` (optional, hand-edited) | you | session_groups (type), fitness model (`exclude` / `bound`) |
+| `data/races.json` (optional, hand-edited) | you | fitness model (official races, `not_races`, `tests`), `calibration_set.py`, app Races |
+| `data/calibration.json` (optional, hand-edited) | you | `calibration_set.py` (who calibrates the shared fitness parameters) |
 | `data/<p>/cache/series/<id>.npz`, `cache/tracks.json` | `garmin-app-cache` (`app/server/fitcache.py:main`), also at server start | app activity pages, maps |
 | `data/together.json` | `scripts/together.py build` (runs once, over every person) | app Together / Community, workout label |
 | `data/community.json`, `data/_community/photos/` | the app (`/api/community/…`, `scripts/community.py`) | Community pages |
@@ -57,8 +62,10 @@ the same way (`fitcache.read_fit`). `sport` (run, ski, hike, …) and the analys
 
 **Session type** — rule-based label per activity in `session_groups.py`: runs → `intervals_track` /
 `intervals_road` / `intervals_treadmill`, `tempo`, `long`, `steady`, `easy`, `race?`, `run_nogps`, `run_other`;
-ski → `ski_intervals` / `ski_easy` / `ski_hard` / `ski_long`; other sports keep their Garmin type. Helpers:
-`recovery_share` (intervals need real recoveries), `steady_or_easy`, `multisport_family`, `pool_swim`.
+ski → `ski_intervals` / `ski_easy` / `ski_hard` / `ski_long`; Concept2 ergs (`row`, `skierg`) → `erg_intervals` /
+`erg_piece` / `erg_steady` (reps = the erg's own intervals, [concept2.md](concept2.md)); other sports keep their Garmin type. Helpers:
+`recovery_share` (intervals need real recoveries), `steady_or_easy`, `multisport_family`, `pool_swim`. Track vs
+road is where the reps happen (`run_track`, `TRACKS`). User corrections (`session_overrides.json`) win.
 [session-groups.md](session-groups.md).
 
 **Workout structure** — what happened inside a session:
@@ -96,14 +103,21 @@ common stops (waypoints) or ~1 km pieces, with each member's time / rank (`route
 `/api/search`, `/api/groups`. (`groups.json` also has an older top-5 `similar` list.) [similarity.md](similarity.md).
 
 **Shape** — fitness on the Daniels VDOT scale, `scripts/fitness_model.py` → `fitness.json`:
-- *Disciplines*: `interval`, `long`, `ski`, plus `overall` (% of personal best, precision-weighted).
+- *Disciplines*: `run` ("Run fitness"), `ski`, plus `overall` (% of personal best, precision-weighted); `interval` /
+  `long` are legacy read-outs of the run curve, not shown.
 - *Evidence*: per session 0..n scored items (`collect_evidence`): races, interval sessions (W′-balance model),
-  tempo / long windows, ski (mechanical power → VO2); kinds `race`, `hard`, `bound` (lower bound only).
+  tempo / long windows, ski (mechanical power → VO2); kinds `race`, `hard`, `bound` (lower bound only). Official
+  results in `data/races.json` make a session a race at its chip time (confirmed `tests` / time trials too, as race
+  evidence at their own distance, but not official races); `session_overrides.json` can exclude a session
+  or make it a bound.
 - *Personal distance curve* (`smooth_curve`, `CURVE`): running is one model, VDOT(km) = θ + s·log2(km/5);
-  `interval` = curve at 5 km, `long` = curve at 14.5 km. Ski uses its own `smooth_series`. Per person it can be
-  switched off (`settings.json` `distance_curve`).
+  `run` = curve at 10 km (the one running number the app shows, "Run fitness"); legacy read-outs `interval` = 5 km,
+  `long` = 14.5 km. Ski uses its own `smooth_series`.
 - *Race prediction*: `race_prediction` / `race_equivalents_s` (via `race_time(vdot, dist)`), app page
-  `/predictor`, `/api/fitness/predict`.
+  `/predictor`, `/api/fitness/predict`. Past races: `races` with the pre-race prediction (`pre_race_prediction`,
+  data strictly before race day).
+- *Calibration set* (`calibration_set.py`): shared parameters (offsets, τ, σ, priors) are chosen on persons with ≥ 30
+  trusted interval sessions and ≥ 2 races (adrian, rise); others are validation only.
 - *Stale*: no race / hard evidence for > `STALE_DAYS` (90) → greyed in the app.
 - *Form delta* (`scripts/form_delta.py:form_delta`): session score − shape the day before from a leave-one-out
   refit, at the session's own distance; `None` for bounds (easy / long runs, hikes).
@@ -150,9 +164,11 @@ user metadata from `data/community.json` (title, note, guests, photos, kudos, hi
 - **One rep list everywhere.** groups.json reps feed compare, together, similarity, the app's Reps tab and the
   workout label (ski / indoor reps via `fitcache.reps_from_groups`).
 - **HR is not a shape input.** Tested three ways (effort adjustment, HR-only aerobic estimate, plausibility gate);
-  all made forecasts worse because wrist HR under-reads hard intervals erratically and shifts with the watch. HR is
-  diagnostics only (`hr_used_in_score: false`). HR *is* used for classification (steady vs easy, ski hard / reps)
-  and for effort (% HR reserve) in Together.
+  all made forecasts worse because wrist HR under-reads hard intervals erratically and shifts with the watch. Scores
+  never use HR (`hr_used_in_score: false` for the default pace variant); the `hr` variant only uses it to judge
+  whether a hard session was maximal, weighted by the device's trust. HR *is* used for classification (steady vs
+  easy, ski hard / reps) and for effort (% HR reserve) in Together, with the person's own max / rest HR and
+  implausible-HR flags from `hr_settings.json`.
 - **Shape is performance-only and honest about gaps.** Easy runs are lower bounds, uncertainty grows without
   evidence, stale values are flagged, no gain is extrapolated past the longest evidenced distance.
 - **Stable ids, changeable names.** Place ids, route ids and Together gids stay stable across rebuilds (Together
@@ -182,7 +198,13 @@ user metadata from `data/community.json` (title, note, guests, photos, kudos, hi
 | area, region | start clusters chained at 2 km / named regions from the similarity index |
 | dist_trusted | distance is GPS-backed (or pool lengths); else excluded from totals and paces |
 | Bislett indoor | winter laps of the 546.5 m indoor track, reps from laps, distance untrusted |
-| shape | VDOT-scale fitness per discipline (interval, long, ski, overall) |
+| shape | VDOT-scale fitness per discipline (run, ski, overall) |
+| Run fitness | the personal distance curve at 10 km (10k-equivalent VDOT), `disciplines.run` |
+| official race, not_races | user-supplied result in `data/races.json` / an auto-detected `race?` the user says wasn't one |
+| test (time trial) | user-confirmed all-out effort in `data/races.json` `tests`: race evidence (σ 1.0, own distance), not an official race |
+| session override | `session_overrides.json`: corrected type, `fitness: exclude \| bound` |
+| track, loop | known running track by rep location (`TRACKS`: Bislett, Øya stadion: flat); Frogner stadion is a loop (road with grade, reps at whole laps) |
+| device trust | how much a watch + HR source's HR is believed (0..1, `hr_settings.json`) |
 | VDOT | Daniels "running VO2max from performance"; maps to race times |
 | evidence (race / hard / bound) | per-session score item; bound = lower bound only |
 | distance curve, θ, slope | VDOT at 5 km and change per doubling of distance |

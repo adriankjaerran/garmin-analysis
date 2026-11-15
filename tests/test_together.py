@@ -115,7 +115,8 @@ def test_replay_segments_and_passes(client):
     s1 = d["segments"][0]
     assert set(s1["people"]) == {"adrian", "patrik"} and s1["target_m"] == 400
     assert s1["total"]["adrian"]["rank"] == 1 and s1["moves"] == []          # same reps so far: ranked, adrian ahead
-    assert d["segments"][9]["total"]["patrik"]["gap_s"] == pytest.approx(78.4, abs=0.2)
+    # patrik's 3 s watch: his lap presses are the rep times (86.1 … 81.8 s; was 78.4 from his detector reps)
+    assert d["segments"][9]["total"]["patrik"]["gap_s"] == pytest.approx(81.1, abs=0.2)
     # rep 11 only adrian ran: his own time so far (11 reps), not a race
     t11 = d["segments"][10]["total"]
     assert set(t11) == {"adrian"} and t11["adrian"]["n"] == 11 and len(d["segments"][10]["people"]) == 1

@@ -24,9 +24,13 @@ FAMILY = {
     "hiking": "hike", "walking": "hike",
     "cycling": "bike", "road_biking": "bike", "mountain_biking": "bike", "indoor_cycling": "bike",
     "lap_swimming": "swim", "open_water_swimming": "swim",
+    # Concept2 ergs (scripts/concept2.py): RowErg -> row, SkiErg -> skierg, BikeErg -> bike
+    "indoor_rowing": "row", "skierg": "skierg", "bikeerg": "bike",
 }
-SPORTS = ["run", "ski", "hike", "bike", "swim", "other"]
-SPORT_LABEL = {"run": "Run", "ski": "Ski", "hike": "Hike", "bike": "Bike", "swim": "Swim", "other": "Other"}
+SPORTS = ["run", "ski", "row", "skierg", "hike", "bike", "swim", "other"]
+SPORT_LABEL = {"run": "Run", "ski": "Ski", "row": "Row", "skierg": "SkiErg", "hike": "Hike", "bike": "Bike",
+               "swim": "Swim", "other": "Other"}
+ERG_SPORTS = ("row", "skierg")   # machine metres: shown, but not part of km totals (volume_km); time counts
 
 
 def family(type_key: str | None, ga: dict | None = None) -> str:
@@ -87,7 +91,7 @@ def rep_pace(reps: list | None, w: dict, sport: str, track: bool = False) -> flo
         return None
     try:
         import similarity as sim
-        parts = sim.rep_parts(reps, sport == "ski")
+        parts = sim.rep_parts(reps, sport == "ski", sport in ERG_SPORTS)
         g = parts[w.get("main_part") or 0] if len(parts) == len(w.get("parts") or parts) else max(parts, key=len)
     except Exception:  # noqa: BLE001 — a label helper must not take the list down
         return w.get("rep_speed_ms")
@@ -106,7 +110,7 @@ def rep_hr(reps: list | None, w: dict, sport: str) -> int | None:
         return None
     try:
         import similarity as sim
-        parts = sim.rep_parts(reps, sport == "ski")
+        parts = sim.rep_parts(reps, sport == "ski", sport in ERG_SPORTS)
         g = parts[w.get("main_part") or 0] if len(parts) == len(w.get("parts") or parts) else max(parts, key=len)
     except Exception:  # noqa: BLE001
         g = range(len(reps))
@@ -174,8 +178,30 @@ def _json(p: Path):
 
 
 def volume_km(a: dict) -> float:
-    """km that count in totals: the trusted distance, else 0 (an untrusted distance or its estimate doesn't)"""
-    return 0.0 if a.get("dist_trusted") is False else (a.get("dist_km") or 0.0)
+    """km that count in totals: the trusted distance, else 0 (an untrusted distance or its estimate doesn't).
+    Erg metres (row, SkiErg; `erg` on the row) never count: they aren't comparable to km on foot or on snow."""
+    return 0.0 if a.get("dist_trusted") is False or a.get("erg") else (a.get("dist_km") or 0.0)
+
+
+def erg_info(a: dict, ga: dict) -> dict | None:
+    """Concept2 extras of an erg row (index row `c2`, scripts/concept2.py): machine, workout type, average pace per
+    500 m (work time / work distance), watts, stroke rate, drag factor, rest time, Concept2 intervals / splits"""
+    c = a.get("c2")
+    if not c:
+        return None
+    import concept2 as c2m
+    tk = a["activityType"]["typeKey"]
+    work, dist = a.get("movingDuration") or 0, a.get("distance") or 0
+    p500 = work / dist * (1000 if tk == "bikeerg" else 500) if work and dist else None
+    return {"machine": c2m.MACHINE.get(tk), "workout_type": c.get("workout_type"), "pace_500_s": _r(p500, 1),
+            "pace_unit": "/1000 m" if tk == "bikeerg" else "/500 m", "watts": a.get("avgPower"),
+            "spm": a.get("averageStrokeRate"), "drag_factor": c.get("drag_factor"), "stroke_count": c.get("stroke_count"),
+            "work_s": _r(work, 1), "rest_s": c.get("rest_time_s"), "rest_m": c.get("rest_distance"),
+            "comments": c.get("comments"), "intervals": c.get("intervals"), "splits": c.get("splits"),
+            # shared machine (concept2.clean): own turns only; Logbook totals, turn pattern, the others' pace
+            "shared": c.get("shared"),
+            "manual": c.get("manual"),   # hand-logged (concept2 manual.json): the monitors' totals, who was there
+            "logbook_url": f"https://log.concept2.com/profile/{c['user_id']}/log/{a['activityId']}" if c.get("user_id") else None}
 
 
 class Store:
@@ -228,12 +254,13 @@ class Store:
         return self._memoize("folders", lambda: [d], build)
 
     def activities(self) -> list[dict]:
-        idx = self.dir / "activities_index.json"
+        import concept2 as c2m
+        idx = c2m.index_paths(self.dir)   # Garmin index + Concept2 erg rows
         gp = self.dir / "groups.json"
         tp = self.cache_dir / "tracks.json"
         sx = self.dir / "similarity_index.json"
         tj = ROOT / "data" / "together.json"   # cross-person groups (scripts/together.py): the `together` link
-        return self._memoize("activities", lambda: [idx, gp, tp, sx, tj, self.dir / "activities"], self._build_activities)
+        return self._memoize("activities", lambda: [*idx, gp, tp, sx, tj, self.dir / "activities"], self._build_activities)
 
     def together_links(self) -> dict[str, dict]:
         """{activity id: {gid, label, kind, role, with: [person, ...]}} for this person's activities in a visible
@@ -262,7 +289,8 @@ class Store:
         tog = self.together_links()
         speeds = easy_speeds(g)
         out = []
-        for a in _json(self.dir / "activities_index.json"):
+        import concept2 as c2m
+        for a in c2m.load_index(self.dir):   # Garmin activities + Concept2 erg workouts
             aid = str(a["activityId"])
             ga = g.get(aid) or {}
             tk = a["activityType"]["typeKey"]
@@ -321,6 +349,7 @@ class Store:
                 "fit": bool(folder and any(folder.glob("*.fit"))),
                 "track": aid in tracks,
                 "together": tog.get(aid),   # {gid, label, kind, role, with} when run with others (null otherwise)
+                "erg": erg_info(a, ga),     # Concept2 erg session: machine, pace /500 m, watts, stroke rate, intervals
             })
         out.sort(key=lambda x: x["start"], reverse=True)
         return out
@@ -369,9 +398,10 @@ class Store:
             return None
         npz = self.cache_dir / "series" / f"{aid}.npz"
         fm = fit.stat().st_mtime_ns
+        nm = npz.stat().st_mtime_ns if npz.exists() else 0   # fitcache rewrites the npz (reps from groups.json)
         with self._lock:
             hit = self._series.get(aid)
-            if hit and hit[0] == fm:
+            if hit and hit[0] == (fm, nm):
                 self._series.move_to_end(aid)
                 return hit[1], hit[2]
         arr = meta = None
@@ -388,8 +418,9 @@ class Store:
             arr, meta = x["arr"], (fitcache.carry_reps(x["meta"], npz) if fresh else x["meta"])
             npz.parent.mkdir(parents=True, exist_ok=True)
             fitcache.save_npz(npz, arr, meta)
+            nm = npz.stat().st_mtime_ns
         with self._lock:
-            self._series[aid] = (fm, arr, meta)
+            self._series[aid] = ((fm, nm), arr, meta)
             while len(self._series) > 64:
                 self._series.popitem(last=False)
         return arr, meta

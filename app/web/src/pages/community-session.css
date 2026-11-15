@@ -123,3 +123,9 @@
   .cs-share-prev img { max-width: 300px; }
 }
 @media (max-width: 500px) { .tg-tbl.cs-sp .set { display: none; } }
+
+/* Splits: the gap to the rep's leader / the one ahead after the time (+Leader / +Next) */
+.cs-sp .gap { margin-left: 6px; font-size: var(--fs-12); font-weight: var(--fw-regular); color: var(--text-muted); }
+.cs-sp th.pgrp.drag { cursor: grab; user-select: none; }
+.cs-sp th.pgrp.dragging { opacity: 0.4; }
+.cs-sp th.pgrp.over { background: var(--accent-surface); }

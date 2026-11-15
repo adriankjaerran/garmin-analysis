@@ -1,0 +1,26 @@
+/* Races (pages/RacesPage.tsx) and Community · Races (pages/CommunityRacesPage.tsx) */
+/* index: green = faster than predicted (stronger = more), red = slower, neutral near 0 */
+.rx-idx { display: inline-block; min-width: 58px; text-align: right; padding: 1px 6px; border-radius: 3px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rx-idx.n { color: var(--text-muted); }
+.rx-idx.g1 { color: var(--state-good); background: color-mix(in srgb, var(--state-good) 10%, transparent); }
+.rx-idx.g2 { color: var(--state-good); background: color-mix(in srgb, var(--state-good) 22%, transparent); font-weight: 600; }
+.rx-idx.g3 { color: #fff; background: var(--state-good); font-weight: 600; }
+.rx-idx.r1 { color: var(--state-duplicate); background: color-mix(in srgb, var(--state-duplicate) 8%, transparent); }
+.rx-idx.r2 { color: var(--state-duplicate); background: color-mix(in srgb, var(--state-duplicate) 18%, transparent); }
+.rx-idx.r3 { color: #fff; background: var(--state-duplicate); }
+:root[data-theme="dark"] .rx-idx.g3, :root[data-theme="dark"] .rx-idx.r3 { color: #111; }
+.rx-src { font-size: var(--fs-12); margin-left: 4px; }
+.rx-best { font-size: var(--fs-12); color: var(--state-good); margin-left: 6px; white-space: nowrap; }
+.rx-tbl tr.hl td { background: color-mix(in srgb, var(--state-good) 6%, transparent); }
+/* plain tables (ski, head-to-head) */
+.rx-plain { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.rx-plain th, .rx-plain td { padding: 4px 10px; border-bottom: 1px solid var(--hairline); text-align: left; white-space: nowrap; vertical-align: baseline; }
+.rx-plain th { font-weight: 600; color: var(--text-muted); font-size: var(--fs-12); }
+.rx-plain .num { text-align: right; }
+.rx-plain .sep { border-left: 1px solid var(--hairline); }
+.rx-plain th.pp { border-bottom: 2px solid var(--person, var(--hairline)); color: var(--text); }
+.rx-plain .lead { font-weight: 600; }
+.rx-plain .gap { color: var(--text-muted); font-size: var(--fs-12); margin-left: 6px; }
+.rx-plain tr.sport td { padding-top: var(--space-3); font-weight: 600; border-bottom: 1px solid var(--hairline); }
+.rx-plain tfoot td { border-bottom: 0; color: var(--text-muted); font-size: var(--fs-12); padding-top: var(--space-2); }
+.rx-wrap { overflow-x: auto; }

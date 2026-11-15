@@ -9,7 +9,7 @@ import { cssVar, dur } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { PACE_INCRS, TIME_INCRS, paceRange, speedRange } from "../lib/chartAxes";
 
-export type PanelKey = "pace" | "paceSlow" | "pace100" | "speed" | "hr" | "alt" | "cad" | "power";
+export type PanelKey = "pace" | "paceSlow" | "pace100" | "pace500" | "speed" | "hr" | "alt" | "cad" | "spm" | "power";
 export interface Band { a: number; b: number; kind: "rep" | "pause" | "lap" }
 
 const PANELS: Record<PanelKey, { label: string; color: string; fmt: (v: number) => string; height: number }> = {
@@ -17,10 +17,12 @@ const PANELS: Record<PanelKey, { label: string; color: string; fmt: (v: number) 
   /** walks and hikes: min/km too, but slow (steep uphill 20–40 min/km) is real, not a stop */
   paceSlow: { label: "Pace (min/km)", color: "--chart-1", fmt: (v) => dur(v), height: 150 },
   pace100: { label: "Pace (min/100 m)", color: "--chart-1", fmt: (v) => dur(v), height: 150 },
+  pace500: { label: "Pace (/500 m)", color: "--chart-1", fmt: (v) => `${Math.floor(v / 60)}:${(v % 60).toFixed(1).padStart(4, "0")}`, height: 150 },
   speed: { label: "Speed (km/h)", color: "--chart-1", fmt: (v) => v.toFixed(1), height: 150 },
   hr: { label: "Heart rate (bpm)", color: "--chart-2", fmt: (v) => String(Math.round(v)), height: 130 },
   alt: { label: "Elevation (m)", color: "--chart-3", fmt: (v) => String(Math.round(v)), height: 110 },
   cad: { label: "Cadence (spm)", color: "--chart-4", fmt: (v) => String(Math.round(v)), height: 100 },
+  spm: { label: "Stroke rate (spm)", color: "--chart-3", fmt: (v) => String(Math.round(v)), height: 100 },
   power: { label: "Power (W)", color: "--chart-4", fmt: (v) => String(Math.round(v)), height: 100 },
 };
 
@@ -48,6 +50,8 @@ function values(s: Series, k: PanelKey): (number | null)[] | null {
   const v = k === "pace" ? sp?.map((v) => (v && v > 0.8 ? Math.min(1000 / v, 900) : null))
     : k === "paceSlow" ? sp?.map((v) => (v && v > 0.35 ? Math.min(1000 / v, 2700) : null))
     : k === "pace100" ? sp?.map((v) => (v && v > 0.2 ? Math.min(100 / v, 500) : null))
+    : k === "pace500" ? sp?.map((v) => (v && v > 1.5 ? Math.min(500 / v, 300) : null))   // erg: rests (< 1.5 m/s) left out
+    : k === "spm" ? s.cad?.map((v) => (v ? v : null))
     : k === "speed" ? sp?.map((v) => (v === null ? null : v * 3.6))
     : ((s as any)[k] as (number | null)[] | undefined);
   if (k === "alt" && v && isFlat(v)) return null;   // a track / flat course: no elevation panel
@@ -141,6 +145,9 @@ export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, x
       const range: uPlot.Range.MinMax = k === "pace" ? paceAxisRange(x, ys, bands) :
         k === "paceSlow" ? (() => { const r = paceRange(ys, { moveFrac: 0.3, hi: 0.97 }); return r ? [Math.max(180, r[0]), Math.min(r[1], 2700)] as [number, number] : [300, 1800] as [number, number]; })() :
         k === "pace100" ? (() => { const r = paceRange(ys, { moveFrac: 0.5, hi: 0.98 }); return r ? [Math.max(30, r[0]), r[1]] as [number, number] : [60, 240] as [number, number]; })() :
+        // erg pace /500 m: fill the panel like power / stroke rate (1-99 %, 8 % padding, no 10 s minimum: a session's
+        // pace often spans only ~10 s /500 m, kristoffer 2026-11-07 1:48-2:00)
+        k === "pace500" ? (() => { const r = paceRange(ys, { moveFrac: 0.5, lo: 0.01, hi: 0.99, minPad: 1 }); return r ? [Math.max(60, r[0]), Math.min(r[1], 300)] as [number, number] : [90, 180] as [number, number]; })() :
         k === "speed" ? speedRange(ys, { lo: 0.01, hi: 0.99 }) ?? [0, 20] :
         k === "hr" ? [Math.max(40, lo - 5), pct(ys, 1) + 5] :   // HR peaks matter: up to the max
         k === "alt" && hi - lo < 20 ? [(hi + lo) / 2 - 10, (hi + lo) / 2 + 10] : [lo - (hi - lo) * 0.05, hi + (hi - lo) * 0.05 || hi + 1];
@@ -157,13 +164,13 @@ export function SeriesCharts({ series, panels, bands = [], onHover, cursorRef, x
           points: { size: 7, fill: color },
           y: false,
         },
-        scales: { x: { time: false }, y: { range: () => range, dir: k === "pace" || k === "paceSlow" || k === "pace100" ? -1 : 1 } },
+        scales: { x: { time: false }, y: { range: () => range, dir: k === "pace" || k === "paceSlow" || k === "pace100" || k === "pace500" ? -1 : 1 } },
         axes: [
           { show: isLast, stroke: cssVar("--text-muted"), grid: { stroke: cssVar("--hairline"), width: 1 }, ticks: { show: false },
             values: (_u, ts) => (xFmt ? ts.map(xFmt) : tTicks(ts)), font: `12px ${cssVar("--font")}`, size: 22, space: 80, incrs: TIME_INCRS },
           { stroke: cssVar("--text-muted"), grid: { stroke: cssVar("--hairline"), width: 1 }, ticks: { show: false },
             values: (_u, ts) => ts.map((v) => P.fmt(v)), font: `12px ${cssVar("--font")}`, size: 48, space: 30,
-            ...(k === "pace" || k === "paceSlow" || k === "pace100" ? { incrs: PACE_INCRS } : {}) },
+            ...(k === "pace" || k === "paceSlow" || k === "pace100" || k === "pace500" ? { incrs: PACE_INCRS } : {}) },
         ],
         series: [{}, { stroke: color, width: 1.25, points: { show: false }, spanGaps: false }],
         hooks: {

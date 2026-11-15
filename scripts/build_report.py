@@ -15,6 +15,7 @@ from pathlib import Path
 import fitparse
 
 from run_analysis import analyse
+import concept2 as c2
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = Path(__file__).with_name("report_template.html")
@@ -31,7 +32,7 @@ def r(v, n=2):
 def activities(d: Path):
     downloaded = {p.name.split("_")[1]: p for p in (d / "activities").glob("*_*_*") if list(p.glob("*.fit"))}
     out = []
-    for a in load(d / "activities_index.json"):
+    for a in c2.load_index(d):   # Garmin + Concept2 erg workouts
         out.append({
             "id": a["activityId"],
             "date": a["startTimeLocal"],

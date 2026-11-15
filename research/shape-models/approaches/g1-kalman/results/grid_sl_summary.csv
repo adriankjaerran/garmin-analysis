@@ -1,0 +1,9 @@
+,0
+grid,sl
+n_cfg,24
+race_ar_min,1.2322103912078581
+race_ar_max,1.6973864024880598
+race_ar_median,1.45658641960715
+loro_tuned_race_mae,1.3438146817877232
+fc_selected,SL rho0.5 k1/400 qa0.05
+fc_selected_race_mae,1.2850074368225926

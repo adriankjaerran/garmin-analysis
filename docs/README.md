@@ -29,7 +29,9 @@
 | [compare.md](compare.md) | Comparing sessions: ghost race, common start line, rep- and break-aligned intervals |
 | [together.md](together.md) | Workouts run with others: detection, labels, groups, the session engine and API |
 | [community.md](community.md) | The club layer: categories, photos, kudos, club and member stats, goals |
-| [fitness-model.md](fitness-model.md) | Shape over time (VDOT scale), race predictor, back-tests, why HR isn't used |
+| [fitness-model.md](fitness-model.md) | Shape over time (VDOT scale), one run number, race predictor, official races, HR settings, back-tests |
+| [concept2.md](concept2.md) | Concept2 Logbook: RowErg / SkiErg workouts as activities (token, fetch, mapping, erg reps) |
+| [erg.md](erg.md) | Concept2 erg trend: 2k-equivalent pace / watts per machine (Row, SkiErg), `erg_fitness.json` |
 
 ## Front ends
 | File | What |

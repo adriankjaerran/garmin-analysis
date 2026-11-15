@@ -10,7 +10,7 @@ import { useCommunity, type CsForm, type CsSession } from "../lib/communitySessi
 import { LastTimeHere } from "./CommunitySessionHighlights";
 import "../pages/community-session.css";
 
-const DISC: Record<string, string> = { interval: "interval", long: "long-distance", ski: "ski" };
+const DISC: Record<string, string> = { interval: "run", long: "run", ski: "ski" };
 
 /** "+2.4": session score minus the shape the day before (VDOT points); coloured only when |delta| ≥ 2 */
 function FormCell({ f }: { f: CsForm | null | undefined }) {
@@ -19,7 +19,7 @@ function FormCell({ f }: { f: CsForm | null | undefined }) {
   if (f.confidence === "none") return <span class="muted" title="score unreliable: rejected by the fitness model (e.g. HR not maximal, a mislabelled session)">?</span>;
   const sign = d > 0 ? "+" : d < 0 ? "−" : "±";
   const tip = [
-    `Session score ${f.score?.toFixed(1)} vs shape ${f.shape?.toFixed(1)} the day before (${DISC[f.discipline ?? ""] ?? f.discipline ?? ""} fitness, VDOT points)`,
+    `Session score ${f.score?.toFixed(1)} vs shape ${f.shape?.toFixed(1)} the day before (${DISC[f.discipline ?? ""] ?? f.discipline ?? ""} fitness${f.discipline === "ski" ? "" : " at the session's distance"}, VDOT points)`,
     `confidence: ${f.confidence}`,
     f.flags?.length ? `flags: ${f.flags.join(", ").replace(/_/g, " ")}` : null,
   ].filter(Boolean).join("\n");
@@ -59,11 +59,14 @@ export function CommunitySessionMembers({ gid, s }: { gid: string; s: TSession }
               const race = races.find((r) => r.person === m.key);
               const n = m.numbers;
               const sport = p?.sport && p.sport !== "other" ? p.sport : s.group.sport;   // a multisport file in a run session: run pace
-              const role = m.role === "partial" ? " (part of the workout)" : m.role === "other" ? " (other workout)" : "";
+              // ran every rep of the main set (own watch saw something else, e.g. reps split at a slowdown): the session's workout
+              const all = !!lb && lb.of > 0 && lb.reps_done >= lb.of && lb.n_counted >= lb.of && m.role !== "other";
+              const role = all ? "" : m.role === "partial" ? " (part of the workout)" : m.role === "other" ? " (other workout)" : "";
+              const wk = all ? s.group.workout ?? m.workout : m.workout;
               return (
                 <tr key={m.key} class={m.role === "other" ? "muted" : ""}>
                   <td><a href={withPerson(`/activities/${m.activity_id}`, m.person)} title={`${personName(m.key)}'s activity`}>{personName(m.key)}</a>{m.key === c.viewer && <span class="muted"> (you)</span>}</td>
-                  <td title={m.type ?? undefined}>{m.workout ?? "—"}<span class="muted">{role}</span></td>
+                  <td title={all && wk !== m.workout ? `own watch: ${m.workout ?? "—"}` : m.type ?? undefined}>{wk ?? "—"}<span class="muted">{role}</span></td>
                   <td class="num">{n?.km ? km(n.km) : "—"}</td>
                   <td class="num" title={n?.dur_s ? `elapsed ${dur(n.dur_s)}` : undefined}>{dur(n?.moving_s)}</td>
                   {iv ? <>

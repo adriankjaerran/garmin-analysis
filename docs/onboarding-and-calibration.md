@@ -39,9 +39,11 @@ or guessed (standard distance, fast pace, few laps).
 1. They create a Personal API key (1 year), we store `GARMIN_<NAME>_API_KEY` in `.env`.
 2. `fetch_index.py <name>`.
 3. Ask them:
-   - races with official chip times/splits, and any route with a known length;
+   - races with official chip times/splits (they go into `data/races.json`, [data-layout.md](data-layout.md#dataracesjson-hand-edited-optional)),
+     auto-detected `race?` runs that weren't races (`not_races`), and any route with a known length;
    - watch model(s) and **when they switched**, plus GPS mode (GPS only / all systems / multi-band).
-     It isn't in the FIT;
+     It isn't in the FIT. Also chest strap use and any watch borrowed from / lent to another person here;
+   - which tracks they run reps on (a new one needs a `TRACKS` entry in `session_groups.py`, decide oval / loop);
    - on track sessions: track mode on? lap button pressed at the line? lane setting?
    - OK to download (show the call count and time).
 4. Find watch eras from the list (`avgPower` proxy, or the FIT of one run per year), then
@@ -53,7 +55,12 @@ or guessed (standard distance, fast pace, few laps).
    `calibrate_distance.py` (geometry) → `gps_lap_analysis.py` (lag table) → `evaluate_detector.py`
    (detector lags, accuracy) → `route_accuracy.py` (races, repeated routes, uncertainty model) →
    `calibrate_distance.py` again (merges all into `calibration.json`).
-7. `build_report.py <name>`.
+7. Analysis: `session_groups.py <name>` → `hr_settings.py <name>` → `session_groups.py <name>` again (steady / easy reads
+   the HR flags) → `fitness_model.py <name>` ([README.md](../README.md#refreshing-the-data)). Check the session types
+   and the odd scores with the runner; fix what the rules get wrong in `session_overrides.json`.
+8. `calibration_set.py`: the new runner drives the shared model parameters only with ≥ 30 trusted interval sessions
+   and ≥ 2 races; otherwise they are validation only ([fitness-model.md](fitness-model.md#calibration-set)).
+9. `build_report.py <name>`.
 
 ## 3. Calibrating a new watch
 Signal behaviour is a property of the watch (and firmware), not of the place, so recalibrate
@@ -73,6 +80,9 @@ Per-watch caveats seen so far:
   GPS-mode Bislet laps are from this watch.
 - **Product 4315** (2026-02-24 →): 1 s recording, wrist power and running dynamics,
   `gps_metadata` at 1 Hz. All Adrian's track-mode sessions are from this watch.
+- **HR per watch:** `hr_settings.py` measures each watch + HR source (how HR follows the reps) and sets its trust for
+  the fitness model's HR variant; a new device gets 0.5 / 0.5 until it has ≥ 5 interval sessions. The FR935's wrist HR
+  under-reads hard reps (trust 0.3), and from 2024 its barometer drifts during reps (levelled by `level_alt`).
 
 So today **track mode (timing lags) and GPS mode (distance/lag) are measured on different watches**.
 Lags measured on one shouldn't be applied to the other without checking. To close the gap: a few

@@ -1,0 +1,645 @@
+set,person,model,n,mae,bias
+official,adrian,production,5,0.915,-0.148
+official,adrian,C,5,0.958,-0.072
+official,adrian,T1,5,0.906,-0.128
+official,adrian,S (G1 fast slope),5,0.888,-0.117
+official,adrian,G5,5,1.078,-0.283
+official,adrian,"mean(C,G5)",5,1.018,-0.178
+official,rise,production,5,1.753,-0.181
+official,rise,C,5,1.307,0.416
+official,rise,T1,5,1.313,-0.142
+official,rise,S (G1 fast slope),5,1.638,-0.023
+official,rise,G5,5,1.407,0.704
+official,rise,"mean(C,G5)",5,1.225,0.56
+official,patrik,production,1,10.874,-10.874
+official,patrik,C,1,7.135,-7.135
+official,patrik,T1,1,7.135,-7.135
+official,patrik,S (G1 fast slope),1,10.874,-10.874
+official,patrik,G5,1,3.43,-3.43
+official,patrik,"mean(C,G5)",1,5.282,-5.282
+official,a+r,production,10,1.334,-0.165
+official,a+r,C,10,1.132,0.172
+official,a+r,T1,10,1.109,-0.135
+official,a+r,S (G1 fast slope),10,1.263,-0.07
+official,a+r,G5,10,1.243,0.211
+official,a+r,"mean(C,G5)",10,1.121,0.191
+official,all,production,11,2.201,-1.138
+official,all,C,11,1.678,-0.492
+official,all,T1,11,1.657,-0.772
+official,all,S (G1 fast slope),11,2.137,-1.052
+official,all,G5,11,1.442,-0.12
+official,all,"mean(C,G5)",11,1.5,-0.306
+official+high,adrian,production,8,1.257,-0.68
+official+high,adrian,C,8,1.868,-0.947
+official+high,adrian,T1,8,1.781,-1.035
+official+high,adrian,S (G1 fast slope),8,1.26,-0.523
+official+high,adrian,G5,8,1.969,-0.895
+official+high,adrian,"mean(C,G5)",8,1.918,-0.921
+official+high,rise,production,5,1.753,-0.181
+official+high,rise,C,5,1.307,0.416
+official+high,rise,T1,5,1.313,-0.142
+official+high,rise,S (G1 fast slope),5,1.638,-0.023
+official+high,rise,G5,5,1.407,0.704
+official+high,rise,"mean(C,G5)",5,1.225,0.56
+official+high,patrik,production,1,10.874,-10.874
+official+high,patrik,C,1,7.135,-7.135
+official+high,patrik,T1,1,7.135,-7.135
+official+high,patrik,S (G1 fast slope),1,10.874,-10.874
+official+high,patrik,G5,1,3.43,-3.43
+official+high,patrik,"mean(C,G5)",1,5.282,-5.282
+official+high,a+r,production,13,1.448,-0.488
+official+high,a+r,C,13,1.652,-0.423
+official+high,a+r,T1,13,1.601,-0.691
+official+high,a+r,S (G1 fast slope),13,1.405,-0.331
+official+high,a+r,G5,13,1.753,-0.28
+official+high,a+r,"mean(C,G5)",13,1.652,-0.351
+official+high,all,production,14,2.121,-1.23
+official+high,all,C,14,2.044,-0.902
+official+high,all,T1,14,1.996,-1.152
+official+high,all,S (G1 fast slope),14,2.082,-1.084
+official+high,all,G5,14,1.873,-0.505
+official+high,all,"mean(C,G5)",14,1.911,-0.704
+extra_high,adrian,production,3,1.826,-1.568
+extra_high,adrian,C,3,3.385,-2.405
+extra_high,adrian,T1,3,3.239,-2.545
+extra_high,adrian,S (G1 fast slope),3,1.88,-1.2
+extra_high,adrian,G5,3,3.454,-1.915
+extra_high,adrian,"mean(C,G5)",3,3.42,-2.16
+extra_high,a+r,production,3,1.826,-1.568
+extra_high,a+r,C,3,3.385,-2.405
+extra_high,a+r,T1,3,3.239,-2.545
+extra_high,a+r,S (G1 fast slope),3,1.88,-1.2
+extra_high,a+r,G5,3,3.454,-1.915
+extra_high,a+r,"mean(C,G5)",3,3.42,-2.16
+extra_high,all,production,3,1.826,-1.568
+extra_high,all,C,3,3.385,-2.405
+extra_high,all,T1,3,3.239,-2.545
+extra_high,all,S (G1 fast slope),3,1.88,-1.2
+extra_high,all,G5,3,3.454,-1.915
+extra_high,all,"mean(C,G5)",3,3.42,-2.16
+interval,adrian,production,122,2.379,0.728
+interval,adrian,C,122,2.42,0.054
+interval,adrian,T1,122,2.412,0.077
+interval,adrian,S (G1 fast slope),122,2.393,0.696
+interval,adrian,G5,122,2.377,0.176
+interval,adrian,"mean(C,G5)",122,2.392,0.115
+interval,rise,production,68,2.467,0.657
+interval,rise,C,68,2.403,0.427
+interval,rise,T1,68,2.411,0.413
+interval,rise,S (G1 fast slope),68,2.475,0.574
+interval,rise,G5,68,2.572,0.783
+interval,rise,"mean(C,G5)",68,2.46,0.605
+interval,patrik,production,6,2.336,-1.06
+interval,patrik,C,6,2.782,-2.005
+interval,patrik,T1,6,2.692,-1.908
+interval,patrik,S (G1 fast slope),6,2.32,-1.06
+interval,patrik,G5,6,2.537,-1.552
+interval,patrik,"mean(C,G5)",6,2.659,-1.778
+interval,a+r,production,190,2.411,0.703
+interval,a+r,C,190,2.414,0.187
+interval,a+r,T1,190,2.411,0.197
+interval,a+r,S (G1 fast slope),190,2.422,0.652
+interval,a+r,G5,190,2.447,0.393
+interval,a+r,"mean(C,G5)",190,2.417,0.29
+interval,all,production,196,2.409,0.649
+interval,all,C,196,2.425,0.12
+interval,all,T1,196,2.42,0.133
+interval,all,S (G1 fast slope),196,2.419,0.6
+interval,all,G5,196,2.45,0.333
+interval,all,"mean(C,G5)",196,2.424,0.227
+hard_effort,adrian,production,13,3.511,2.69
+hard_effort,adrian,C,13,3.293,0.79
+hard_effort,adrian,T1,13,3.419,0.682
+hard_effort,adrian,S (G1 fast slope),13,3.477,2.815
+hard_effort,adrian,G5,13,3.151,0.973
+hard_effort,adrian,"mean(C,G5)",13,3.198,0.881
+hard_effort,rise,production,2,2.672,-2.672
+hard_effort,rise,C,2,2.455,-2.455
+hard_effort,rise,T1,2,2.456,-2.456
+hard_effort,rise,S (G1 fast slope),2,2.672,-2.672
+hard_effort,rise,G5,2,1.854,-1.854
+hard_effort,rise,"mean(C,G5)",2,2.155,-2.155
+hard_effort,patrik,production,4,6.993,6.993
+hard_effort,patrik,C,4,4.437,4.437
+hard_effort,patrik,T1,4,4.452,4.452
+hard_effort,patrik,S (G1 fast slope),4,6.959,6.959
+hard_effort,patrik,G5,4,4.52,4.52
+hard_effort,patrik,"mean(C,G5)",4,4.479,4.479
+hard_effort,a+r,production,15,3.399,1.975
+hard_effort,a+r,C,15,3.181,0.358
+hard_effort,a+r,T1,15,3.291,0.263
+hard_effort,a+r,S (G1 fast slope),15,3.37,2.084
+hard_effort,a+r,G5,15,2.978,0.596
+hard_effort,a+r,"mean(C,G5)",15,3.059,0.477
+hard_effort,all,production,19,4.156,3.031
+hard_effort,all,C,19,3.446,1.216
+hard_effort,all,T1,19,3.535,1.145
+hard_effort,all,S (G1 fast slope),19,4.126,3.11
+hard_effort,all,G5,19,3.303,1.422
+hard_effort,all,"mean(C,G5)",19,3.358,1.319
+official,adrian,S,5,0.888,-0.117
+official,adrian,"V1 C,M=0",5,0.889,-0.17
+official,adrian,"V2 T1,M=0",5,0.805,-0.28
+official,adrian,V3a C-B,5,0.884,-0.008
+official,adrian,V3b T1-B,5,0.981,-0.176
+official,adrian,V4 P+dI,5,0.99,-0.054
+official,adrian,V5 S+dI,5,0.915,-0.116
+official,adrian,"V6 T1-B+dI,M=0",5,1.013,-0.343
+official,adrian,"V7 T1+dI,M=0",5,1.727,-1.727
+official,adrian,"V8 C,M_adrian=0 (post hoc)",5,0.889,-0.17
+official,rise,S,5,1.638,-0.023
+official,rise,"V1 C,M=0",5,1.532,0.013
+official,rise,"V2 T1,M=0",5,1.586,-0.626
+official,rise,V3a C-B,5,1.512,0.476
+official,rise,V3b T1-B,5,1.665,-0.256
+official,rise,V4 P+dI,5,1.664,0.089
+official,rise,V5 S+dI,5,1.375,0.304
+official,rise,"V6 T1-B+dI,M=0",5,1.73,-0.635
+official,rise,"V7 T1+dI,M=0",5,2.325,-1.239
+official,rise,"V8 C,M_adrian=0 (post hoc)",5,1.307,0.416
+official,patrik,S,1,10.874,-10.874
+official,patrik,"V1 C,M=0",1,8.006,-8.006
+official,patrik,"V2 T1,M=0",1,8.006,-8.006
+official,patrik,V3a C-B,1,9.891,-9.891
+official,patrik,V3b T1-B,1,9.891,-9.891
+official,patrik,V4 P+dI,1,10.874,-10.874
+official,patrik,V5 S+dI,1,10.874,-10.874
+official,patrik,"V6 T1-B+dI,M=0",1,10.874,-10.874
+official,patrik,"V7 T1+dI,M=0",1,8.006,-8.006
+official,patrik,"V8 C,M_adrian=0 (post hoc)",1,7.135,-7.135
+official,a+r,S,10,1.263,-0.07
+official,a+r,"V1 C,M=0",10,1.211,-0.078
+official,a+r,"V2 T1,M=0",10,1.196,-0.453
+official,a+r,V3a C-B,10,1.198,0.234
+official,a+r,V3b T1-B,10,1.323,-0.216
+official,a+r,V4 P+dI,10,1.327,0.017
+official,a+r,V5 S+dI,10,1.145,0.094
+official,a+r,"V6 T1-B+dI,M=0",10,1.371,-0.489
+official,a+r,"V7 T1+dI,M=0",10,2.026,-1.483
+official,a+r,"V8 C,M_adrian=0 (post hoc)",10,1.098,0.123
+official,all,S,11,2.137,-1.052
+official,all,"V1 C,M=0",11,1.828,-0.799
+official,all,"V2 T1,M=0",11,1.815,-1.139
+official,all,V3a C-B,11,1.988,-0.687
+official,all,V3b T1-B,11,2.102,-1.095
+official,all,V4 P+dI,11,2.195,-0.973
+official,all,V5 S+dI,11,2.029,-0.903
+official,all,"V6 T1-B+dI,M=0",11,2.235,-1.433
+official,all,"V7 T1+dI,M=0",11,2.57,-2.076
+official,all,"V8 C,M_adrian=0 (post hoc)",11,1.647,-0.537
+official+high,adrian,S,8,1.26,-0.523
+official+high,adrian,"V1 C,M=0",8,1.754,-1.049
+official+high,adrian,"V2 T1,M=0",8,1.664,-1.153
+official+high,adrian,V3a C-B,8,1.379,-0.446
+official+high,adrian,V3b T1-B,8,1.414,-0.56
+official+high,adrian,V4 P+dI,8,1.239,-0.601
+official+high,adrian,V5 S+dI,8,1.282,-0.603
+official+high,adrian,"V6 T1-B+dI,M=0",8,1.299,-0.671
+official+high,adrian,"V7 T1+dI,M=0",8,2.73,-2.73
+official+high,adrian,"V8 C,M_adrian=0 (post hoc)",8,1.754,-1.049
+official+high,rise,S,5,1.638,-0.023
+official+high,rise,"V1 C,M=0",5,1.532,0.013
+official+high,rise,"V2 T1,M=0",5,1.586,-0.626
+official+high,rise,V3a C-B,5,1.512,0.476
+official+high,rise,V3b T1-B,5,1.665,-0.256
+official+high,rise,V4 P+dI,5,1.664,0.089
+official+high,rise,V5 S+dI,5,1.375,0.304
+official+high,rise,"V6 T1-B+dI,M=0",5,1.73,-0.635
+official+high,rise,"V7 T1+dI,M=0",5,2.325,-1.239
+official+high,rise,"V8 C,M_adrian=0 (post hoc)",5,1.307,0.416
+official+high,patrik,S,1,10.874,-10.874
+official+high,patrik,"V1 C,M=0",1,8.006,-8.006
+official+high,patrik,"V2 T1,M=0",1,8.006,-8.006
+official+high,patrik,V3a C-B,1,9.891,-9.891
+official+high,patrik,V3b T1-B,1,9.891,-9.891
+official+high,patrik,V4 P+dI,1,10.874,-10.874
+official+high,patrik,V5 S+dI,1,10.874,-10.874
+official+high,patrik,"V6 T1-B+dI,M=0",1,10.874,-10.874
+official+high,patrik,"V7 T1+dI,M=0",1,8.006,-8.006
+official+high,patrik,"V8 C,M_adrian=0 (post hoc)",1,7.135,-7.135
+official+high,a+r,S,13,1.405,-0.331
+official+high,a+r,"V1 C,M=0",13,1.669,-0.64
+official+high,a+r,"V2 T1,M=0",13,1.634,-0.95
+official+high,a+r,V3a C-B,13,1.43,-0.092
+official+high,a+r,V3b T1-B,13,1.511,-0.443
+official+high,a+r,V4 P+dI,13,1.403,-0.336
+official+high,a+r,V5 S+dI,13,1.318,-0.254
+official+high,a+r,"V6 T1-B+dI,M=0",13,1.465,-0.657
+official+high,a+r,"V7 T1+dI,M=0",13,2.575,-2.157
+official+high,a+r,"V8 C,M_adrian=0 (post hoc)",13,1.582,-0.486
+official+high,all,S,14,2.082,-1.084
+official+high,all,"V1 C,M=0",14,2.122,-1.166
+official+high,all,"V2 T1,M=0",14,2.089,-1.454
+official+high,all,V3a C-B,14,2.034,-0.792
+official+high,all,V3b T1-B,14,2.109,-1.118
+official+high,all,V4 P+dI,14,2.079,-1.088
+official+high,all,V5 S+dI,14,2.001,-1.013
+official+high,all,"V6 T1-B+dI,M=0",14,2.137,-1.387
+official+high,all,"V7 T1+dI,M=0",14,2.962,-2.574
+official+high,all,"V8 C,M_adrian=0 (post hoc)",14,1.979,-0.96
+extra_high,adrian,S,3,1.88,-1.2
+extra_high,adrian,"V1 C,M=0",3,3.196,-2.514
+extra_high,adrian,"V2 T1,M=0",3,3.095,-2.608
+extra_high,adrian,V3a C-B,3,2.203,-1.176
+extra_high,adrian,V3b T1-B,3,2.135,-1.202
+extra_high,adrian,V4 P+dI,3,1.655,-1.512
+extra_high,adrian,V5 S+dI,3,1.895,-1.414
+extra_high,adrian,"V6 T1-B+dI,M=0",3,1.777,-1.217
+extra_high,adrian,"V7 T1+dI,M=0",3,4.402,-4.402
+extra_high,adrian,"V8 C,M_adrian=0 (post hoc)",3,3.196,-2.514
+extra_high,a+r,S,3,1.88,-1.2
+extra_high,a+r,"V1 C,M=0",3,3.196,-2.514
+extra_high,a+r,"V2 T1,M=0",3,3.095,-2.608
+extra_high,a+r,V3a C-B,3,2.203,-1.176
+extra_high,a+r,V3b T1-B,3,2.135,-1.202
+extra_high,a+r,V4 P+dI,3,1.655,-1.512
+extra_high,a+r,V5 S+dI,3,1.895,-1.414
+extra_high,a+r,"V6 T1-B+dI,M=0",3,1.777,-1.217
+extra_high,a+r,"V7 T1+dI,M=0",3,4.402,-4.402
+extra_high,a+r,"V8 C,M_adrian=0 (post hoc)",3,3.196,-2.514
+extra_high,all,S,3,1.88,-1.2
+extra_high,all,"V1 C,M=0",3,3.196,-2.514
+extra_high,all,"V2 T1,M=0",3,3.095,-2.608
+extra_high,all,V3a C-B,3,2.203,-1.176
+extra_high,all,V3b T1-B,3,2.135,-1.202
+extra_high,all,V4 P+dI,3,1.655,-1.512
+extra_high,all,V5 S+dI,3,1.895,-1.414
+extra_high,all,"V6 T1-B+dI,M=0",3,1.777,-1.217
+extra_high,all,"V7 T1+dI,M=0",3,4.402,-4.402
+extra_high,all,"V8 C,M_adrian=0 (post hoc)",3,3.196,-2.514
+interval,adrian,S,122,2.393,0.696
+interval,adrian,"V1 C,M=0",122,2.433,0.019
+interval,adrian,"V2 T1,M=0",122,2.428,0.038
+interval,adrian,V3a C-B,122,2.4,0.675
+interval,adrian,V3b T1-B,122,2.4,0.702
+interval,adrian,V4 P+dI,122,2.383,0.724
+interval,adrian,V5 S+dI,122,2.397,0.7
+interval,adrian,"V6 T1-B+dI,M=0",122,2.397,0.719
+interval,adrian,"V7 T1+dI,M=0",122,2.391,0.481
+interval,adrian,"V8 C,M_adrian=0 (post hoc)",122,2.433,0.019
+interval,rise,S,68,2.475,0.574
+interval,rise,"V1 C,M=0",68,2.393,0.429
+interval,rise,"V2 T1,M=0",68,2.402,0.412
+interval,rise,V3a C-B,68,2.481,0.535
+interval,rise,V3b T1-B,68,2.48,0.539
+interval,rise,V4 P+dI,68,2.452,0.61
+interval,rise,V5 S+dI,68,2.469,0.541
+interval,rise,"V6 T1-B+dI,M=0",68,2.475,0.548
+interval,rise,"V7 T1+dI,M=0",68,2.465,0.527
+interval,rise,"V8 C,M_adrian=0 (post hoc)",68,2.403,0.427
+interval,patrik,S,6,2.32,-1.06
+interval,patrik,"V1 C,M=0",6,2.918,-2.208
+interval,patrik,"V2 T1,M=0",6,2.853,-2.136
+interval,patrik,V3a C-B,6,2.361,-1.085
+interval,patrik,V3b T1-B,6,2.42,-1.131
+interval,patrik,V4 P+dI,6,2.325,-1.05
+interval,patrik,V5 S+dI,6,2.306,-1.053
+interval,patrik,"V6 T1-B+dI,M=0",6,2.403,-1.119
+interval,patrik,"V7 T1+dI,M=0",6,2.569,-1.743
+interval,patrik,"V8 C,M_adrian=0 (post hoc)",6,2.782,-2.005
+interval,a+r,S,190,2.422,0.652
+interval,a+r,"V1 C,M=0",190,2.419,0.166
+interval,a+r,"V2 T1,M=0",190,2.419,0.172
+interval,a+r,V3a C-B,190,2.429,0.625
+interval,a+r,V3b T1-B,190,2.428,0.644
+interval,a+r,V4 P+dI,190,2.408,0.683
+interval,a+r,V5 S+dI,190,2.423,0.643
+interval,a+r,"V6 T1-B+dI,M=0",190,2.425,0.658
+interval,a+r,"V7 T1+dI,M=0",190,2.417,0.497
+interval,a+r,"V8 C,M_adrian=0 (post hoc)",190,2.422,0.165
+interval,all,S,196,2.419,0.6
+interval,all,"V1 C,M=0",196,2.434,0.093
+interval,all,"V2 T1,M=0",196,2.432,0.101
+interval,all,V3a C-B,196,2.427,0.573
+interval,all,V3b T1-B,196,2.428,0.589
+interval,all,V4 P+dI,196,2.405,0.63
+interval,all,V5 S+dI,196,2.419,0.591
+interval,all,"V6 T1-B+dI,M=0",196,2.424,0.603
+interval,all,"V7 T1+dI,M=0",196,2.422,0.429
+interval,all,"V8 C,M_adrian=0 (post hoc)",196,2.433,0.099
+hard_effort,adrian,S,13,3.477,2.815
+hard_effort,adrian,"V1 C,M=0",13,3.421,0.713
+hard_effort,adrian,"V2 T1,M=0",13,3.541,0.613
+hard_effort,adrian,V3a C-B,13,3.563,1.027
+hard_effort,adrian,V3b T1-B,13,3.681,0.933
+hard_effort,adrian,V4 P+dI,13,3.505,2.712
+hard_effort,adrian,V5 S+dI,13,3.48,2.667
+hard_effort,adrian,"V6 T1-B+dI,M=0",13,3.93,0.814
+hard_effort,adrian,"V7 T1+dI,M=0",13,4.021,-0.657
+hard_effort,adrian,"V8 C,M_adrian=0 (post hoc)",13,3.421,0.713
+hard_effort,rise,S,2,2.672,-2.672
+hard_effort,rise,"V1 C,M=0",2,2.585,-2.585
+hard_effort,rise,"V2 T1,M=0",2,2.585,-2.585
+hard_effort,rise,V3a C-B,2,2.672,-2.672
+hard_effort,rise,V3b T1-B,2,2.672,-2.672
+hard_effort,rise,V4 P+dI,2,2.646,-2.646
+hard_effort,rise,V5 S+dI,2,2.587,-2.587
+hard_effort,rise,"V6 T1-B+dI,M=0",2,2.664,-2.664
+hard_effort,rise,"V7 T1+dI,M=0",2,3.052,-3.052
+hard_effort,rise,"V8 C,M_adrian=0 (post hoc)",2,2.455,-2.455
+hard_effort,patrik,S,4,6.959,6.959
+hard_effort,patrik,"V1 C,M=0",4,4.394,4.394
+hard_effort,patrik,"V2 T1,M=0",4,4.407,4.407
+hard_effort,patrik,V3a C-B,4,4.862,4.817
+hard_effort,patrik,V3b T1-B,4,4.914,4.824
+hard_effort,patrik,V4 P+dI,4,6.818,6.818
+hard_effort,patrik,V5 S+dI,4,6.788,6.788
+hard_effort,patrik,"V6 T1-B+dI,M=0",4,5.087,4.734
+hard_effort,patrik,"V7 T1+dI,M=0",4,3.714,3.697
+hard_effort,patrik,"V8 C,M_adrian=0 (post hoc)",4,4.437,4.437
+hard_effort,a+r,S,15,3.37,2.084
+hard_effort,a+r,"V1 C,M=0",15,3.309,0.273
+hard_effort,a+r,"V2 T1,M=0",15,3.413,0.187
+hard_effort,a+r,V3a C-B,15,3.444,0.534
+hard_effort,a+r,V3b T1-B,15,3.547,0.452
+hard_effort,a+r,V4 P+dI,15,3.39,1.997
+hard_effort,a+r,V5 S+dI,15,3.361,1.966
+hard_effort,a+r,"V6 T1-B+dI,M=0",15,3.761,0.35
+hard_effort,a+r,"V7 T1+dI,M=0",15,3.892,-0.976
+hard_effort,a+r,"V8 C,M_adrian=0 (post hoc)",15,3.292,0.291
+hard_effort,all,S,19,4.126,3.11
+hard_effort,all,"V1 C,M=0",19,3.538,1.141
+hard_effort,all,"V2 T1,M=0",19,3.622,1.075
+hard_effort,all,V3a C-B,19,3.743,1.436
+hard_effort,all,V3b T1-B,19,3.834,1.372
+hard_effort,all,V4 P+dI,19,4.112,3.012
+hard_effort,all,V5 S+dI,19,4.083,2.981
+hard_effort,all,"V6 T1-B+dI,M=0",19,4.04,1.273
+hard_effort,all,"V7 T1+dI,M=0",19,3.854,0.008
+hard_effort,all,"V8 C,M_adrian=0 (post hoc)",19,3.533,1.164
+official,adrian,V9 P+tests,5,0.915,-0.557
+official,adrian,V9 S+tests,5,0.814,-0.52
+official,adrian,V9 C+tests,5,0.902,-0.447
+official,adrian,V9 T1+tests,5,0.959,-0.389
+official,adrian,"V10 P+dI,tight slope",5,1.229,-0.203
+official,rise,V9 P+tests,5,1.753,-0.181
+official,rise,V9 S+tests,5,1.638,-0.023
+official,rise,V9 C+tests,5,1.307,0.416
+official,rise,V9 T1+tests,5,1.313,-0.142
+official,rise,"V10 P+dI,tight slope",5,1.768,-0.448
+official,patrik,V9 P+tests,1,10.874,-10.874
+official,patrik,V9 S+tests,1,10.874,-10.874
+official,patrik,V9 C+tests,1,7.135,-7.135
+official,patrik,V9 T1+tests,1,7.135,-7.135
+official,patrik,"V10 P+dI,tight slope",1,10.874,-10.874
+official,a+r,V9 P+tests,10,1.334,-0.369
+official,a+r,V9 S+tests,10,1.226,-0.272
+official,a+r,V9 C+tests,10,1.105,-0.016
+official,a+r,V9 T1+tests,10,1.136,-0.265
+official,a+r,"V10 P+dI,tight slope",10,1.498,-0.325
+official,all,V9 P+tests,11,2.201,-1.324
+official,all,V9 S+tests,11,2.103,-1.236
+official,all,V9 C+tests,11,1.653,-0.663
+official,all,V9 T1+tests,11,1.681,-0.89
+official,all,"V10 P+dI,tight slope",11,2.351,-1.284
+official+high,adrian,V9 P+tests,8,1.176,-0.856
+official+high,adrian,V9 S+tests,8,1.124,-0.685
+official+high,adrian,V9 C+tests,8,1.831,-1.18
+official+high,adrian,V9 T1+tests,8,1.812,-1.196
+official+high,adrian,"V10 P+dI,tight slope",8,1.21,-0.353
+official+high,rise,V9 P+tests,5,1.753,-0.181
+official+high,rise,V9 S+tests,5,1.638,-0.023
+official+high,rise,V9 C+tests,5,1.307,0.416
+official+high,rise,V9 T1+tests,5,1.313,-0.142
+official+high,rise,"V10 P+dI,tight slope",5,1.768,-0.448
+official+high,patrik,V9 P+tests,1,10.874,-10.874
+official+high,patrik,V9 S+tests,1,10.874,-10.874
+official+high,patrik,V9 C+tests,1,7.135,-7.135
+official+high,patrik,V9 T1+tests,1,7.135,-7.135
+official+high,patrik,"V10 P+dI,tight slope",1,10.874,-10.874
+official+high,a+r,V9 P+tests,13,1.398,-0.597
+official+high,a+r,V9 S+tests,13,1.322,-0.43
+official+high,a+r,V9 C+tests,13,1.63,-0.566
+official+high,a+r,V9 T1+tests,13,1.62,-0.791
+official+high,a+r,"V10 P+dI,tight slope",13,1.424,-0.389
+official+high,all,V9 P+tests,14,2.075,-1.331
+official+high,all,V9 S+tests,14,2.004,-1.176
+official+high,all,V9 C+tests,14,2.023,-1.035
+official+high,all,V9 T1+tests,14,2.014,-1.244
+official+high,all,"V10 P+dI,tight slope",14,2.099,-1.138
+extra_high,adrian,V9 P+tests,3,1.613,-1.355
+extra_high,adrian,V9 S+tests,3,1.639,-0.959
+extra_high,adrian,V9 C+tests,3,3.381,-2.401
+extra_high,adrian,V9 T1+tests,3,3.235,-2.541
+extra_high,adrian,"V10 P+dI,tight slope",3,1.178,-0.602
+extra_high,a+r,V9 P+tests,3,1.613,-1.355
+extra_high,a+r,V9 S+tests,3,1.639,-0.959
+extra_high,a+r,V9 C+tests,3,3.381,-2.401
+extra_high,a+r,V9 T1+tests,3,3.235,-2.541
+extra_high,a+r,"V10 P+dI,tight slope",3,1.178,-0.602
+extra_high,all,V9 P+tests,3,1.613,-1.355
+extra_high,all,V9 S+tests,3,1.639,-0.959
+extra_high,all,V9 C+tests,3,3.381,-2.401
+extra_high,all,V9 T1+tests,3,3.235,-2.541
+extra_high,all,"V10 P+dI,tight slope",3,1.178,-0.602
+interval,adrian,V9 P+tests,122,2.445,0.848
+interval,adrian,V9 S+tests,122,2.445,0.78
+interval,adrian,V9 C+tests,122,2.432,0.098
+interval,adrian,V9 T1+tests,122,2.425,0.122
+interval,adrian,"V10 P+dI,tight slope",122,2.383,0.768
+interval,rise,V9 P+tests,68,2.467,0.657
+interval,rise,V9 S+tests,68,2.475,0.574
+interval,rise,V9 C+tests,68,2.403,0.427
+interval,rise,V9 T1+tests,68,2.411,0.413
+interval,rise,"V10 P+dI,tight slope",68,2.419,0.684
+interval,patrik,V9 P+tests,6,2.336,-1.06
+interval,patrik,V9 S+tests,6,2.32,-1.06
+interval,patrik,V9 C+tests,6,2.782,-2.005
+interval,patrik,V9 T1+tests,6,2.692,-1.908
+interval,patrik,"V10 P+dI,tight slope",6,2.354,-1.076
+interval,a+r,V9 P+tests,190,2.453,0.78
+interval,a+r,V9 S+tests,190,2.456,0.706
+interval,a+r,V9 C+tests,190,2.422,0.216
+interval,a+r,V9 T1+tests,190,2.42,0.226
+interval,a+r,"V10 P+dI,tight slope",190,2.396,0.738
+interval,all,V9 P+tests,196,2.449,0.723
+interval,all,V9 S+tests,196,2.452,0.652
+interval,all,V9 C+tests,196,2.433,0.148
+interval,all,V9 T1+tests,196,2.428,0.161
+interval,all,"V10 P+dI,tight slope",196,2.395,0.682
+hard_effort,adrian,V9 P+tests,13,3.556,2.804
+hard_effort,adrian,V9 S+tests,13,3.46,2.91
+hard_effort,adrian,V9 C+tests,13,3.294,0.794
+hard_effort,adrian,V9 T1+tests,13,3.412,0.695
+hard_effort,adrian,"V10 P+dI,tight slope",13,3.581,2.966
+hard_effort,rise,V9 P+tests,2,2.672,-2.672
+hard_effort,rise,V9 S+tests,2,2.672,-2.672
+hard_effort,rise,V9 C+tests,2,2.455,-2.455
+hard_effort,rise,V9 T1+tests,2,2.456,-2.456
+hard_effort,rise,"V10 P+dI,tight slope",2,2.998,-2.998
+hard_effort,patrik,V9 P+tests,4,6.993,6.993
+hard_effort,patrik,V9 S+tests,4,6.959,6.959
+hard_effort,patrik,V9 C+tests,4,4.437,4.437
+hard_effort,patrik,V9 T1+tests,4,4.452,4.452
+hard_effort,patrik,"V10 P+dI,tight slope",4,6.92,6.92
+hard_effort,a+r,V9 P+tests,15,3.438,2.074
+hard_effort,a+r,V9 S+tests,15,3.355,2.165
+hard_effort,a+r,V9 C+tests,15,3.182,0.361
+hard_effort,a+r,V9 T1+tests,15,3.284,0.275
+hard_effort,a+r,"V10 P+dI,tight slope",15,3.503,2.171
+hard_effort,all,V9 P+tests,19,4.187,3.11
+hard_effort,all,V9 S+tests,19,4.114,3.175
+hard_effort,all,V9 C+tests,19,3.446,1.219
+hard_effort,all,V9 T1+tests,19,3.53,1.154
+hard_effort,all,"V10 P+dI,tight slope",19,4.223,3.171
+official,adrian,P+M,5,0.888,-0.055
+official,adrian,P+B,5,0.925,-0.146
+official,adrian,P+B3k,5,0.941,-0.285
+official,adrian,C B3k,5,0.928,-0.291
+official,adrian,T1 B3k,5,0.856,-0.371
+official,adrian,P+T1tempo,5,1.055,-0.403
+official,adrian,S+T1tempo,5,0.99,-0.368
+official,rise,P+M,5,1.854,0.131
+official,rise,P+B,5,1.681,0.054
+official,rise,P+B3k,5,1.808,-0.089
+official,rise,C B3k,5,1.531,0.59
+official,rise,T1 B3k,5,1.57,-0.016
+official,rise,P+T1tempo,5,2.037,-1.105
+official,rise,S+T1tempo,5,1.901,-0.902
+official,patrik,P+M,1,9.891,-9.891
+official,patrik,P+B,1,8.006,-8.006
+official,patrik,P+B3k,1,8.006,-8.006
+official,patrik,C B3k,1,7.135,-7.135
+official,patrik,T1 B3k,1,7.135,-7.135
+official,patrik,P+T1tempo,1,10.874,-10.874
+official,patrik,S+T1tempo,1,10.874,-10.874
+official,a+r,P+M,10,1.371,0.038
+official,a+r,P+B,10,1.303,-0.046
+official,a+r,P+B3k,10,1.374,-0.187
+official,a+r,C B3k,10,1.229,0.15
+official,a+r,T1 B3k,10,1.213,-0.193
+official,a+r,P+T1tempo,10,1.546,-0.754
+official,a+r,S+T1tempo,10,1.445,-0.635
+official,all,P+M,11,2.146,-0.865
+official,all,P+B,11,1.912,-0.77
+official,all,P+B3k,11,1.977,-0.898
+official,all,C B3k,11,1.766,-0.513
+official,all,T1 B3k,11,1.751,-0.824
+official,all,P+T1tempo,11,2.394,-1.674
+official,all,S+T1tempo,11,2.302,-1.566
+official+high,adrian,P+M,8,1.344,-0.58
+official+high,adrian,P+B,8,1.763,-1.008
+official+high,adrian,P+B3k,8,1.821,-1.269
+official+high,adrian,C B3k,8,1.951,-1.284
+official+high,adrian,T1 B3k,8,1.843,-1.391
+official+high,adrian,P+T1tempo,8,1.407,-0.735
+official+high,adrian,S+T1tempo,8,1.318,-0.67
+official+high,rise,P+M,5,1.854,0.131
+official+high,rise,P+B,5,1.681,0.054
+official+high,rise,P+B3k,5,1.808,-0.089
+official+high,rise,C B3k,5,1.531,0.59
+official+high,rise,T1 B3k,5,1.57,-0.016
+official+high,rise,P+T1tempo,5,2.037,-1.105
+official+high,rise,S+T1tempo,5,1.901,-0.902
+official+high,patrik,P+M,1,9.891,-9.891
+official+high,patrik,P+B,1,8.006,-8.006
+official+high,patrik,P+B3k,1,8.006,-8.006
+official+high,patrik,C B3k,1,7.135,-7.135
+official+high,patrik,T1 B3k,1,7.135,-7.135
+official+high,patrik,P+T1tempo,1,10.874,-10.874
+official+high,patrik,S+T1tempo,1,10.874,-10.874
+official+high,a+r,P+M,13,1.54,-0.307
+official+high,a+r,P+B,13,1.732,-0.6
+official+high,a+r,P+B3k,13,1.816,-0.815
+official+high,a+r,C B3k,13,1.789,-0.563
+official+high,a+r,T1 B3k,13,1.738,-0.862
+official+high,a+r,P+T1tempo,13,1.649,-0.877
+official+high,a+r,S+T1tempo,13,1.542,-0.759
+official+high,all,P+M,14,2.137,-0.991
+official+high,all,P+B,14,2.18,-1.129
+official+high,all,P+B3k,14,2.258,-1.329
+official+high,all,C B3k,14,2.171,-1.032
+official+high,all,T1 B3k,14,2.123,-1.31
+official+high,all,P+T1tempo,14,2.308,-1.591
+official+high,all,S+T1tempo,14,2.209,-1.482
+extra_high,adrian,P+M,3,2.104,-1.455
+extra_high,adrian,P+B,3,3.161,-2.444
+extra_high,adrian,P+B3k,3,3.288,-2.909
+extra_high,adrian,C B3k,3,3.656,-2.938
+extra_high,adrian,T1 B3k,3,3.487,-3.091
+extra_high,adrian,P+T1tempo,3,1.992,-1.287
+extra_high,adrian,S+T1tempo,3,1.865,-1.172
+extra_high,a+r,P+M,3,2.104,-1.455
+extra_high,a+r,P+B,3,3.161,-2.444
+extra_high,a+r,P+B3k,3,3.288,-2.909
+extra_high,a+r,C B3k,3,3.656,-2.938
+extra_high,a+r,T1 B3k,3,3.487,-3.091
+extra_high,a+r,P+T1tempo,3,1.992,-1.287
+extra_high,a+r,S+T1tempo,3,1.865,-1.172
+extra_high,all,P+M,3,2.104,-1.455
+extra_high,all,P+B,3,3.161,-2.444
+extra_high,all,P+B3k,3,3.288,-2.909
+extra_high,all,C B3k,3,3.656,-2.938
+extra_high,all,T1 B3k,3,3.487,-3.091
+extra_high,all,P+T1tempo,3,1.992,-1.287
+extra_high,all,S+T1tempo,3,1.865,-1.172
+interval,adrian,P+M,122,2.4,0.697
+interval,adrian,P+B,122,2.42,0.032
+interval,adrian,P+B3k,122,2.488,-0.112
+interval,adrian,C B3k,122,2.473,-0.089
+interval,adrian,T1 B3k,122,2.449,-0.058
+interval,adrian,P+T1tempo,122,2.39,0.73
+interval,adrian,S+T1tempo,122,2.394,0.721
+interval,rise,P+M,68,2.47,0.609
+interval,rise,P+B,68,2.403,0.42
+interval,rise,P+B3k,68,2.434,0.538
+interval,rise,C B3k,68,2.442,0.447
+interval,rise,T1 B3k,68,2.444,0.447
+interval,rise,P+T1tempo,68,2.484,0.641
+interval,rise,S+T1tempo,68,2.478,0.574
+interval,patrik,P+M,6,2.379,-1.096
+interval,patrik,P+B,6,2.823,-2.057
+interval,patrik,P+B3k,6,3.687,-3.412
+interval,patrik,C B3k,6,3.606,-3.276
+interval,patrik,T1 B3k,6,3.522,-3.187
+interval,patrik,P+T1tempo,6,2.422,-1.137
+interval,patrik,S+T1tempo,6,2.42,-1.135
+interval,a+r,P+M,190,2.425,0.666
+interval,a+r,P+B,190,2.414,0.171
+interval,a+r,P+B3k,190,2.469,0.121
+interval,a+r,C B3k,190,2.462,0.103
+interval,a+r,T1 B3k,190,2.447,0.122
+interval,a+r,P+T1tempo,190,2.423,0.698
+interval,a+r,S+T1tempo,190,2.424,0.669
+interval,all,P+M,196,2.423,0.612
+interval,all,P+B,196,2.426,0.103
+interval,all,P+B3k,196,2.506,0.013
+interval,all,C B3k,196,2.497,-0.0
+interval,all,T1 B3k,196,2.48,0.021
+interval,all,P+T1tempo,196,2.423,0.642
+interval,all,S+T1tempo,196,2.424,0.613
+hard_effort,adrian,P+M,13,3.402,2.663
+hard_effort,adrian,P+B,13,3.432,2.228
+hard_effort,adrian,P+B3k,13,3.558,1.962
+hard_effort,adrian,C B3k,13,3.469,0.63
+hard_effort,adrian,T1 B3k,13,3.55,0.528
+hard_effort,adrian,P+T1tempo,13,3.556,2.649
+hard_effort,adrian,S+T1tempo,13,3.532,2.729
+hard_effort,rise,P+M,2,2.672,-2.672
+hard_effort,rise,P+B,2,2.571,-2.571
+hard_effort,rise,P+B3k,2,2.663,-2.663
+hard_effort,rise,C B3k,2,2.616,-2.616
+hard_effort,rise,T1 B3k,2,2.616,-2.616
+hard_effort,rise,P+T1tempo,2,2.672,-2.672
+hard_effort,rise,S+T1tempo,2,2.672,-2.672
+hard_effort,patrik,P+M,4,6.798,6.798
+hard_effort,patrik,P+B,4,5.253,5.253
+hard_effort,patrik,P+B3k,4,4.482,4.482
+hard_effort,patrik,C B3k,4,4.11,4.11
+hard_effort,patrik,T1 B3k,4,4.127,4.127
+hard_effort,patrik,P+T1tempo,4,6.962,6.962
+hard_effort,patrik,S+T1tempo,4,6.942,6.942
+hard_effort,a+r,P+M,15,3.305,1.952
+hard_effort,a+r,P+B,15,3.317,1.588
+hard_effort,a+r,P+B3k,15,3.439,1.345
+hard_effort,a+r,C B3k,15,3.355,0.198
+hard_effort,a+r,T1 B3k,15,3.426,0.109
+hard_effort,a+r,P+T1tempo,15,3.439,1.939
+hard_effort,a+r,S+T1tempo,15,3.417,2.009
+hard_effort,all,P+M,19,4.04,2.972
+hard_effort,all,P+B,19,3.725,2.36
+hard_effort,all,P+B3k,19,3.658,2.005
+hard_effort,all,C B3k,19,3.514,1.021
+hard_effort,all,T1 B3k,19,3.573,0.955
+hard_effort,all,P+T1tempo,19,4.18,2.997
+hard_effort,all,S+T1tempo,19,4.159,3.047

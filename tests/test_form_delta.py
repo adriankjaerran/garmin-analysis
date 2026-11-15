@@ -85,8 +85,8 @@ def test_form_series_shape():
     s = fd.form_series("adrian")
     assert len(s) > 100 and [r["date"] for r in s] == sorted(r["date"] for r in s)
     last = s[-1]
-    assert {"date", "interval", "long", "ski", "overall", "sd"} <= set(last)
-    assert 30 < last["interval"] < 80
+    assert {"date", "run", "interval", "long", "ski", "overall", "sd"} <= set(last)
+    assert 30 < last["interval"] < 80 and 30 < last["run"] < 80
     assert fd.form_series("adrian", since=last["date"]) == [last]
 
 

@@ -39,7 +39,7 @@ function LastTimeBody({ c, gid, same, base }: { c: CsSession; gid: string; same:
               {!o ? <span class="muted small">wasn't there</span> : (
                 <span class="cs-last-v">
                   {d !== null
-                    ? <span title={`Fitness score (VDOT scale, ${m.form?.discipline ?? ""}): ${then!.toFixed(1)} then, ${now!.toFixed(1)} now`}>
+                    ? <span title={`Fitness score (VDOT scale, ${m.form?.discipline === "ski" ? "ski" : "run"}): ${then!.toFixed(1)} then, ${now!.toFixed(1)} now`}>
                         score {then!.toFixed(1)} → <b>{now!.toFixed(1)}</b> <span class={d >= 0.3 ? "good" : d <= -0.3 ? "bad" : "muted"}>{d > 0 ? "+" : d < 0 ? "−" : "±"}{Math.abs(d).toFixed(1)}</span></span>
                     : <span class="muted small" title={unrel ? "The fitness model marks a score here as unreliable, so it isn't compared" : "A fitness score needs a hard session with heart rate on both days"}>{now === null && then === null ? "no scores" : now === null ? (unrel ? "score today unreliable" : "no score today") : unrel ? "score then unreliable" : "no score then"}</span>}
                   {rep !== null && <span title="Average time per rep (every full rep each ran), then vs now"> · avg rep {repTime(o.avg_s)} → <b>{repTime(m.avg_s)}</b> <span class={rep < -0.2 ? "good" : rep > 0.2 ? "bad" : "muted"}>{rep < 0 ? "−" : "+"}{Math.abs(rep).toFixed(1)} s</span></span>}

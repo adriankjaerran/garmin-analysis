@@ -1,0 +1,185 @@
+set,person,model,n,mae,bias
+official,adrian,production,5,0.915,-0.148
+official,adrian,P+M,5,0.888,-0.055
+official,adrian,P+B,5,0.925,-0.146
+official,adrian,P+B3k,5,0.941,-0.285
+official,adrian,C B3k,5,0.928,-0.291
+official,adrian,T1 B3k,5,0.856,-0.371
+official,adrian,P+T1tempo,5,1.055,-0.403
+official,adrian,S+T1tempo,5,0.99,-0.368
+official,rise,production,5,1.753,-0.181
+official,rise,P+M,5,1.854,0.131
+official,rise,P+B,5,1.681,0.054
+official,rise,P+B3k,5,1.808,-0.089
+official,rise,C B3k,5,1.531,0.59
+official,rise,T1 B3k,5,1.57,-0.016
+official,rise,P+T1tempo,5,2.037,-1.105
+official,rise,S+T1tempo,5,1.901,-0.902
+official,patrik,production,1,10.874,-10.874
+official,patrik,P+M,1,9.891,-9.891
+official,patrik,P+B,1,8.006,-8.006
+official,patrik,P+B3k,1,8.006,-8.006
+official,patrik,C B3k,1,7.135,-7.135
+official,patrik,T1 B3k,1,7.135,-7.135
+official,patrik,P+T1tempo,1,10.874,-10.874
+official,patrik,S+T1tempo,1,10.874,-10.874
+official,a+r,production,10,1.334,-0.165
+official,a+r,P+M,10,1.371,0.038
+official,a+r,P+B,10,1.303,-0.046
+official,a+r,P+B3k,10,1.374,-0.187
+official,a+r,C B3k,10,1.229,0.15
+official,a+r,T1 B3k,10,1.213,-0.193
+official,a+r,P+T1tempo,10,1.546,-0.754
+official,a+r,S+T1tempo,10,1.445,-0.635
+official,all,production,11,2.201,-1.138
+official,all,P+M,11,2.146,-0.865
+official,all,P+B,11,1.912,-0.77
+official,all,P+B3k,11,1.977,-0.898
+official,all,C B3k,11,1.766,-0.513
+official,all,T1 B3k,11,1.751,-0.824
+official,all,P+T1tempo,11,2.394,-1.674
+official,all,S+T1tempo,11,2.302,-1.566
+official+high,adrian,production,8,1.257,-0.68
+official+high,adrian,P+M,8,1.344,-0.58
+official+high,adrian,P+B,8,1.763,-1.008
+official+high,adrian,P+B3k,8,1.821,-1.269
+official+high,adrian,C B3k,8,1.951,-1.284
+official+high,adrian,T1 B3k,8,1.843,-1.391
+official+high,adrian,P+T1tempo,8,1.407,-0.735
+official+high,adrian,S+T1tempo,8,1.318,-0.67
+official+high,rise,production,5,1.753,-0.181
+official+high,rise,P+M,5,1.854,0.131
+official+high,rise,P+B,5,1.681,0.054
+official+high,rise,P+B3k,5,1.808,-0.089
+official+high,rise,C B3k,5,1.531,0.59
+official+high,rise,T1 B3k,5,1.57,-0.016
+official+high,rise,P+T1tempo,5,2.037,-1.105
+official+high,rise,S+T1tempo,5,1.901,-0.902
+official+high,patrik,production,1,10.874,-10.874
+official+high,patrik,P+M,1,9.891,-9.891
+official+high,patrik,P+B,1,8.006,-8.006
+official+high,patrik,P+B3k,1,8.006,-8.006
+official+high,patrik,C B3k,1,7.135,-7.135
+official+high,patrik,T1 B3k,1,7.135,-7.135
+official+high,patrik,P+T1tempo,1,10.874,-10.874
+official+high,patrik,S+T1tempo,1,10.874,-10.874
+official+high,a+r,production,13,1.448,-0.488
+official+high,a+r,P+M,13,1.54,-0.307
+official+high,a+r,P+B,13,1.732,-0.6
+official+high,a+r,P+B3k,13,1.816,-0.815
+official+high,a+r,C B3k,13,1.789,-0.563
+official+high,a+r,T1 B3k,13,1.738,-0.862
+official+high,a+r,P+T1tempo,13,1.649,-0.877
+official+high,a+r,S+T1tempo,13,1.542,-0.759
+official+high,all,production,14,2.121,-1.23
+official+high,all,P+M,14,2.137,-0.991
+official+high,all,P+B,14,2.18,-1.129
+official+high,all,P+B3k,14,2.258,-1.329
+official+high,all,C B3k,14,2.171,-1.032
+official+high,all,T1 B3k,14,2.123,-1.31
+official+high,all,P+T1tempo,14,2.308,-1.591
+official+high,all,S+T1tempo,14,2.209,-1.482
+extra_high,adrian,production,3,1.826,-1.568
+extra_high,adrian,P+M,3,2.104,-1.455
+extra_high,adrian,P+B,3,3.161,-2.444
+extra_high,adrian,P+B3k,3,3.288,-2.909
+extra_high,adrian,C B3k,3,3.656,-2.938
+extra_high,adrian,T1 B3k,3,3.487,-3.091
+extra_high,adrian,P+T1tempo,3,1.992,-1.287
+extra_high,adrian,S+T1tempo,3,1.865,-1.172
+extra_high,a+r,production,3,1.826,-1.568
+extra_high,a+r,P+M,3,2.104,-1.455
+extra_high,a+r,P+B,3,3.161,-2.444
+extra_high,a+r,P+B3k,3,3.288,-2.909
+extra_high,a+r,C B3k,3,3.656,-2.938
+extra_high,a+r,T1 B3k,3,3.487,-3.091
+extra_high,a+r,P+T1tempo,3,1.992,-1.287
+extra_high,a+r,S+T1tempo,3,1.865,-1.172
+extra_high,all,production,3,1.826,-1.568
+extra_high,all,P+M,3,2.104,-1.455
+extra_high,all,P+B,3,3.161,-2.444
+extra_high,all,P+B3k,3,3.288,-2.909
+extra_high,all,C B3k,3,3.656,-2.938
+extra_high,all,T1 B3k,3,3.487,-3.091
+extra_high,all,P+T1tempo,3,1.992,-1.287
+extra_high,all,S+T1tempo,3,1.865,-1.172
+interval,adrian,production,122,2.379,0.728
+interval,adrian,P+M,122,2.4,0.697
+interval,adrian,P+B,122,2.42,0.032
+interval,adrian,P+B3k,122,2.488,-0.112
+interval,adrian,C B3k,122,2.473,-0.089
+interval,adrian,T1 B3k,122,2.449,-0.058
+interval,adrian,P+T1tempo,122,2.39,0.73
+interval,adrian,S+T1tempo,122,2.394,0.721
+interval,rise,production,68,2.467,0.657
+interval,rise,P+M,68,2.47,0.609
+interval,rise,P+B,68,2.403,0.42
+interval,rise,P+B3k,68,2.434,0.538
+interval,rise,C B3k,68,2.442,0.447
+interval,rise,T1 B3k,68,2.444,0.447
+interval,rise,P+T1tempo,68,2.484,0.641
+interval,rise,S+T1tempo,68,2.478,0.574
+interval,patrik,production,6,2.336,-1.06
+interval,patrik,P+M,6,2.379,-1.096
+interval,patrik,P+B,6,2.823,-2.057
+interval,patrik,P+B3k,6,3.687,-3.412
+interval,patrik,C B3k,6,3.606,-3.276
+interval,patrik,T1 B3k,6,3.522,-3.187
+interval,patrik,P+T1tempo,6,2.422,-1.137
+interval,patrik,S+T1tempo,6,2.42,-1.135
+interval,a+r,production,190,2.411,0.703
+interval,a+r,P+M,190,2.425,0.666
+interval,a+r,P+B,190,2.414,0.171
+interval,a+r,P+B3k,190,2.469,0.121
+interval,a+r,C B3k,190,2.462,0.103
+interval,a+r,T1 B3k,190,2.447,0.122
+interval,a+r,P+T1tempo,190,2.423,0.698
+interval,a+r,S+T1tempo,190,2.424,0.669
+interval,all,production,196,2.409,0.649
+interval,all,P+M,196,2.423,0.612
+interval,all,P+B,196,2.426,0.103
+interval,all,P+B3k,196,2.506,0.013
+interval,all,C B3k,196,2.497,-0.0
+interval,all,T1 B3k,196,2.48,0.021
+interval,all,P+T1tempo,196,2.423,0.642
+interval,all,S+T1tempo,196,2.424,0.613
+hard_effort,adrian,production,13,3.511,2.69
+hard_effort,adrian,P+M,13,3.402,2.663
+hard_effort,adrian,P+B,13,3.432,2.228
+hard_effort,adrian,P+B3k,13,3.558,1.962
+hard_effort,adrian,C B3k,13,3.469,0.63
+hard_effort,adrian,T1 B3k,13,3.55,0.528
+hard_effort,adrian,P+T1tempo,13,3.556,2.649
+hard_effort,adrian,S+T1tempo,13,3.532,2.729
+hard_effort,rise,production,2,2.672,-2.672
+hard_effort,rise,P+M,2,2.672,-2.672
+hard_effort,rise,P+B,2,2.571,-2.571
+hard_effort,rise,P+B3k,2,2.663,-2.663
+hard_effort,rise,C B3k,2,2.616,-2.616
+hard_effort,rise,T1 B3k,2,2.616,-2.616
+hard_effort,rise,P+T1tempo,2,2.672,-2.672
+hard_effort,rise,S+T1tempo,2,2.672,-2.672
+hard_effort,patrik,production,4,6.993,6.993
+hard_effort,patrik,P+M,4,6.798,6.798
+hard_effort,patrik,P+B,4,5.253,5.253
+hard_effort,patrik,P+B3k,4,4.482,4.482
+hard_effort,patrik,C B3k,4,4.11,4.11
+hard_effort,patrik,T1 B3k,4,4.127,4.127
+hard_effort,patrik,P+T1tempo,4,6.962,6.962
+hard_effort,patrik,S+T1tempo,4,6.942,6.942
+hard_effort,a+r,production,15,3.399,1.975
+hard_effort,a+r,P+M,15,3.305,1.952
+hard_effort,a+r,P+B,15,3.317,1.588
+hard_effort,a+r,P+B3k,15,3.439,1.345
+hard_effort,a+r,C B3k,15,3.355,0.198
+hard_effort,a+r,T1 B3k,15,3.426,0.109
+hard_effort,a+r,P+T1tempo,15,3.439,1.939
+hard_effort,a+r,S+T1tempo,15,3.417,2.009
+hard_effort,all,production,19,4.156,3.031
+hard_effort,all,P+M,19,4.04,2.972
+hard_effort,all,P+B,19,3.725,2.36
+hard_effort,all,P+B3k,19,3.658,2.005
+hard_effort,all,C B3k,19,3.514,1.021
+hard_effort,all,T1 B3k,19,3.573,0.955
+hard_effort,all,P+T1tempo,19,4.18,2.997
+hard_effort,all,S+T1tempo,19,4.159,3.047

@@ -120,16 +120,18 @@ def test_meta_reps_equal_groups_reps(client):
     assert n >= 18
     r = client.get("/api/activities/23925803195").json()     # 2026-08-10 ski 4×4:30
     assert len(r["reps"]) == 4
-    f = client.get("/api/activities/24631175030").json()     # Frogner 3×1800 + 2×900: set distances
-    assert [x["dist"] for x in f["reps"] if x["time"] > 100] == [1800, 1800, 1800, 900, 900]
+    f = client.get("/api/activities/24631175030").json()     # Frogner loop 3×1800 + 2×900: whole laps (~890 m)
+    assert [x["dist"] for x in f["reps"] if x["time"] > 100] == [1780, 1780, 1780, 890, 890]
 
 
 def test_shape_staleness_and_prediction(client):
     d = client.get("/api/fitness").json()
-    c = d["disciplines"]["long"]["current"]
-    assert {"days_since_evidence", "stale", "last_evidence_date"} <= set(c)
+    c = d["disciplines"]["run"]["current"]
+    assert {"days_since_evidence", "stale", "last_evidence_date", "last_distance_evidence_date", "sd_state"} <= set(c)
     o = d["disciplines"]["overall"]["current"]
     p = o["race_prediction"]
     assert p and p["model"] == "distance_curve" and o["race_equivalents_s"] == p["race_equivalents_s"]
-    # long's own race equivalents are the curve's (one prediction per distance)
-    assert c["race_equivalents_s"] == p["race_equivalents_s"] and c["ref_km"] > 10
+    # run = the 10k prediction (VDOT ± sd), its race equivalents the curve's (one prediction per distance)
+    assert c["race_equivalents_s"] == p["race_equivalents_s"] and c["ref_km"] == 10
+    assert c["mean"] == pytest.approx(p["vdot_by_distance"]["10k"], abs=0.01) and c["sd"] == pytest.approx(p["sd_by_distance"]["10k"], abs=0.01)
+    assert d["disciplines"]["long"]["current"]["race_equivalents_s"] == p["race_equivalents_s"]

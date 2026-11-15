@@ -1,0 +1,9 @@
+,0
+grid,curve2
+n_cfg,20
+race_ar_min,1.141989100919409
+race_ar_max,1.552807014054686
+race_ar_median,1.3460979788511747
+loro_tuned_race_mae,1.258605434405127
+fc_selected,curve2 qs0.02 ssd1.5
+fc_selected_race_mae,1.3077191449001346

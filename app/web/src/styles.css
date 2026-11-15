@@ -24,6 +24,8 @@
   --sport-hike: #2f8a4c;
   --sport-bike: #b88a00;
   --sport-swim: #1f8fa6;
+  --sport-row: #7b4fc4;     /* Concept2 RowErg */
+  --sport-skierg: #d0671f;  /* Concept2 SkiErg */
   --sport-other: #8a9199;
   /* type, spacing, radii, motion */
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;

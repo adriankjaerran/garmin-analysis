@@ -41,7 +41,7 @@ SIX_K = "6×1000 · rest ~2:30"     # the Bislett 6×1000 same-workout key
     ("/api/groups?kind=exact", {"kind", "groups"}),
     ("/api/groups?kind=workout", {"kind", "groups"}),
     ("/api/fitness", {"disciplines", "sessions"}),
-    ("/api/fitness?discipline=interval&hr=1", {"disciplines", "sessions"}),
+    ("/api/fitness?discipline=run&hr=1", {"disciplines", "sessions"}),
     ("/api/fitness/rebuild", {"running"}),
     ("/api/home", {"anchor", "latest", "latest_day", "volume", "days", "recent", "fitness", "periods"}),
     ("/api/home?date=2025-06-15", {"anchor", "latest", "volume"}),
@@ -378,10 +378,16 @@ def test_fitness_json_loads(client):
     raw = json.loads((DATA / "fitness.json").read_text())
     assert raw["disciplines"] and raw["sessions"]
     d = client.get("/api/fitness").json()
-    assert {"interval", "long", "ski"} <= set(d["disciplines"])
+    assert {"run", "interval", "long", "ski"} <= set(d["disciplines"])
+    assert "distance_curve" not in d and "curve_off" not in d and "curve_off" not in raw
     assert len(d["sessions"]) == len(raw["sessions"])
-    cur = d["disciplines"]["interval"]["current"]
+    cur = d["disciplines"]["run"]["current"]
     assert 30 < cur["mean"] < 85
+    # discipline=run: the run series and every running session (interval / long evidence), no ski
+    f = client.get("/api/fitness?discipline=run").json()
+    assert set(f["disciplines"]) == {"run"}
+    assert f["sessions"] and {s["discipline"] for s in f["sessions"]} <= {"interval", "long"}
+    assert len(f["sessions"]) == sum(1 for s in raw["sessions"] if s["discipline"] in ("interval", "long"))
 
 
 def test_fitness_variants(client):
@@ -392,13 +398,13 @@ def test_fitness_variants(client):
     v = d["variants"]
     assert v["pace"]["label"] and v["hr"]["label"]
     hd = v["hr"]["disciplines"]
-    assert {"interval", "long", "ski"} <= set(hd)
-    cur = hd["interval"]["current"]
+    assert {"run", "interval", "long", "ski"} <= set(hd)
+    cur = hd["run"]["current"]
     assert 30 < cur["mean"] < 85 and "trend_90d" in cur and "last_evidence" in cur
     # filters apply to the variant series too
-    f = client.get("/api/fitness?discipline=long&from=2024-01-01").json()
-    assert set(f["variants"]["hr"]["disciplines"]) == {"long"}
-    assert all(w["date"] >= "2024-01-01" for w in f["variants"]["hr"]["disciplines"]["long"]["weekly"])
+    f = client.get("/api/fitness?discipline=run&from=2024-01-01").json()
+    assert set(f["variants"]["hr"]["disciplines"]) == {"run"}
+    assert all(w["date"] >= "2024-01-01" for w in f["variants"]["hr"]["disciplines"]["run"]["weekly"])
     # eval comparison: null without fitness_eval.json, else pace/hr per discipline
     ev = d["eval_variants"]
     if (DATA / "fitness_eval.json").exists() and ev is not None:
@@ -442,8 +448,8 @@ def test_home(client, activities):
     assert len(rec) >= 15 and rec[0]["date"] == anchor
     assert all(k in rec[0] for k in ("signature", "rep_count", "rep_speed_ms", "family_label", "dur_s", "track"))
     if h["fitness"]:
-        assert "interval" in h["fitness"] and "overall" not in h["fitness"] and h["fitness"]["interval"]["mean"]
-        assert set(h["fitness"]["interval"]) == {"label", "unit", "mean", "sd", "date", "last_evidence_date"}
+        assert "run" in h["fitness"] and not {"interval", "long", "overall"} & set(h["fitness"]) and h["fitness"]["run"]["mean"]
+        assert set(h["fitness"]["run"]) == {"label", "unit", "mean", "sd", "date", "last_evidence_date"}
     # an anchor before the data: nothing active, no latest day
     e = client.get("/api/home?date=2000-01-01").json()
     assert e["latest"] is None and e["latest_day"] is None and e["recent"] == []
@@ -608,3 +614,34 @@ def test_fitness_eval_writer_finite():
     import fitness_eval
 
     assert fitness_eval.finite({"a": float("nan"), "b": [np.float64("inf"), np.int64(3), 2.5]}) == {"a": None, "b": [None, 3, 2.5]}
+
+
+# ---- races: pre-race predictions precomputed in fitness.json `races` (scripts/fitness_model.official_race_results)
+def test_races(client):
+    d = client.get("/api/races").json()
+    assert {"person", "races", "summary"} <= set(d)
+    run = [r for r in d["races"] if r["sport"] == "run"]
+    for r in d["races"]:
+        assert r["source"] in ("chip", "watch") and r["official_s"] > 0
+        if r["sport"] == "ski":
+            assert "pct" not in r and "predicted_s" not in r
+    for r in run:
+        if "pct" in r:   # pct = (predicted - official) / predicted * 100, > 0 = faster than predicted
+            assert abs(r["pct"] - (r["predicted_s"] - r["official_s"]) / r["predicted_s"] * 100) < 0.05
+            assert r["predicted_range_s"][0] <= r["predicted_s"] <= r["predicted_range_s"][1]
+    s = d["summary"]
+    scored = [r for r in run if "pct" in r]
+    assert s["n_run"] == len(scored) and s["n_beat"] == sum(r["pct"] > 0 for r in scored)
+    if scored:
+        assert s["best"]["pct"] == max(r["pct"] for r in scored)
+
+
+def test_community_races(client):
+    d = client.get("/api/community/races").json()
+    assert {"people", "races"} <= set(d)
+    for r in d["races"]:
+        gaps = [x["gap_s"] for x in r["results"]]
+        assert gaps == sorted(gaps) and (not gaps or gaps[0] == 0)
+        if r["sport"] == "ski":
+            assert all("pct" not in x for x in r["results"])
+

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>What Garmin API token gives access to</title>
+<style>
+  body { font: 15px/1.4 Helvetica, Arial, sans-serif; color: #000; background: #fff; margin: 0; padding: 24px; }
+  .wrap { width: 680px; }
+  h1 { font-size: 19px; margin: 0 0 2px; }
+  p { margin: 0 0 12px; color: #444; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #999; padding: 6px 9px; text-align: left; vertical-align: top; }
+  th { background: #e8e8e8; }
+  th:nth-child(1) { width: 34%; } th:nth-child(2) { width: 36%; }
+  td.sec { background: #f4f4f4; font-weight: bold; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>What Garmin API token gives access to</h1>
+  <p>Garmin Connect Personal API</p>
+
+  <table>
+    <tr><th></th><th>During an activity</th><th>Outside activities</th></tr>
+    <tr><td class="sec" colspan="3">Data</td></tr>
+    <tr><td>Heart rate</td><td>Every 1–5 s (depends on watch)</td><td>Every 2 min</td></tr>
+    <tr><td>GPS position</td><td>Every 1–5 s</td><td>No</td></tr>
+    <tr><td>Speed and distance</td><td>Every 1–5 s</td><td>Daily total</td></tr>
+    <tr><td>Cadence</td><td>Every 1–5 s</td><td>No</td></tr>
+    <tr><td class="sec" colspan="3">Wellness</td></tr>
+    <tr><td>Sleep</td><td>–</td><td>One summary per night</td></tr>
+    <tr><td>Steps, calories, stress, respiration</td><td>Steps and calories total</td><td>Daily total</td></tr>
+  </table>
+</div>
+</body>
+</html>

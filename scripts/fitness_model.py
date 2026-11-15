@@ -16,13 +16,18 @@ Disciplines (see docs):
             (races, tempo) + an HR-based aerobic estimate from steady running (speed per %HRR, Swain).
   ski       XC/roller ski: mechanical power from climb rate + rolling friction + drag, converted to
             VO2 with an assumed gross efficiency, scored like a run (best sustained demand / Daniels %VO2max).
+            Physically implausible windows (speed / vertical rate, `ski_implausible`) are dropped.
+Official race results (data/races.json, optional): run races scored from the chip time, ski races `hard` (σ ski_race).
+Confirmed tests / time trials (data/races.json `tests`): scored like run races (σ race, at their own distance), but not
+official races (not in fitness.json `races`).
   overall   precision-weighted mix of the disciplines as % of each one's personal best.
 Running (interval + long) is published from one coupled distance curve (`smooth_curve`, `CURVE`): VDOT(km, t) =
 theta_t + slope_t * log2(km/5); interval = the curve at 5 km, long = at the 10k-half log-mean (~14.5 km), and the
 race predictor (fitness.json `predictor`, any distance) reads the same curve.
 
 Two variants: "pace" (performance only; HR is diagnostics) and "hr" (same scores, but HR effort decides whether a
-hard session was maximal: sub-max -> lower bound, else weighted by p(maximal), FR935 HR discounted). See `apply_hr_intent`.
+hard session was maximal: sub-max -> lower bound, else weighted by p(maximal), discounted by the device's HR trust from
+data/<person>/profile/hr_settings.json, scripts/hr_settings.py). See `apply_hr_intent`, `hr_of`.
 
 Importable API (for a backend): `build(person)` -> fitness doc; `load_features`, `collect_evidence`,
 `score_session`, `smooth_series`, `forecast_errors`, `smooth_curve`, `curve_predict`, `evidence_km`; physiology `vdot_from_race`, `race_time`, `speed_for`,
@@ -48,11 +53,15 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import session_groups as sg  # noqa: E402
+import hr_settings as hs  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-MODEL_VERSION = 2       # fitness.json schema/model; 2: running from the coupled distance curve, `predictor` block
-FEATURE_VERSION = 1     # per-session feature cache key (bump only when session_features changes)
-NEW_WATCH_FROM = "2026-02-18"
+MODEL_VERSION = 3       # fitness.json schema/model; 2: running from the coupled distance curve, `predictor` block;
+                        # 3: `run` discipline (the curve at 10 km = one run number), `curve_off` removed
+FEATURE_VERSION = 2     # per-session feature cache key (bump only when session_features changes); 2: level_alt
+NEW_WATCH_FROM = "2026-02-18"   # adrian FR935 -> 4315; only for the legacy HR settings (HR_SETTINGS = False)
+HR_SETTINGS = True     # HR max / trust per person and device from data/<person>/profile/hr_settings.json
+                       # (scripts/hr_settings.py); False: the old adrian constants for everyone (evaluation)
 
 P = {
     # running
@@ -60,18 +69,24 @@ P = {
                                  # 2.5 at +-20 s, 2.0 at +-45 s, 3.1 without grade; +-10 s inflated hill reps by 16)
     "grade_clip": 0.20,
     "vz_glitch": 1.0,            # m/s: altitude steps faster than this (running) are barometer glitches -> grade 0
+    "alt_fix": "level",          # running altitude: "level" = revisited positions at one altitude (`level_alt`); None: raw
+    "level": {"knot_s": 30, "step_s": 5, "pair_m": 10.0, "min_dt": 30, "lam": 0.3, "resid_m": 6.0, "max_pairs": 30000},
     "downhill_share": 0.5,       # share of Minetti's downhill saving we believe (Minetti overstates it at speed)
     "v_max_run": 8.0,            # m/s: faster grid speeds are GPS spikes
     "wbal_dt": 2,                # s: W'bal step
     "tau_scale": 0.35,           # multiplier on Skiba's recovery time constant (fitted: rep-length bias ~0, best forecast)
-    "interval_offset": -2.5,     # VDOT added to W'bal interval scores so they match 5k/10k race VDOT
+    "interval_offset": -0.5,     # VDOT added to W'bal interval scores so they match race VDOT. 2026-11-04 re-fit
+                                 # (track by rep location, set distances, Frogner loop as road, level_alt): grid on
+                                 # adrian + rise, forward race back-test + one-step interval forecast; flat basin
+                                 # -1.0 .. -0.25 (docs/fitness-model.md "Offsets re-fit"); was -2.5
     "tempo_offset": 3.0,         # VDOT added to tempo (>= 20 min continuous) scores: tempo is run below race effort
+                                 # (re-checked 2026-11-04: 2.5-3.5 flat, 4.0 tips cross_check -> kept)
     "cross_check": 3.0,          # long-run evidence > interval shape + 3 VDOT + 2 sd is implausible (mislabelled / GPS)
     "dcp_ref_w": 250.0,          # W: Skiba's DCP for a 'full' rest, expressed as share of CS
     "cont_min_s": 1200,          # long-discipline continuous effort >= 20 min
     # HR
-    "hr_max": 206,               # profile (Garmin HR_MAX zones); data p98 194..207 depending on year/watch
-    "hr_rest_default": 50,
+    "hr_max": 206,               # fallback without hr_settings.json (adrian's Garmin HR_MAX zones); else per person
+    "hr_rest_default": 50,       # fallback without daily resting HR and without hr_settings.json rest_hr
     "hr_chunk_s": 180,
     "hr_warmup_s": 600,
     "hr_min_hrr": 0.45,          # below this %HRR the HR-VO2 line is unreliable
@@ -80,8 +95,10 @@ P = {
     "hr_intent": {
         "thr": {"interval": 0.85, "long": 0.85, "ski": 0.82},  # %HRR of a maximal effort (work-HR p90 / last 2/3 of the window)
         "sd": 0.04,                                           # spread of maximal-effort %HRR around thr
+        # legacy (HR_SETTINGS = False) trust by adrian's watch; else per device from hr_settings.json `devices[].trust`
         "trust": {"fr935": {"interval": 0.3, "steady": 0.5},  # FR935 wrist HR under-reads interval bursts erratically; 0.5: never demotes alone
                   "4315": {"interval": 1.0, "steady": 1.0}},
+        "steady_trust_min": None,                             # evaluation knob: floor on every device's steady trust
         "demote_p": 0.5,                                      # p(maximal) below this: hard -> bound (in-sample choice, see docs)
     },
     # ski
@@ -89,6 +106,10 @@ P = {
     "ski_mu": {"roller?": 0.025, "snow": 0.035, "unknown": 0.03},
     "ski_cda_per_kg": 0.5 / 75,  # CdA m² per kg body mass
     "rho": 1.2,
+    "ski_v_max": 7.0,            # m/s over the scored window (>= 20 min): faster is a lift / car / GPS glitch (Vasaloppet
+                                 # winners average ~7 m/s; our fastest real window is 6.0 m/s) -> `implausible`
+    "ski_vz_max": 0.3,           # m/s net vertical over the scored window (1080 m/h, world-class uphill pace): faster is a
+                                 # barometer glitch (our steepest real window: 0.21 m/s) -> `implausible`
     # smoother
     "q_per_day": {"interval": 0.05, "long": 0.02, "ski": 0.05},  # VDOT² per day random walk: best one-step predictive log-lik, capped at 0.05
     "prior_sd": 6.0,
@@ -96,7 +117,9 @@ P = {
 DISCIPLINES = ("interval", "long", "ski")
 STALE_DAYS = 90        # current shape without a race / hard session (weight > 0.5) for longer than this: `stale`
 LABEL = {"interval": "Interval shape (short/fast running)", "long": "Long-distance running shape",
+         "run": "Run fitness (10k-equivalent VDOT from the personal distance curve)",
          "ski": "Ski shape (roller + snow)", "overall": "Overall (all disciplines, % of personal best)"}
+RUN_KM = 10.0          # `run` discipline = the distance curve read at 10 km (the one running number the app shows)
 
 
 # ------------------------------------------------------------------ physiology (Daniels & Gilbert 1979)
@@ -191,15 +214,81 @@ def _shift_diff(x, w):
     return out
 
 
+def level_alt(G, **kw):
+    """Running altitude minus a smooth error e(t) fitted so that revisited positions have the same altitude:
+    pairs of GPS points (every 5 s) within 10 m of each other and >= 30 s apart (loops, out-and-back, standing still)
+    give e(t2) - e(t1) = alt(t2) - alt(t1); e is piecewise linear (30 s knots) with a first-difference penalty, least
+    squares, pairs off by > 6 m after a fit dropped (bridges, GPS jumps), 3 passes. Without revisits e stays ~0.
+    adrian's FR935 from 2024 reads 10-35 m high during hard reps and sinks back while standing after them
+    (2024-04-14: three closed ~1000 m loops measured at +15..+25 m each -> +0..+3 m; patrik's watch on the same reps:
+    -1..+2 m). Returns (altitude, info or None)."""
+    c = {**P["level"], **kw}
+    knot_s, step_s, pair_m, min_dt, lam, resid_m, max_pairs = (c[k] for k in ("knot_s", "step_s", "pair_m", "min_dt", "lam",
+                                                                           "resid_m", "max_pairs"))
+    ridge = 1e-3
+    alt = G.get("alt"); gps = G.get("gps")
+    if alt is None or gps is None or "lat" not in G:
+        return alt, None
+    T = len(alt) - 1
+    idx = np.arange(0, T + 1, step_s); idx = idx[gps[idx] & ~np.isnan(alt[idx])]
+    if len(idx) < 10:
+        return alt, None
+    la = np.radians(G["lat"][idx]); lo = np.radians(G["lon"][idx])
+    y = (la - la.mean()) * 6371000.0; x = (lo - lo.mean()) * 6371000.0 * math.cos(la.mean())
+    cx, cy = np.floor(x / pair_m).astype(int), np.floor(y / pair_m).astype(int)
+    H = collections.defaultdict(list)
+    for j in range(len(idx)):
+        H[(cx[j], cy[j])].append(j)
+    I, J = [], []
+    for j in range(len(idx)):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for k in H.get((cx[j] + dx, cy[j] + dy), ()):
+                    if k > j and idx[k] - idx[j] >= min_dt and (x[k] - x[j]) ** 2 + (y[k] - y[j]) ** 2 <= pair_m ** 2:
+                        I.append(j); J.append(k)
+    if len(I) < 5:
+        return alt, None
+    I, J = np.array(I), np.array(J)
+    if len(I) > max_pairs:
+        sel = np.linspace(0, len(I) - 1, max_pairs).astype(int); I, J = I[sel], J[sel]
+    nk = T // knot_s + 2
+
+    def basis(t):
+        k = np.minimum(t // knot_s, nk - 2).astype(int)
+        return k, (t - k * knot_s) / knot_s
+    k1, f1 = basis(idx[I]); k2, f2 = basis(idx[J])
+    dz = alt[idx[J]] - alt[idx[I]]
+    w = np.ones(len(I))
+    n = len(I)
+    s_ = lam * math.sqrt(max(n / nk, 1))   # prior strength scaled with the pairs per knot
+    D = np.zeros((nk - 1, nk)); D[np.arange(nk - 1), np.arange(nk - 1)] = -s_; D[np.arange(nk - 1), np.arange(1, nk)] = s_
+    R = np.eye(nk) * ridge * s_
+    for _ in range(3):
+        A = np.zeros((n, nk)); r = np.arange(n); sw = np.sqrt(w)
+        np.add.at(A, (r, k2), sw * (1 - f2)); np.add.at(A, (r, k2 + 1), sw * f2)
+        np.add.at(A, (r, k1), -sw * (1 - f1)); np.add.at(A, (r, k1 + 1), -sw * f1)
+        e = np.linalg.lstsq(np.vstack([A, D, R]), np.concatenate([sw * dz, np.zeros(2 * nk - 1)]), rcond=None)[0]
+        res = dz - ((e[k2] * (1 - f2) + e[k2 + 1] * f2) - (e[k1] * (1 - f1) + e[k1 + 1] * f1))
+        w = (np.abs(res) <= resid_m).astype(float)
+    k, f = basis(np.arange(T + 1))
+    E = e[k] * (1 - f) + e[k + 1] * f
+    return alt - E, {"pairs": int(n), "kept": int(w.sum()), "e_range": round(float(E.max() - E.min()), 1)}
+
+
 def session_series(fit, act):
     """1 Hz series from the FIT: v (m/s), vg (grade-adjusted / ski VO2 demand), hr, legs (pause-free spans)."""
     G = sg.to_grid(sg.read_series(Path(fit)))
     sg.indoor_grid(G, act)   # Bislett indoor: reps of n x 546.5 m - 7.5 m, 0 between (watch distance is made up there)
+    sg.track_rep_grid(G, act)   # GPS track reps at their set distance (groups.json track_reps)
     T = G["T"]
     v = np.clip(G["v"], 0, P["v_max_run"] if act["sport"] == "run" else 20.0)
-    flat = act.get("atype") in ("track_running", "treadmill_running", "indoor_running") or act.get("place") == "Bislet"
+    # flat: on a running track (groups.json `track`: where the reps / the moving time were, not the start place; not
+    # the Frogner loop, sg.LOOPS: hilly, grade-adjusted like road), the watch's track mode, treadmill / indoor
+    flat = act.get("atype") in ("track_running", "treadmill_running", "indoor_running") or sg.flat_track(act.get("track"))
     w = P["grade_window_s"]
     grade = np.zeros(T + 1)
+    if "alt" in G and act["sport"] == "run" and P["alt_fix"] == "level" and not flat:   # barometer errors (FR935 2024-25)
+        G["alt"] = level_alt(G)[0]
     if "alt" in G and not flat:
         dh, dd = _shift_diff(G["alt"], w), _shift_diff(G["d"], w)
         grade = np.where(dd > 30, dh / np.maximum(dd, 1), 0.0)
@@ -415,8 +504,9 @@ def effort_hrr(S, a, b, hr_rest, hr_max=None):
 TAU_VARIANTS = (0.15, 0.25, 0.35, 0.5, 1.0)
 
 
-def session_features(fit, act, hr_rest):
-    """Everything the model needs from one FIT (independent of the other sessions)."""
+def session_features(fit, act, hr_rest, hr_max=None):
+    """Everything the model needs from one FIT (independent of the other sessions). hr_max: the person's (else P)."""
+    hm = hr_max or P["hr_max"]
     S = session_series(fit, act)
     f = {"T": S["T"], "moving_s": int(S["moving"].sum()), "dist_m": float(S["d"][-1])}
     hr = S["hr"]
@@ -425,7 +515,7 @@ def session_features(fit, act, hr_rest):
         f["wbal_flat"] = wbal_vdot(S["v"])            # without grade adjustment (evaluation)
         c = continuous_vdot(S)
         if c:
-            c["hrr"] = effort_hrr(S, c["start"] + c["dur_s"] // 3, c["start"] + c["dur_s"], hr_rest)
+            c["hrr"] = effort_hrr(S, c["start"] + c["dur_s"] // 3, c["start"] + c["dur_s"], hr_rest, hm)
             f["cont"] = c
         # effort indicator for the interval score: HR in the hardest part (seconds above 85 % of the
         # session's 95th-percentile grade-adjusted speed, from 60 s into the first one)
@@ -437,15 +527,15 @@ def session_features(fit, act, hr_rest):
                 hh = hr[hot]; hh = hh[~np.isnan(hh)]
                 if len(hh) > 30:
                     f["work_hr_p90"] = float(np.percentile(hh, 90))
-                    f["work_hrr"] = float((f["work_hr_p90"] - hr_rest) / (P["hr_max"] - hr_rest))
+                    f["work_hrr"] = float((f["work_hr_p90"] - hr_rest) / (hm - hr_rest))
                 f["work_s"] = int(len(hot))
     else:
         e = ski_effort(S)
         if e:
-            e["hrr"] = effort_hrr(S, e["start"] + (e["end"] - e["start"]) // 3, e["end"], hr_rest)
+            e["hrr"] = effort_hrr(S, e["start"] + (e["end"] - e["start"]) // 3, e["end"], hr_rest, hm)
             f["ski"] = e
     # HR-speed line: not for Bislett indoor (speed is synthetic or made up there)
-    f["hr_aer"] = hr_aerobic(S, act["sport"], hr_rest) if not act.get("indoor_bislett") else None
+    f["hr_aer"] = hr_aerobic(S, act["sport"], hr_rest, hm) if not act.get("indoor_bislett") else None
     if hr is not None:
         h = hr[~np.isnan(hr)]
         f["hr_max_s"] = float(h.max()) if len(h) else None
@@ -453,9 +543,9 @@ def session_features(fit, act, hr_rest):
 
 
 def _feat_job(job):
-    fit, act, hr_rest = job
+    fit, act, hr_rest, hr_max = job
     try:
-        return fit, session_features(fit, act, hr_rest)
+        return fit, session_features(fit, act, hr_rest, hr_max)
     except Exception as e:  # noqa: BLE001
         return fit, {"err": repr(e)[:120]}
 
@@ -464,7 +554,65 @@ def _feat_job(job):
 SIG = {  # observation SD (VDOT) per evidence kind; from test-retest pairs (docs/fitness-model.md)
     "race": 1.0, "int_track": 1.5, "int_road": 2.0, "int_10k": 2.0, "tempo": 2.0, "cont_bound": 2.5,
     "ski_hard": 2.5, "ski_bound": 3.0, "hr_aer": 4.0,
+    "ski_race": 2.0,   # official ski race (data/races.json): known maximal intent, but a 20-90 min window of a 2-7 h race
 }
+RACES_FILE = ROOT / "data" / "races.json"
+
+
+def load_official_races(person, path=None):
+    """{activity id (str): {name, date, sport, km, official_s}} for `person` from data/races.json (official chip
+    times, user-supplied). Missing file / person: {}."""
+    path = RACES_FILE if path is None else Path(path)
+    if not path.exists():
+        return {}
+    out = {}
+    for r in json.loads(path.read_text()).get("races", []):
+        x = (r.get("results") or {}).get(person)
+        if x and x.get("activity_id") and x.get("official_s"):
+            out[str(x["activity_id"])] = {"name": r["name"], "date": r["date"], "sport": r["sport"],
+                                          "km": float(r["km"]), "official_s": float(x["official_s"])}
+    return out
+
+
+def load_not_races(person, path=None):
+    """Activity ids (str) the user says were not races (data/races.json `not_races`: {person: [{activity_id, note}]})."""
+    path = RACES_FILE if path is None else Path(path)
+    if not path.exists():
+        return set()
+    return {str(x["activity_id"]) for x in (json.loads(path.read_text()).get("not_races") or {}).get(person, [])}
+
+
+def load_tests(person, path=None):
+    """{activity id (str): {name, date, km, time_s}} of the user-confirmed all-out tests / time trials for `person`
+    (data/races.json `tests`: {person: [{activity_id, date, km, time_s, time, note}]}). Scored as race evidence at their
+    own distance (`score_session`), but they are not official races. Missing file / person: {}."""
+    path = RACES_FILE if path is None else Path(path)
+    if not path.exists():
+        return {}
+    out = {}
+    for x in (json.loads(path.read_text()).get("tests") or {}).get(person, []):
+        if x.get("activity_id") and x.get("km") and x.get("time_s"):
+            km = float(x["km"])
+            out[str(x["activity_id"])] = {"name": f"{race_nominal(km * 1000)[1] or f'{km:g}k'} test", "date": x.get("date"),
+                                          "km": km, "time_s": float(x["time_s"])}
+    return out
+
+
+def apply_official_races(person, acts, path=None):
+    """Attach `official_race` to the activities listed in data/races.json and `time_trial` to the confirmed tests
+    (used by `score_session`); auto-detected `race?` sessions listed under `not_races` become `steady` (lower bound only)."""
+    for i, r in load_official_races(person, path).items():
+        if i in acts:
+            acts[i]["official_race"] = r
+    for i, r in load_tests(person, path).items():
+        if i in acts and acts[i].get("sport") == "run" and "official_race" not in acts[i]:
+            acts[i]["time_trial"] = r
+    for i in load_not_races(person, path):
+        if i in acts and acts[i].get("type") == "race?":
+            acts[i]["type"] = "steady"
+            acts[i]["not_race"] = True
+    return acts
+
 NOMINAL = [(5000, "5k"), (10000, "10k"), (21097.5, "half"), (42195, "marathon")]
 
 
@@ -483,27 +631,43 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
     t, sport, out = act["type"], act["sport"], []
     if "err" in f:
         return out
+    ovr = (act.get("override") or {}).get("fitness")   # session_groups: data/<person>/session_overrides.json
+    if ovr == "exclude":
+        return out
     if sport == "run":
         ind = act.get("indoor_bislett")
         if ind and not any(ind.get("rep_m") or []):
             return out
         if not ind and (not act.get("dist_trusted") or act.get("atype") in ("treadmill_running", "indoor_running")):
             return out
-        track = act.get("atype") == "track_running" or act.get("place") == "Bislet" or bool(ind)
+        track = act.get("atype") == "track_running" or sg.flat_track(act.get("track")) or bool(ind)   # track σ (groups.json `track`; loops: road)
         fw = f.get("wbal_flat")
         comp = {"score_without_grade": fw + P["interval_offset"] if fw is not None and t.startswith("intervals") else None,
                 "work_hrr": f.get("work_hrr")}
-        if t == "race?":
-            nom, nm = race_nominal(f["dist_m"])
-            mov = act.get("moving_s") or f["moving_s"]
+        off = act.get("official_race") if act.get("official_race", {}).get("sport") == "run" else None
+        tt = act.get("time_trial") if not off else None   # confirmed test / time trial (data/races.json `tests`)
+        if off or tt or t == "race?":
+            if off:   # data/races.json: official distance + chip time (whatever the session was typed / the watch said)
+                nom, mov = off["km"] * 1000, off["official_s"]
+                nm = race_nominal(nom)[1] or f"{off['km']:g}k"
+            elif tt:   # test: the confirmed distance + time, race evidence at its own distance (not an official race)
+                nom, mov = tt["km"] * 1000, tt["time_s"]
+                nm = race_nominal(nom)[1] or f"{tt['km']:g}k"
+            else:
+                nom, nm = race_nominal(f["dist_m"])
+                mov = act.get("moving_s") or f["moving_s"]
             if nom:
                 v = vdot_from_race(nom, mov)
                 c = {"race": nm, "time_s": mov, **comp}
+                if off:
+                    c.update(official=off["name"], race_km=off["km"])
+                elif tt:
+                    c.update(test=tt["name"], race_km=tt["km"])
                 if nom <= 7000:
                     out.append(("interval", v, "race", SIG["race"], c))
                 else:
                     out.append(("long", v, "race", SIG["race"], c))
-                    if nom == 10000:
+                    if nm == "10k":
                         out.append(("interval", v, "hard", SIG["int_10k"], c))
         elif t.startswith("intervals"):
             w = f["wbal"].get(str(tau)) if isinstance(f.get("wbal"), dict) else None
@@ -519,7 +683,7 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
                     w = w + hr_b * (hr_ref - f["work_hrr"])
                 out.append(("interval", w, "hard", SIG["int_track" if track else "int_road"], c))
         cont = f.get("cont") if not ind else None   # indoor: only the whole-lap reps carry distance
-        if cont and t != "race?":
+        if cont and t != "race?" and not off and not tt:
             kind = "hard" if t == "tempo" else "bound"
             out.append(("long", cont["vdot"] + (P["tempo_offset"] if kind == "hard" else 0.0), kind, SIG["tempo" if kind == "hard" else "cont_bound"],
                         {"window_s": cont["dur_s"], "gap_speed": round(cont["speed"], 3), "hrr": cont.get("hrr")}))
@@ -529,11 +693,35 @@ def score_session(act, f, tau=None, hr_b=0.0, hr_ref=0.9, use_hr_aer=False):
     elif sport == "ski":
         e = f.get("ski")
         if e and act.get("dist_trusted", True):
+            off = act.get("official_race") if act.get("official_race", {}).get("sport") == "ski" else None
             kind = "hard" if t in ("ski_hard", "ski_long_race?", "ski_intervals") else "bound"   # ski_intervals: hard sessions with reps
-            out.append(("ski", e["vdot"], kind, SIG["ski_hard" if kind == "hard" else "ski_bound"],
-                        {"window_s": e["dur_s"], "climb_m": e["climb_m"], "speed": round(e["speed"], 2),
-                         "demand": round(e["demand"], 1), "surface": act.get("surface"), "hrr": e.get("hrr")}))
+            sig = SIG["ski_hard" if kind == "hard" else "ski_bound"]
+            c = {"window_s": e["dur_s"], "climb_m": e["climb_m"], "speed": round(e["speed"], 2),
+                 "demand": round(e["demand"], 1), "surface": act.get("surface"), "hrr": e.get("hrr")}
+            if off:   # official race: hard (robust below: a window inside a long, paced race), full weight around the shape
+                kind, sig = "hard", SIG["ski_race"]
+                c.update(official=off["name"], official_s=off["official_s"], race_km=off["km"])
+            bad = ski_implausible(e)
+            if bad:
+                kind = "implausible"
+                c["implausible"] = bad
+            out.append(("ski", e["vdot"], kind, sig, c))
+    if ovr == "bound":   # user: not a maximal / structured effort -> lower bounds only (races stay races)
+        out = [(d, s, "bound", SIG["ski_bound" if d == "ski" else "cont_bound"], {**c, "override": "bound"}) if k == "hard" else (d, s, k, sg_, c)
+               for d, s, k, sg_, c in out]
     return [{"discipline": d, "score": float(s), "kind": k, "sigma": sg_, "components": c} for d, s, k, sg_, c in out]
+
+
+def ski_implausible(e):
+    """Reason (str) when a ski score's window is physically implausible, else None: sustained speed above
+    `ski_v_max` (lift / car / GPS) or net vertical rate above `ski_vz_max` (barometer glitch). Rise 2024-03-03:
+    8.3 m/s for 20 min (score 87); 2025-01-25: 481 m net climb in 20 min (score 120)."""
+    v, vz = e["speed"], e["climb_m"] / e["dur_s"]
+    if v > P["ski_v_max"]:
+        return f"{v * 3.6:.0f} km/h for {e['dur_s'] // 60} min: faster than skiing allows (GPS / lift?)"
+    if abs(vz) > P["ski_vz_max"]:
+        return f"{e['climb_m']} m net climb in {e['dur_s'] // 60} min: altitude glitch"
+    return None
 
 
 # ------------------------------------------------------------------ HR intent (variant "hr")
@@ -542,7 +730,19 @@ VARIANTS = {"pace": "Performance only (speed, altitude, distance, breaks)",
 
 
 def watch_of(date):
+    """adrian's watch on a date (legacy HR settings only)"""
     return "4315" if date >= NEW_WATCH_FROM else "fr935"
+
+
+def hr_of(person, act_id, date):
+    """HR normalisation of one activity: {max, rest, device, source, trust {interval, steady}, flags}. With
+    HR_SETTINGS: from data/<person>/profile/hr_settings.json (device of the activity, trust 0 for flagged HR); without
+    the file or with HR_SETTINGS False: the legacy adrian constants (P hr_max, trust by NEW_WATCH_FROM)."""
+    if HR_SETTINGS and person and hs.settings(person).get("max_hr"):
+        return hs.for_activity(person, act_id, date)
+    w = watch_of(date)
+    return {"max": P["hr_max"], "rest": None, "device": w, "source": None,
+            "trust": dict(P["hr_intent"]["trust"][w]), "flags": []}
 
 
 def hr_intent(e):
@@ -554,7 +754,11 @@ def hr_intent(e):
         return None, None
     H = P["hr_intent"]
     p = 0.5 * (1 + math.erf((h - H["thr"][e["discipline"]]) / (H["sd"] * math.sqrt(2))))
-    t = H["trust"][watch_of(e["date"])]["interval" if e["discipline"] == "interval" else "steady"]
+    kind = "interval" if e["discipline"] == "interval" else "steady"
+    dev = e.get("hr_dev")
+    t = (dev["trust"] if dev and HR_SETTINGS else H["trust"][watch_of(e["date"])])[kind]
+    if kind == "steady" and H.get("steady_trust_min") is not None and not (dev and dev.get("flags")):
+        t = max(t, H["steady_trust_min"])
     return t * p + (1 - t), h
 
 
@@ -564,7 +768,7 @@ def apply_hr_intent(ev):
     out = []
     for e in ev:
         e = {**e, "components": dict(e["components"])}
-        if e["kind"] == "hard":
+        if e["kind"] == "hard" and not (e["components"].get("official") or e["components"].get("test")):   # official races / tests: maximal by definition
             p, h = hr_intent(e)
             if p is not None:
                 e["components"]["p_max"] = p
@@ -663,12 +867,16 @@ def forecast_errors(obs, q, kinds=("race", "hard")):
 CURVE = {
     "ref_km": 5.0,
     "q_theta": P["q_per_day"]["interval"],   # VDOT² / day, as the interval shape
-    "q_slope": 0.005,                        # (VDOT / doubling)² / day: out-of-sample choice (eval table in docs)
-    "slope_prior_sd": 1.5,                   # slope ~ N(0, 1.5²) VDOT per doubling: prior and (slope_revert) stationary sd
+    "q_slope": 0.01,                         # (VDOT / doubling)² / day: 0.005 (out-of-sample choice, eval table in docs)
+                                             # raised to 0.01 with the tests (2026-11): the overnight research
+                                             # (research/shape-models/SUMMARY.md, variant S) found a faster slope neutral
+                                             # to slightly better on races; a small step, not its 0.04
+    "slope_prior_sd": 1.75,                  # slope ~ N(0, 1.75²) VDOT per doubling: prior and (slope_revert) stationary
+                                             # sd (was 1.5; research S used 2.0)
     "slope_revert": True,                    # slope = AR(1) towards 0 (not a random walk): the shrinkage towards the
                                              # Daniels default (0) holds at every date, so an old distance profile fades
-                                             # (time constant 2·sd²/q ≈ 900 days); scripts/slope_prior_eval.py
-    "interval_km": 5.0,                      # interval session scores are calibrated (offset -2.5) to 5k races
+                                             # (time constant 2·sd²/q ≈ 600 days); scripts/slope_prior_eval.py
+    "interval_km": 5.0,                      # interval session scores are calibrated (interval_offset) to races
     "tempo_km": None,                        # None: the offset-calibration distance below; a number: fixed km
     "tempo_cal_km": (10.0, 21.0975),         # tempo_offset +3.0 was fitted against the 10k / half long shape:
                                              # tempo scores are 10k-half equivalents -> x = mean log2 of these
@@ -690,7 +898,7 @@ def _mean_x(kms):
 
 def evidence_km(e):
     """Effective race distance (km) of a running evidence item for the distance curve; None = not on the curve.
-    race: its nominal distance. interval (hard): CURVE interval_km (the session scores are calibrated to 5k races).
+    race: its nominal distance (official races / tests: `race_km`, e.g. a 3k test at 3 km). interval (hard): CURVE interval_km (the session scores are calibrated to 5k races).
     tempo (hard long): the tempo offset's calibration distance (10k-half mean, ~14.5 km): the +3.0 lifts tempo scores
     to the 10k/half level, so placing them at the window's own distance would count the slope twice.
     long bound: the grade-adjusted distance covered in the scored window (= the race distance whose Daniels time is
@@ -698,12 +906,12 @@ def evidence_km(e):
     c = e.get("components") or {}
     if e["discipline"] == "interval":
         if "race" in c:
-            return None if e["kind"] != "race" else {"5k": 5.0}.get(c["race"], 5.0)
+            return None if e["kind"] != "race" else c.get("race_km") or {"5k": 5.0}.get(c["race"], 5.0)
         return CURVE["interval_km"]
     if e["discipline"] != "long" or e["kind"] == "implausible":
         return None
     if "race" in c:
-        return {"5k": 5.0, "10k": 10.0, "half": 21.0975, "marathon": 42.195}[c["race"]]
+        return c.get("race_km") or {"5k": 5.0, "10k": 10.0, "half": 21.0975, "marathon": 42.195}[c["race"]]
     if c.get("hr_based"):
         return None
     if e.get("type") == "tempo":       # hard (or demoted to a bound by the HR-intent variant): offset applied
@@ -805,7 +1013,8 @@ def curve_predict(theta, slope, var_theta, var_slope, cov, km, evidence_km=None,
     extrapolation), doublings_outside, extrapolated}. Outside the evidenced range [min, max] km the sd grows by
     `extrap_sd` per doubling. Beyond the longest evidence a positive slope stops (VDOT held, e.g. marathon =
     half VDOT): carrying it further would predict a marathon VDOT above the half. A negative slope keeps applying.
-    flat=True (distance curve switched off): slope 0, i.e. the Daniels equivalents of theta (the 5 km VDOT)."""
+    flat=True: slope 0, i.e. the Daniels equivalents of theta (the 5 km VDOT); not used by the app since the
+    distance-curve-off setting was removed (model_version 3), kept for the back-tests ("One run number")."""
     if flat:
         slope, var_slope, cov = 0.0, 0.0, 0.0
     race_sd = CURVE["race_sd"] if race_sd is None else race_sd
@@ -859,7 +1068,7 @@ def curve_obs(ev):
 def load_features(person, workers=8, progress=True):
     """(activities from groups.json, {id: features}) with a per-FIT cache."""
     D = ROOT / "data" / person
-    acts = json.loads((D / "groups.json").read_text())["activities"]
+    acts = apply_official_races(person, json.loads((D / "groups.json").read_text())["activities"])
     fits = {p.stem: p for p in (D / "activities").glob("*/*.fit")}
     rest = hr_rest_series(D)
     cfile = D / "cache" / "fitness_model.pkl"
@@ -874,21 +1083,24 @@ def load_features(person, workers=8, progress=True):
         if a["sport"] not in ("run", "ski") or i not in fits:
             continue
         c = cache.get(i)
-        hr0 = rest.get(a["date"], P["hr_rest_default"])
-        if c and c["key"] == key(fits[i]) and c.get("hr_rest") == hr0 and c.get("indoor") == a.get("indoor_bislett"):
+        a["hr_dev"] = hn = hr_of(person, i, a["date"])
+        hr0 = rest.get(a["date"], hn["rest"] or P["hr_rest_default"])
+        if c and c["key"] == key(fits[i]) and c.get("hr_rest") == hr0 and c.get("hr_max") == hn["max"] \
+                and c.get("indoor") == a.get("indoor_bislett") and c.get("track") == [a.get("track"), a.get("track_reps")]:
             feats[i] = c["f"]
         else:
-            jobs.append((str(fits[i]), {k: v for k, v in a.items() if k != "similar"}, hr0))
+            jobs.append((str(fits[i]), {k: v for k, v in a.items() if k != "similar"}, hr0, hn["max"]))
     if jobs:
         if workers > 1 and len(jobs) > 4:
             with Pool(workers) as pool:
                 res = pool.map(_feat_job, jobs, chunksize=4)
         else:
             res = [_feat_job(j) for j in jobs]
-        for (fit, a, hr0), (_, f) in zip(jobs, res):
+        for (fit, a, hr0, hm), (_, f) in zip(jobs, res):
             i = Path(fit).stem
             feats[i] = f
-            cache[i] = {"key": key(Path(fit)), "hr_rest": hr0, "f": f, "indoor": a.get("indoor_bislett")}
+            cache[i] = {"key": key(Path(fit)), "hr_rest": hr0, "hr_max": hm, "f": f, "indoor": a.get("indoor_bislett"),
+                        "track": [a.get("track"), a.get("track_reps")]}   # flat + track rep distances (session_series)
         cfile.write_bytes(pickle.dumps(cache))
     if progress:
         print(f"features: {len(feats)} sessions ({len(jobs)} recomputed)")
@@ -900,7 +1112,8 @@ def collect_evidence(acts, feats, **kw):
     for i, f in feats.items():
         a = acts[i]
         for e in score_session(a, f, **kw):
-            e.update(id=i, date=a["date"], day=dt.date.fromisoformat(a["date"]).toordinal(), type=a["type"])
+            e.update(id=i, date=a["date"], day=dt.date.fromisoformat(a["date"]).toordinal(), type=a["type"],
+                     hr_dev=a.get("hr_dev"))
             ev.append(e)
     ev.sort(key=lambda e: (e["day"], e["id"]))
     return ev
@@ -922,21 +1135,22 @@ def cross_check(ev, interval_series):
         lim = m[k] + P["cross_check"] + 2 * math.sqrt(s[k] ** 2 + e["sigma"] ** 2)
         if e["score"] > lim:
             e["kind"] = "implausible"
-            e["components"]["implausible"] = f"> interval shape {m[k]:.1f} + {lim - m[k]:.1f}"
+            e["components"]["implausible"] = f"> 5 km level {m[k]:.1f} + {lim - m[k]:.1f}"
 
 
 def is_10k_dup(e):
     """The interval/hard copy of a 10k race (kept by collect_evidence for the per-discipline back-tests; the published
     model counts a 10k once, as a long race on the distance curve)."""
-    return e["discipline"] == "interval" and e["type"] == "race?" and "race" in e["components"] and e["kind"] != "race"
+    return e["discipline"] == "interval" and "race" in e["components"] and e["kind"] != "race"
 
 
 def _model(ev, today):
     """Shape per discipline + overall + the distance-curve predictor from evidence items (sets weight / shape_at /
-    km on them). Running (interval, long) comes from one coupled distance curve (`smooth_curve`): interval = the curve
-    at 5 km (theta), long = the curve at the 10k-half reference. Ski: its own random-walk smoother.
-    Returns (disciplines, predictor block or None, disciplines with the distance curve off: long = theta and race
-    equivalents / race prediction = Daniels equivalents of theta; the same fit, only the read-out differs)."""
+    score_10k / km on them). Running comes from one coupled distance curve (`smooth_curve`): `run` = the curve at
+    10 km (RUN_KM, the one running number), and the legacy read-outs interval = the curve at 5 km (theta), long = the
+    curve at the 10k-half reference. Ski: its own random-walk smoother.
+    Returns (disciplines, predictor block or None, None); the third element is kept for the old 3-tuple shape (it was
+    the distance-curve-off read-out, removed in model_version 3)."""
     t1 = today.toordinal()
     series, best, curve_sub = {}, {}, None
     # 1) separate interval smoother: only for the cross-check of long items (implausibly fast for this runner)
@@ -947,22 +1161,23 @@ def _model(ev, today):
         cross_check(ev, (days, m, s, None))
     # 2) coupled distance curve on every running item
     items, cobs = curve_obs(ev)
-    pred_block, series_off, best_off = None, {}, {}
+    pred_block = None
     if cobs:
         d0 = min(o[0] for o in cobs) - 7
         days, M, C, w, _ = smooth_curve(cobs, d0, t1)
+        x_run = curve_x(RUN_KM)
         for e, wi, o in zip(items, w, sorted(cobs, key=lambda o: o[0])):
             k = e["day"] - d0
             e["weight"] = round(float(wi), 3)
             e["shape_at"] = round(float(M[k, 0] + o[4] * M[k, 1]), 2)   # the curve at the item's own distance
+            # the score moved along that day's curve to 10 km (its distance from the curve kept): plotted against `run`
+            e["score_10k"] = round(float(e["score"] + (x_run - o[4]) * M[k, 1]), 2)
         x_long = _mean_x(CURVE["long_ref_km"])
-        for disc, x in (("interval", 0.0), ("long", x_long)):
+        for disc, x in (("interval", 0.0), ("long", x_long), ("run", x_run)):
             m, s = curve_at(M, C, x)
-            sub = [e for e in items if e["discipline"] == disc]
+            sub = items if disc == "run" else [e for e in items if e["discipline"] == disc]
             series[disc] = (days, m, s, sub)
             best[disc] = float(m[s <= np.median(s)].max())
-        series_off = {**series, "long": (*series["interval"][:3], series["long"][3])}
-        best_off = {**best, "long": best["interval"]}
         curve_sub = items
         pred_block = _predictor_block(days, M, C, items)
     # 3) ski
@@ -977,29 +1192,23 @@ def _model(ev, today):
         series["ski"] = (days, m, s, sub)
         best["ski"] = float(m[s <= np.median(s)].max())
     if not series:
-        return {}, None, {}
-    out = _assemble(series, best, pred_block, curve_sub, today, False)
-    out_off = _assemble({**series, **series_off}, {**best, **best_off}, pred_block, curve_sub, today, True) if pred_block else out
-    return out, pred_block, out_off
+        return {}, None, None
+    return _assemble(series, best, pred_block, curve_sub, today), pred_block, None
 
 
-def _assemble(series, best, pred_block, curve_sub, today, flat):
-    """disciplines + overall from the smoothed series (`_model`); flat: the distance curve switched off."""
+def _assemble(series, best, pred_block, curve_sub, today):
+    """disciplines + overall from the smoothed series (`_model`)."""
     t1 = today.toordinal()
-    # overall: precision-weighted mean of % of personal best over disciplines with independent evidence. Interval
-    # and long are two readings of one curve (same theta), so running enters once: the mean of their % of best,
-    # with the sd of a fully correlated mean.
+    # overall: precision-weighted mean of % of personal best over disciplines with independent evidence. Running
+    # enters once, as `run` (interval / long / run are readings of one curve).
     start = min(v[0][0] for v in series.values())
     days_all = np.arange(start, t1 + 1)
     num = np.zeros(len(days_all)); den = np.zeros(len(days_all))
     parts = []
-    if "interval" in series:
-        days = series["interval"][0]
-        pi, si = [100 * series[d][1] / best[d] for d in ("interval", "long")], [100 * series[d][2] / best[d] for d in ("interval", "long")]
-        parts.append((days, (pi[0] + pi[1]) / 2, (si[0] + si[1]) / 2))
-    if "ski" in series:
-        days, m, s, _ = series["ski"]
-        parts.append((days, 100 * m / best["ski"], 100 * s / best["ski"]))
+    for disc in ("run", "ski"):
+        if disc in series:
+            days, m, s, _ = series[disc]
+            parts.append((days, 100 * m / best[disc], 100 * s / best[disc]))
     for days, pct, psd in parts:
         off = days[0] - start
         wgt = 1 / psd**2
@@ -1026,16 +1235,18 @@ def _assemble(series, best, pred_block, curve_sub, today, flat):
     def last_ev(sub):
         return max((e["day"] for e in sub if e["kind"] in ("race", "hard") and (e.get("weight") or 0) > 0.5), default=None)
 
+    pred = race_prediction(pred_block)
     disc_out = {}
-    for disc in DISCIPLINES:
+    for disc in ("run", *DISCIPLINES):
         if disc not in series:
             continue
         days, m, s, sub = series[disc]
         cur_m, cur_s = float(m[-1]), float(s[-1])
         eq = {}
-        if disc in ("interval", "long") and pred_block:
+        running = disc in ("run", "interval", "long")
+        if running and pred_block:
             # race equivalents from the curve at each distance (the same numbers as the race prediction)
-            eq = {nm: pred_block["_now_flat" if flat else "_now"][nm]["time_s"] for nm in ("5k", "10k", "half", "marathon")}
+            eq = {nm: pred_block["_now"][nm]["time_s"] for nm in ("5k", "10k", "half", "marathon")}
         yearly = {}
         for y in sorted({dt.date.fromordinal(int(d)).year for d in days}):
             mk = np.array([dt.date.fromordinal(int(d)).year == y for d in days])
@@ -1045,30 +1256,39 @@ def _assemble(series, best, pred_block, curve_sub, today, flat):
                               "sd_median": round(float(np.median(s[mk])), 2), "n_evidence": len(sub_y),
                               "mean_well_observed": round(float(m[obs_mk].mean()), 1) if obs_mk.sum() >= 14 else None,
                               "days_well_observed": int(obs_mk.sum())}
-        # staleness: the latest race / hard evidence that counted (weight > 0.5). For interval / long that is any
-        # item on the distance curve (they share theta); long also reports its own latest item (10k+ race / tempo)
-        last = last_ev(curve_sub if disc in ("interval", "long") else sub)
+        # staleness: the latest race / hard evidence that counted (weight > 0.5). For the running read-outs that is any
+        # item on the distance curve (they share theta); run / long also report the latest 10k+ race / tempo
+        last = last_ev(curve_sub if running else sub)
         dse = int(t1 - last) if last is not None else None
+        sd_state = cur_s
+        if disc == "run" and pred:
+            # the 10k race prediction: VDOT (= the curve at 10 km inside the evidenced range) ± its sd (state ⊕
+            # race-day noise ⊕ extrapolation); sd_state = the band of the weekly series
+            cur_m, cur_s = float(pred["vdot_by_distance"]["10k"]), float(pred["sd_by_distance"]["10k"])
         cur = {"date": today.isoformat(), "mean": round(cur_m, 2), "sd": round(cur_s, 2),
-               "confidence": conf(cur_s), "pct_of_best": round(100 * cur_m / best[disc], 1),
+               "confidence": conf(sd_state), "pct_of_best": round(100 * cur_m / best[disc], 1),
                "race_equivalents_s": eq or None,
                "last_evidence_date": dt.date.fromordinal(last).isoformat() if last is not None else None,
                "days_since_evidence": dse, "stale": dse is None or dse > STALE_DAYS}
-        if disc == "long":
-            own = last_ev(sub)
+        if disc == "run":
+            cur["sd_state"] = round(sd_state, 2)
+            cur["ref_km"] = RUN_KM
+        if disc in ("run", "long"):
+            own = last_ev([e for e in sub if e["discipline"] == "long"])
             cur["last_distance_evidence_date"] = dt.date.fromordinal(own).isoformat() if own is not None else None
-            cur["ref_km"] = CURVE["ref_km"] if flat else round(CURVE["ref_km"] * 2 ** _mean_x(CURVE["long_ref_km"]), 2)
+        if disc == "long":
+            cur["ref_km"] = round(CURVE["ref_km"] * 2 ** _mean_x(CURVE["long_ref_km"]), 2)
         disc_out[disc] = {
             "label": LABEL[disc], "unit": "VDOT" if disc != "ski" else "VDOT-equivalent (ml/kg/min)",
             "q_per_day": P["q_per_day"][disc] if disc == "ski" else CURVE["q_theta"],
-            "model": "distance_curve" if disc != "ski" else "random_walk",
-            **({"distance_curve": not flat} if disc != "ski" else {}),
+            "model": "distance_curve" if running else "random_walk",
+            **({"ref_km": RUN_KM} if disc == "run" else {}),
+            **({"legacy": True} if disc in ("interval", "long") else {}),
             "personal_best": round(best[disc], 2),
             "current": cur,
             "yearly": yearly,
             "weekly": weekly(days, m, s, sub),
         }
-    pred = race_prediction(pred_block, flat)
     disc_out["overall"] = {
         "label": LABEL["overall"], "unit": "% of personal best (precision-weighted over disciplines)",
         "current": {"date": today.isoformat(), "mean": round(float(ov_m[-1]), 1), "sd": round(float(ov_s[-1]), 1),
@@ -1098,12 +1318,11 @@ def _predictor_block(days, M, C, items):
             for e in items if e["kind"] != "bound" or (e.get("weight") or 0) >= 0.05]
     last = max((e["day"] for e in strong), default=None)
     t = daily[-1]
-    now, now_flat = {}, {}
+    now = {}
     for dist, nm in PRED_DIST:
-        for flat, tgt in ((False, now), (True, now_flat)):
-            p = curve_predict(t["theta"], t["slope"], t["var_theta"], t["var_slope"], t["cov"], dist / 1000, ekm, flat=flat)
-            tgt[nm] = {**p, "time_s": round(race_time(p["vdot"], dist)),
-                       "range_s": [round(race_time(p["vdot"] + p["sd"], dist)), round(race_time(p["vdot"] - p["sd"], dist))]}
+        p = curve_predict(t["theta"], t["slope"], t["var_theta"], t["var_slope"], t["cov"], dist / 1000, ekm)
+        now[nm] = {**p, "time_s": round(race_time(p["vdot"], dist)),
+                   "range_s": [round(race_time(p["vdot"] + p["sd"], dist)), round(race_time(p["vdot"] - p["sd"], dist))]}
     return {"ref_km": CURVE["ref_km"], "x": "log2(km/5)", "q": {"theta": CURVE["q_theta"], "slope": CURVE["q_slope"]},
             "slope_prior_sd": CURVE["slope_prior_sd"], "slope_revert": CURVE["slope_revert"], "race_sd": CURVE["race_sd"],
             "evidence_km": [round(ekm[0], 3), round(ekm[1], 3)],
@@ -1114,22 +1333,21 @@ def _predictor_block(days, M, C, items):
                           "bound": "grade-adjusted distance of the scored window"},
             "long_ref_km": round(CURVE["ref_km"] * 2 ** _mean_x(CURVE["long_ref_km"]), 3),
             "last_evidence_date": dt.date.fromordinal(last).isoformat() if last is not None else None,
-            "daily": daily, "evidence": evid, "_now": now, "_now_flat": now_flat}
+            "daily": daily, "evidence": evid, "_now": now}
 
 
-def race_prediction(block, flat=False):
-    """The running race prediction from the distance curve today (None without running evidence; flat: the curve
-    switched off, slope 0 = Daniels equivalents of theta):
+def race_prediction(block):
+    """The running race prediction from the distance curve today (None without running evidence):
     {vdot (at 10k), sd (state ⊕ race-day noise, at 10k), vdot_by_distance, sd_by_distance, extrapolated (per
     distance), race_equivalents_s per distance from the curve, range_10k_s [fast, slow] (±1 sd), weights {} (kept for
     the old schema: the interval / long blend it described is gone), model "distance_curve"}."""
     if not block:
         return None
-    now = block["_now_flat" if flat else "_now"]
+    now = block["_now"]
     t = block["daily"][-1]
     p10 = now["10k"]
     return {"vdot": round(p10["vdot"], 2), "sd": round(p10["sd"], 2), "weights": {}, "model": "distance_curve",
-            "distance_curve": not flat, "theta": t["theta"], "slope": 0.0 if flat else t["slope"],
+            "theta": t["theta"], "slope": t["slope"],
             "vdot_by_distance": {nm: round(p["vdot"], 2) for nm, p in now.items()},
             "sd_by_distance": {nm: round(p["sd"], 2) for nm, p in now.items()},
             "extrapolated": {nm: p["extrapolated"] for nm, p in now.items()},
@@ -1138,17 +1356,70 @@ def race_prediction(block, flat=False):
             "range_10k_s": p10["range_s"]}
 
 
+def pre_race_prediction(ev, date, km):
+    """The run prediction for a race on `date` (ISO) over `km` from evidence strictly before race day (the forward
+    filter of the official-race back-test, docs/fitness-model.md): the distance-curve model fitted on `ev` items with
+    day < race day, read on the day before at the race distance. `ev` is not modified.
+    {vdot, sd, time_s, range_s [fast, slow]} or None (no running evidence before the race)."""
+    import copy
+    day = dt.date.fromisoformat(date).toordinal()
+    prior = copy.deepcopy([e for e in ev if e["day"] < day])
+    if not prior:
+        return None
+    _, block, _ = _model(prior, dt.date.fromordinal(day - 1))
+    if not block:
+        return None
+    t = block["daily"][-1]
+    p = curve_predict(t["theta"], t["slope"], t["var_theta"], t["var_slope"], t["cov"], km, block["evidence_km"])
+    m = km * 1000
+    return {"vdot": float(p["vdot"]), "sd": float(p["sd"]), "time_s": float(race_time(p["vdot"], m)),
+            "range_s": [float(race_time(p["vdot"] + p["sd"], m)), float(race_time(p["vdot"] - p["sd"], m))]}
+
+
+def official_race_results(person, ev, path=None):
+    """The person's results in data/races.json, oldest first, each run race with its pre-race prediction
+    (`pre_race_prediction`; fitness.json `races`). Per race: name, date, sport, km, official_s, activity_id (None =
+    no Garmin activity), source ("chip" or "watch", from the results' `source` note). Run races also: predicted_s,
+    predicted_range_s, predicted_vdot, predicted_sd, actual_vdot, pct = (predicted_s - official_s) / predicted_s * 100
+    (> 0: faster than predicted), delta_s = official_s - predicted_s (< 0: faster). Ski: results only (the ski model is
+    too coarse for a race-time prediction). `ev`: the build's evidence list (before `_model` touches it)."""
+    path = RACES_FILE if path is None else Path(path)
+    if not path.exists():
+        return []
+    out = []
+    for r in sorted(json.loads(path.read_text()).get("races", []), key=lambda r: r["date"]):
+        x = (r.get("results") or {}).get(person)
+        if not x or not x.get("official_s"):
+            continue
+        src = (x.get("source") or "").lower()
+        row = {"name": r["name"], "date": r["date"], "sport": r["sport"], "km": float(r["km"]),
+               "official_s": float(x["official_s"]), "official": x.get("official"),
+               "activity_id": int(x["activity_id"]) if x.get("activity_id") else None,
+               "source": "watch" if "watch" in src else "chip"}
+        if r["sport"] == "run":
+            p = pre_race_prediction(ev, r["date"], float(r["km"]))
+            if p:
+                ts, os_ = p["time_s"], row["official_s"]
+                row.update(predicted_s=round(ts), predicted_range_s=[round(v) for v in p["range_s"]],
+                           predicted_vdot=round(p["vdot"], 2), predicted_sd=round(p["sd"], 2),
+                           actual_vdot=round(float(vdot_from_race(float(r["km"]) * 1000, os_)), 2),
+                           pct=round((ts - os_) / ts * 100, 2), delta_s=round(os_ - ts))
+        out.append(row)
+    return out
+
+
 def build(person, workers=8, today=None, progress=True):
     """The whole fitness doc (what fitness.json holds): variant "pace" in `disciplines` / `sessions`, variant "hr"
     in `variants.hr` and `sessions[].hr`."""
     acts, feats, rest = load_features(person, workers, progress)
     ev = [e for e in collect_evidence(acts, feats) if not is_10k_dup(e)]   # a 10k counts once (long race)
     ev_hr = apply_hr_intent(ev)          # copies, before cross_check marks the pace list
+    races = official_race_results(person, ev)   # pre-race predictions (copies; before _model marks `ev`)
     today = today or dt.date.today()
-    disc_out, predictor, disc_off = _model(ev, today)
-    disc_hr, _, disc_hr_off = _model(ev_hr, today)
+    disc_out, predictor, _ = _model(ev, today)
+    disc_hr, _, _ = _model(ev_hr, today)
     if predictor:
-        predictor.pop("_now", None); predictor.pop("_now_flat", None)
+        predictor.pop("_now", None)
     hr_by = {(e["id"], e["discipline"]): e for e in ev_hr}
     sessions = []
     for e in ev:
@@ -1156,6 +1427,7 @@ def build(person, workers=8, today=None, progress=True):
                          "score": round(e["score"], 2), "kind": e["kind"], "sigma": e["sigma"],
                          "weight": e.get("weight"), "shape_at": e.get("shape_at"),
                          **({"km": round(e["km"], 3)} if e.get("km") else {}),
+                         **({"score_10k": e["score_10k"]} if e.get("score_10k") is not None else {}),
                          "confidence": round(float(e.get("weight") or 0) * (SIG["race"] / e["sigma"]) ** 2, 3),
                          "components": _clean(e["components"])})
         h = hr_by.get((e["id"], e["discipline"]))
@@ -1163,7 +1435,9 @@ def build(person, workers=8, today=None, progress=True):
             sessions[-1]["hr"] = {"kind": h["kind"], "sigma": round(h["sigma"], 2), "weight": h.get("weight"),
                                   "shape_at": h.get("shape_at"),
                                   "p_max": round(h["components"]["p_max"], 3) if "p_max" in h["components"] else None,
-                                  "note": h["components"].get("hr_intent")}
+                                  "note": h["components"].get("hr_intent"),
+                                  **({"device": h["hr_dev"]["device"], "trust": h["hr_dev"]["trust"]} if h.get("hr_dev") else {}),
+                                  **({"flags": h["hr_dev"]["flags"]} if (h.get("hr_dev") or {}).get("flags") else {})}
     hr_diag = {}
     for i, f in feats.items():
         ha = f.get("hr_aer") or {}
@@ -1174,11 +1448,17 @@ def build(person, workers=8, today=None, progress=True):
             "hr_used_in_score": False, "disciplines": disc_out,
             "variants": {"pace": {"label": VARIANTS["pace"], "hr_used_in_score": False},
                          "hr": {"label": VARIANTS["hr"], "hr_used_in_score": True, "disciplines": disc_hr}},
-            # the same model read with the distance curve switched off (per-person setting distance_curve = false,
-            # data/<person>/settings.json): the server swaps these in for `disciplines` / `variants.hr.disciplines`
-            "curve_off": {"label": "Distance curve off: same VDOT at every distance (Daniels equivalents of the 5 km shape)",
-                          "disciplines": disc_off, "hr_disciplines": disc_hr_off},
-            "predictor": predictor, "sessions": sessions, "hr_diagnostics": hr_diag}
+            "predictor": predictor, "races": races, "sessions": sessions, "hr_diagnostics": hr_diag,
+            "hr_settings": _hr_settings_summary(person)}
+
+
+def _hr_settings_summary(person):
+    """max / rest HR and the per-device trust the build used (hr_settings.json), or the legacy constants"""
+    h = hs.settings(person) if HR_SETTINGS else {}
+    if not h.get("max_hr"):
+        return {"source": "legacy", "max_hr": P["hr_max"], "trust": P["hr_intent"]["trust"]}
+    return {"source": "hr_settings.json", "max_hr": h["max_hr"], "rest_hr": h.get("rest_hr"),
+            "devices": {k: {"from": d.get("from"), "to": d.get("to"), "trust": d.get("trust")} for k, d in (h.get("devices") or {}).items()}}
 
 
 def _clean(d):

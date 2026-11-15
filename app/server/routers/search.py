@@ -13,7 +13,7 @@ from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..deps import get_store
-from ..store import SPORT_LABEL, Store, family, type_label
+from ..store import ERG_SPORTS, SPORT_LABEL, Store, family, type_label
 
 router = APIRouter(tags=["search"])
 
@@ -192,7 +192,9 @@ def search(request: Request, sort: str = "-date", limit: int | None = None, poly
     rows = [row(a, bool(poly)) for a in (res[:limit] if limit else res)]
     app_fields(store, rows)
     return {"n": n, "truncated": bool(limit and n > limit), "filters": f,
-            "km": round(sum(a.get("dist_km") or 0 for a in res if a.get("dist_trusted") is not False), 1),   # trusted only
+            # trusted distances only; erg metres (row / SkiErg) never count in km totals (store.volume_km)
+            "km": round(sum(a.get("dist_km") or 0 for a in res if a.get("dist_trusted") is not False
+                            and family(a.get("atype"), a) not in ERG_SPORTS), 1),
             "families": dict(Counter((a.get("workout") or {}).get("family") for a in res).most_common()),
             "rows": rows}
 

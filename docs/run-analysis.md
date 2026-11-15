@@ -24,7 +24,8 @@ v1.1 (threshold on 5 s-smoothed speed) is still available as `analyse_v1` for co
    still decide which laps are reps (`intensity`).
 7. **Distance:** in track mode with a matching active lap, rep `dist` = Garmin lap distance
    (`dist_source: "lap"`). Otherwise it's the distance field between the detected change points
-   (`dist_source: "detected"`). `dist_detected` is always kept.
+   (`dist_source: "detected"`). `dist_detected` is always kept. Snapping GPS-mode reps on a known track to their set
+   distance happens later, in session_groups (`track_reps`, `snap_track_reps`; [session-groups.md](session-groups.md)).
 8. **Uncertainty:** `start_uncertainty_s` / `end_uncertainty_s` = base (GPS 0.6 s, track 0.7 s,
    68th percentile from the Bislet evaluation) + ½ × (local record gap − 1 s). `totals.distance_uncertainty_pct`
    (1σ) comes from `gps_quality.py` with the model in `calibration.json` `uncertainty_model`, plus

@@ -25,7 +25,7 @@ export interface CPanel {
   single?: N[];
   /** only these grid points set the y range (e.g. reps, not breaks) */
   rangeMask?: boolean[] | null;
-  /** y axis kind: "pace" (s/km, robust moving range, m:ss steps), "time" (m:ss steps), "num" (default).
+  /** y axis kind: "pace" (s/km or s/500 m, robust moving range, m:ss steps), "time" (m:ss steps), "num" (default).
    *  "speed" = robust moving range. Without it, a "speed" panel counts as pace when reversed (dir -1), else as
    *  speed, and a fmt that prints m:ss as time. */
   axis?: "pace" | "speed" | "time" | "num";
@@ -33,6 +33,8 @@ export interface CPanel {
   yRange?: [number, number] | null;
   /** y axis width (px) for long tick labels ("2:00 behind"); every panel gets the widest so the x axes line up */
   axisSize?: number;
+  /** y tick labels (default: fmt), e.g. erg pace without the tenths of the readout */
+  tickFmt?: (v: number) => string;
 }
 
 interface Props {
@@ -143,7 +145,7 @@ export function CompareCharts({ X, panels, order, colors, refId, focus, many, sp
             show: isLast, stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, font, size: 22, space: xSpace,
             ...(ticks ? categoryAxis(ticks) : { values: (_u: uPlot, ts: number[]) => ts.map(xFmt), ...(xIncrs ? { incrs: xIncrs } : {}) }),
           },
-          { stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, values: (_u, ts) => ts.map((v) => P.fmt(v)), font, size: ySize, space: 28,
+          { stroke: muted, grid: { stroke: hair, width: 1 }, ticks: { show: false }, values: (_u, ts) => ts.map((v) => (P.tickFmt ?? P.fmt)(v)), font, size: ySize, space: 28,
             ...(kind === "pace" ? { incrs: PACE_INCRS } : kind === "time" ? { incrs: TIME_INCRS } : {}) },
         ],
         series,

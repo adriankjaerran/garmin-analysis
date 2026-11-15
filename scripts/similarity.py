@@ -92,7 +92,7 @@ KIND_LABEL = {"intervals": "Interval running", "tempo": "Tempo run", "race": "Ra
               "easy": "Easy run", "steady": "Steady run", "other": "Other run", "nogps": "Run without GPS"}
 SPORT_LABEL = {"hike": "Hike", "cycling": "Cycling", "lap_swimming": "Pool swim", "open_water_swimming": "Open water swim",
                "rowing_v2": "Rowing", "kayaking_v2": "Kayaking", "stop_watch": "Stopwatch (no GPS)",
-               "multi_sport": "Multisport", "other": "Other", "run": "Run", "ski": "Ski"}
+               "multi_sport": "Multisport", "other": "Other", "run": "Run", "ski": "Ski", "row": "Row", "skierg": "SkiErg"}
 # readable labels per Garmin activity type (the app's sport chips are run / ski / hike / bike / swim / other)
 ATYPE_LABEL = {"running": "Run", "track_running": "Track run", "treadmill_running": "Treadmill run",
                "indoor_running": "Indoor run", "trail_running": "Trail run", "street_running": "Road run",
@@ -100,7 +100,8 @@ ATYPE_LABEL = {"running": "Run", "track_running": "Track run", "treadmill_runnin
                "backcountry_skiing": "Backcountry ski", "hiking": "Hike", "walking": "Walk", "cycling": "Ride",
                "road_biking": "Road ride", "mountain_biking": "MTB ride", "indoor_cycling": "Indoor ride",
                "lap_swimming": "Pool swim", "open_water_swimming": "Open water swim", "rowing_v2": "Rowing",
-               "kayaking_v2": "Kayaking", "stop_watch": "Stopwatch (no GPS)", "multi_sport": "Multisport", "other": "Other"}
+               "kayaking_v2": "Kayaking", "stop_watch": "Stopwatch (no GPS)", "multi_sport": "Multisport", "other": "Other",
+               "indoor_rowing": "RowErg", "skierg": "SkiErg", "bikeerg": "BikeErg"}
 
 
 def atype_label(atype):
@@ -283,10 +284,11 @@ def load_tracks(D, fits, workers=8):
 
 
 # ---------------------------------------------------------------- workout structure
-def rep_parts(reps, ski=False):
+def rep_parts(reps, ski=False, erg=False):
     """reps [[time_s, dist_m, ...]] -> parts [index lists] grouped like session_groups.signature
-    (session_groups.rep_groups: runs by similar time or distance, +-15 %, strides dropped; ski by duration)"""
-    return sg.rep_groups([r[0] for r in reps], [r[1] for r in reps], ski)
+    (session_groups.rep_groups: runs by similar time or distance, +-15 %, strides dropped; ski by duration;
+    erg by exact target)"""
+    return sg.rep_groups([r[0] for r in reps], [r[1] for r in reps], ski, erg)
 
 
 def rest_label(s):
@@ -311,7 +313,7 @@ def dist_band(sport, km):
 FAMILY = {"intervals_track": "intervals", "intervals_road": "intervals", "intervals_treadmill": "intervals",
           "tempo": "tempo", "race?": "race", "long": "long", "easy": "easy", "steady": "steady", "run_nogps": "nogps",
           "run_other": "other", "ski_easy": "easy", "ski_hard": "hard", "ski_long": "long", "ski_long_race?": "long",
-          "ski_intervals": "intervals"}
+          "ski_intervals": "intervals", "erg_intervals": "intervals", "erg_piece": "piece", "erg_steady": "steady"}
 RELATED_FAM = {frozenset(p) for p in [("run/intervals", "run/tempo"), ("run/tempo", "run/race"), ("run/easy", "run/long"), ("run/easy", "run/steady"),
                                       ("run/steady", "run/tempo"), ("run/steady", "run/long"),
                                       ("ski/easy", "ski/long"), ("ski/hard", "ski/long"), ("run/easy", "run/nogps"),
@@ -322,14 +324,14 @@ def workout_of(o, sport, ana, dist_km):
     """hierarchy family > signature > exact_key, plus rep / rest stats for intervals"""
     st = o.get("type") or "?"
     kind = FAMILY.get(st)
-    fam = f"{sport}/{kind}" if kind and sport in ("run", "ski") else sport
-    label = (KIND_LABEL.get(kind, kind) if sport == "run" else f"{sport.capitalize()} {kind}" if kind
+    fam = f"{sport}/{kind}" if kind and sport in ("run", "ski", "row", "skierg") else sport
+    label = (KIND_LABEL.get(kind, kind) if sport == "run" else f"{SPORT_LABEL.get(sport, sport.capitalize())} {kind}" if kind
              else SPORT_LABEL.get(sport, sport.replace("_v2", "").replace("_", " ").capitalize()))
     w = {"family": fam, "family_label": label, "category": st, "detail": o.get("type_detail")}
     reps = o.get("reps")
     if o.get("sig") and reps:
         ski_mode = str((ana or {}).get("mode") or "").startswith("ski")
-        parts = rep_parts(reps, ski_mode)
+        parts = rep_parts(reps, ski_mode, o.get("type") == "erg_intervals")
         brk = o.get("breaks_s") or []
         # Bislett indoor: reps come from laps (groups.json), the cached speed-detector breaks don't match them
         sbrk = [b for b in (ana or {}).get("breaks", [])] if ana and not o.get("indoor_bislett") else []
@@ -483,7 +485,7 @@ def build(person="adrian", workers=8, quiet=False):
     T0 = time.time()
     D = ROOT / "data" / person
     G = json.loads((D / "groups.json").read_text())
-    idx = {x["activityId"]: x for x in json.loads((D / "activities_index.json").read_text())}
+    idx = {x["activityId"]: x for x in sg.c2.load_index(D)}
     fits = {int(p.stem): p for p in (D / "activities").glob("*/*.fit")}
     tracks, n_new = load_tracks(D, fits, workers)
     sgc = D / "cache" / "session_groups.pkl"

@@ -10,7 +10,7 @@ the race day; with and without adrian's soft 2025-10-24 19:01 5k), calibration (
 predictive sd), one-step-ahead forecasts of interval / long race+hard items, today's slope ± sd. Also the
 races-only slope (curve fitted on race items only, weak prior) for reference.
 
-Usage: uv run scripts/slope_prior_eval.py [person ...]     (default: adrian patrik)
+Usage: uv run scripts/slope_prior_eval.py [person ...]     (default: the calibration persons, then the validation persons; scripts/calibration_set.py)
 Does not write any files.
 """
 
@@ -109,7 +109,10 @@ def run(person):
 
 
 if __name__ == "__main__":
-    for p in sys.argv[1:] or ["adrian", "patrik"]:
+    import calibration_set as cs
+    for p in sys.argv[1:] or cs.calibration_persons() + cs.validation_persons():
+        if cs.calibration_weight(p) == 0:
+            print(f"\n{p}: VALIDATION ONLY (scripts/calibration_set.py): report, don't choose shared parameters on it")
         if (fm.ROOT / "data" / p / "groups.json").exists():
             run(p)
         else:

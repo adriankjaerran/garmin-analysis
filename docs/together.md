@@ -23,7 +23,7 @@ tg.session(gid)                              # session payload (cached in data/_
 tg.replay(gid, step_s=2, max_points=4000)    # positions on the group clock
 tg.list_payload(person=, sport=, kind=, label=, near=, place=, date_from=, date_to=, q=)   # the list endpoint
 tg.links()                                   # {(person, activity id): {gid, label, kind, role, with}}
-tg.people_info(); tg.hr_norm(person)         # display names / colours; HR max / rest for effort
+tg.people_info(); tg.hr_norm(person, activity_id=None)   # display names / colours; HR max / rest (+ flags) for effort
 ```
 
 ## Files
@@ -31,7 +31,7 @@ tg.people_info(); tg.hr_norm(person)         # display names / colours; HR max /
 |---|---|
 | `data/together.json` | groups (cross-person, at the top of `data/`, not a person folder) |
 | `data/people.json` | optional, hand-edited: `{id: {name, initials, colour, colour_dark}}`. Missing people / fields are automatic: name = folder name capitalised, colours from a fixed palette (blue, orange, green, purple, teal, ochre, red, slate: each ≥ 3:1 contrast on the light and the dark background), initials = the shortest name prefix no one else has |
-| `data/<person>/profile/hr_settings.json` | `{max_hr, rest_hr}` for effort as % of HR reserve, written by `scripts/hr_settings.py` (max = highest HR held 12 s in a run, rest = median daily resting HR of the last 365 days; `"source": "manual"` = hand-edited, never overwritten). Without it: max (and rest, if set) from the watch's `heart_rate_zones.json`, effort as % of max HR, with a warning |
+| `data/<person>/profile/hr_settings.json` | per-person, per-device HR settings from `scripts/hr_settings.py` (format: [data-layout.md](data-layout.md), [fitness-model.md](fitness-model.md)). Together reads the person's `max_hr` / `rest_hr` (a `manual` block overrides single values) for effort as % of HR reserve, and `activities[id].flags` (`cadence_lock`, `hr_high_for_pace`, `hr_dropout`: HR implausible on that run, judged against the recording device) to leave that participant's effort out (`hr_norm.flags`, warning). Without the file: max (and rest, if set) from the watch's `heart_rate_zones.json`, effort as % of max HR, with a warning |
 | `data/_together/cache.pkl` | FIT start times (by mtime + size), pair results (by both FIT keys + groups.json type / place / indoor fields + `PARAM_VERSION`) |
 | `data/_together/sessions.pkl` | session payloads, by a fingerprint of the group record, the participants' FIT files / groups.json entries, HR settings, fitness.json, people.json and the engine code **as loaded by the process** (a hash taken at import: a long-running server with older code can't store old-format payloads under the new key) |
 
@@ -147,6 +147,10 @@ A thin layer on the per-person compare engine (`scripts/compare.py`, not forked)
 earliest file start).
 
 **Intervals**
+- **Anchor.** Detection's anchor: among the members followed ≥ 80 % as much as the most-followed one
+  (`ANCHOR_FOLLOW_SHARE`), the densest recording (1 s beats 4 s), then the most followed, then the earliest start.
+  2026-11-03 Bislett 6×1000: all three tied on 6 followed reps; the earliest start (a 4 s watch whose detector split
+  every rep at a mid-rep slowdown) used to win and gave 16 slots.
 - **Slots by clock time.** The anchor = the participant with the most reps (detection's anchor first); its reps are
   slots 1..n. Another person's rep joins a slot when the starts are ≤ max(8 s, 2 × the coarser recording interval)
   apart and the reps overlap > 50 %; unmatched reps get extra slots `k+1`, `k+2` after anchor rep k (shown, not ranked).
@@ -168,20 +172,36 @@ earliest file start).
     A slower stretch is the recovery: the watch measured the rep short and the set distance is only reached while
     walking (2026-10-06 Frogner: adrian's rep 2 was 6:43 to his lap press, the stream reached 1800 m at 9:48, so the
     replay showed patrik "passing" him at 1780 m). Then the cell is `partial`.
+  - `lap` / `position` (`_position_finish`): every other person's cell in an anchor distance slot.
+    **`lap`**: a coarse watch (recording every ≥ 2 s) with a manual lap matching the rep (starting ≤ 8 s from the
+    anchor's rep start, watch distance ± 15 % of the set distance, a plausible time) → the lap press is the time
+    (`lap_s`), unless the position time below disagrees by more than max(10 s, 4 % of the rep). 4 s GPS can't place the
+    line better than ± 5–10 m, while lap presses are ~± 0.5 s: on 2026-11-03 they gave patrik behind rise in reps 1–4,
+    level in 5 (0.1 s) and ahead in 6, as remembered; detector / position times had patrik ahead in rep 5 and level in
+    2–4.
+    **`position`** (no usable lap): own start, or the anchor's start when within max(3 s, 2 × sample interval) of it
+    (`common_start`: 4 s watches find their start up to a sample early); finish at the anchor's finish line (through
+    its position at the rep end, across its direction over the last 3 s), timed 20 m before it (still running hard) +
+    those 20 m at own speed over the previous 8 s; the line is crossed every lap on a track, so the crossing where the
+    own watch distance is closest to the set distance counts. On the anchor itself this reproduces its detector times
+    within ~0.5 s. `pos_s` keeps it next to `lap_s`. `unsure_s` (lap 1 s, position half the recording interval): the
+    app marks a gap to the one above within it as too close to call (dotted), never "=".
   - `partial` (◐): otherwise; shown with own time / distance, not ranked.
   - Set-time slots (`0:45`): metres covered in the set time (÷ GPS scale), ranked by metres; `result_s` = the time to
     cover the winner's metres at own pace (so totals add up).
 - **Standings** per slot (≥ 2 results; each rep is ranked among whoever ran it, extra slots too): rank, `gap_s` to the
   rep's fastest, `gap_m` (≈ gap × set distance ÷ time);
   **dead heat** when within `tie_s` = max(1 s, half the coarser median recording interval) of the group's best
-  (`tie: true`, same rank).
+  (`tie: true`, same rank). The app always shows the gap (no "=" / "dead heat"); see `unsure_s`.
 - **Suspect reps** (`cell.suspect`: the reason): > 10 % faster than the person's median for the same set distance
   (≥ 3 such reps), e.g. adrian's 15th 400 m in 64.5 s (median 77.8 s): a short rep or a lap pressed early. Kept in
   `reps_done`, left out of the averages, best rep and fade; listed in `leaderboard[].suspect`.
 - **Warm-up / cool-down reps** (`cell.warmup` = `"warm-up" | "cool-down"`, `cell.warmup_reason`; `slot.warmup`;
   labels `WU1`, `WU2` / `CD1`): the main set runs from the first to the last rep 2+ people ran. A rep only one person
   ran outside it is a warm-up (before) / cool-down (after) when it was clearly easy for them: ≥ 8 % slower than their
-  median main-set pace **and** ≥ 8 effort points below their median main-set effort (pace alone without HR). Shown
+  median main-set pace **and** ≥ 8 effort points below their median main-set effort (pace alone without HR), or a
+  **stride**: shorter than half the main-set rep distance and ≥ 3 min from the main set (`WARM_SHORT`, `WARM_GAP_S`;
+  2026-11-03: rise's 230 m at 4:05 /km 10 min before the 6×1000). Shown
   greyed out, not counted anywhere: not in `reps_done`, averages, best, by_target, cumulative, replay totals, efforts.
   `leaderboard[].n_warmup` counts them. 2026-10-06 Frogner: patrik's 250 m (5:06 /km, effort 56 %) and 600 m (5:08 /km,
   71 %) vs his main reps (median ~4:13 /km, 94 %). Hard reps run alone stay reps (adrian's 400s 11–15 on 2026-10-20:
@@ -204,7 +224,8 @@ earliest file start).
 - **Breaks** between consecutive reps of each person (compare's `_break_stats`: duration, kind, HR peak, `drop_30/60/90`,
   `hr_next_start`) + `drop_30_pct` (of HR reserve, or of max HR) and `hr_next_start_pct`; `recovered_faster` = the
   person with the larger drop per break.
-- **Effort** per rep: peak HR in the rep as % of HR reserve (`effort_mode: hrr`) or of max HR (`hrmax`, ⚠ caveat).
+- **Effort** per rep: peak HR in the rep as % of HR reserve (`effort_mode: hrr`) or of max HR (`hrmax`, ⚠ caveat);
+  none for a participant whose run is flagged in hr_settings.json (`hr_norm(person, activity_id).flags`).
   Raw bpm misleads across people: max and rest differ, wrist vs strap, and the FR935 read low (adrian's 2025-11-11 800s
   at 3:07 /km show 134–151 bpm). So effort is relative to each person's own range, and it uses the peak because the
   mean lags on short reps. There is no cross-person pace-per-beat.
@@ -230,7 +251,7 @@ Validation (2026-11-01, `together.py validate`: 0 failures over 19 groups; detec
 `compare --mode intervals` rep times, standings sorted with the fastest at 0, leaderboard pace = own reps' time ÷
 distance and ranked by it, cumulative counts every full rep):
 2026-10-06: adrian's 1800s are 416.8 / 403.2 / 411.7 s and 900s 187.2 / 171.2 s (detector = lap presses; the 1754 m
-GPS reps count as 1800, [app.md](app.md#rep-pace)); patrik's 250 m and 600 m before rep 1 are warm-up reps (not
+GPS reps are within the detector window of the signature's 1800 m); patrik's 250 m and 600 m before rep 1 are warm-up reps (not
 counted). 2026-10-20: adrian 15 reps (14 counted, rep 15 suspect) avg 1:17.6 = 3:14 /km,
 patrik 10 reps avg 1:25.1 = 3:33 /km (+18.6 s/km); closest rep 10 (2.5 s); rep 1: patrik ≈ 54 m behind at 70 s.
 2025-11-11: rep 1 patrik ran 2 × 330 m, rep 2 split by his detector (◐); 2024-04-14: patrik's reps from onsets (typed
@@ -258,9 +279,15 @@ The session page is `/community/<gid>` (`pages/TogetherSession.tsx` + the Commun
 `/api/together/{gid}` for the results and `/replay` for the maps and the replay. Units and words follow app.md
 Vocabulary ("R3" / "Rep 3", "1:17.2", "10.9 s behind").
 - **Rep by rep** (intervals, the main results view): **Table** (a row per rep, people fastest to the left, the
-  fastest bold, `+s` behind it, `=` dead heat, `*` partial, `≈` from the speed step, `?` suspect) or **Leaderboard**
-  (a column per rep, a row per place). The choice is remembered in localStorage `session.repView`. Click a rep = its
+  fastest bold, `*` partial, `≈` from the speed step or estimated, `?` suspect) or **Leaderboard** (a column per rep, a
+  row per place); remembered in localStorage `session.repView`. Gap toggle **Time · +Leader · +Next** (own time, behind
+  the rep's fastest, behind the one just ahead; `session.repGap`, default +Leader): always the real gap, never "=";
+  a gap to the one above within `unsure_s` (at least 1 s) is dotted ("too close to call"). The tooltip says how a
+  time was taken (lap press, with the GPS time; or timed at the anchor's finish line). **Warm-ups** toggle (only when
+  there are warm-up / cool-down reps; `session.warmups`, shared with Splits) shows or hides them. Click a rep = its
   close-up (`?rep=<label>`).
+- **Splits** (`components/CommunitySessionSplits.tsx`): All · Time · Pace · HR columns (`session.splitCols`), the same
+  gap toggle (`session.splitGap`, default Time) and Warm-ups toggle; HR cells show bpm, effort % in the tooltip (none for a flagged run).
 - **More detail** (`?more=1`): leaderboard (ordered by distance-weighted average rep pace), rep times / pace, rep
   close-up (Own start / Clock, `?align=clock`), breaks ("Faster recovery" = the larger 30 s HR drop), heart rate,
   and for continuous runs the gap over distance, distance apart, who led and the map.

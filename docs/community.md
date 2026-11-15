@@ -2,7 +2,8 @@
 
 The club layer on top of [Together](together.md): every joint workout Together detects becomes a club **session** with
 a category (shown as "type" in the app), an optional title / note / guests / photos / kudos, collective numbers, each
-member's result against their current form. Plus a club dashboard and member profiles. The pages are deliberately plain:
+member's result against their current form. Plus a club dashboard, member profiles and the official races side by
+side (Community · Races, `/community/races`). The pages are deliberately plain:
 dense tables and text, no emoji, badges, avatars, medals or animations ([app.md](app.md)). Standings, splits and the
 replay of a session stay on `/api/together/{gid}` (+ `/replay`, [together.md](together.md#api)).
 
@@ -99,7 +100,8 @@ community sessions (not near-misses, not user-hidden), oldest first.
 The club decided (2026-11-01) against rivalry and records, and the pages were then made minimal:
 - **No rivalry:** no head-to-head scores, win counts, rivalry timelines or "rep winner" headlines. Results stay: each
   rep is ranked among whoever ran it (fastest bold), the session leaderboard orders by average rep pace, races by
-  finish time.
+  finish time. Community · Races puts each person's official race times side by side (run: each against their own
+  prediction; ski: gap to the fastest of us), with no win counts or scores.
 - **No club records:** no club bests, club PBs or record badges. Personal records (`/api/records`, Garmin's fastest
   splits, on the Fitness page) are a separate, personal feature and stay.
 - **Also gone:** badges, the yearly Wrapped page, the club's pairs / pair matrix / weekday × hour heatmap / recent
@@ -210,6 +212,15 @@ Over the visible sessions (not together's near-misses, not user-hidden) in the p
              form, numbers, rank, of_people, reps_done, avg_s, pace_s_km, n_photos, kudos}]   /* newest first */,
  form_series: [{date, gid, score, shape, delta, discipline, …}]     /* oldest first, sessions with a delta */,
  partners: [{person, display, sessions, last, gids}]}
+```
+
+### `GET /api/community/races`
+Not part of `community.py`: served by `app/server/routers/races.py` from `data/races.json` and each person's
+fitness.json `races` ([app.md](app.md#endpoints), [fitness-model.md](fitness-model.md)).
+```
+{people, races: [{name, date, sport, km, results: [{person, official_s, official, gap_s, activity_id, source chip|watch,
+                                                    predicted_s?, pct?, delta_s? /* run races only */}]}]}
+/* races newest first, results fastest first */
 ```
 
 ### Motivation endpoints

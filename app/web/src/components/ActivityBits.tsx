@@ -1,6 +1,6 @@
 // Small shared pieces for activities: sport dot, "together with" text, workout name, speed/pace cell, Day-page table columns, summary kv.
 import type { Activity, TogetherLink } from "../lib/api";
-import { SPORT_LABEL, dur, km, num, sportColor, stypeLabel, typeLabel, time, speedText as speedOf, speedLabel } from "../lib/format";
+import { SPORT_LABEL, dur, isErg, km, num, sportColor, stypeLabel, typeLabel, time, speedText as speedOf, speedLabel } from "../lib/format";
 import type { Col } from "./Table";
 import { personName } from "../lib/people";
 
@@ -9,9 +9,10 @@ export const togetherWith = (t: TogetherLink) => `Together with ${t.with.map(per
 export const SportDot = ({ sport }: { sport: string }) => <span class="dot" style={{ background: sportColor(sport) }} title={SPORT_LABEL[sport]} />;
 
 // ------------------------------------------------------------------ distance (trusted / estimate / unknown)
-type DistLike = { dist_km: number | null; dist_trusted?: boolean | null; dist_est_km?: number | null; dist_note?: string | null };
-/** km that count in totals: the trusted distance only (an indoor / no-GPS distance or its estimate doesn't) */
-export const trustedKm = (a: DistLike) => (a.dist_trusted === false ? 0 : a.dist_km || 0);
+type DistLike = { dist_km: number | null; dist_trusted?: boolean | null; dist_est_km?: number | null; dist_note?: string | null; sport?: string };
+/** km that count in totals: the trusted distance only (an indoor / no-GPS distance or its estimate doesn't; erg
+ *  metres never do: their time counts, not their km, store.volume_km) */
+export const trustedKm = (a: DistLike) => (a.dist_trusted === false || isErg(a.sport) ? 0 : a.dist_km || 0);
 /** sort key for a km column: trusted distance, else the estimate */
 export const distSort = (a: DistLike) => (a.dist_trusted === false ? a.dist_est_km ?? null : a.dist_km);
 /** "≈ 9.2" (lap estimate) / "—" (untrusted) / "8.0" as text, with `unit` " km" appended when asked */

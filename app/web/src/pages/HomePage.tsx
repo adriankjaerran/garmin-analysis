@@ -14,7 +14,9 @@ import "./home.css";
 
 interface Agg { n: number; km: number; s: number; n_untrusted?: number }
 interface VolRow { sport: string; week: Agg; prev4: Agg; month: Agg; year30: Agg }
-interface Shape { label: string; unit: string; mean: number | null; sd: number | null; date: string; last_evidence_date: string | null }
+interface Shape { label: string; unit: string; mean: number | null; sd: number | null; date: string; last_evidence_date: string | null;
+  /** erg trend (row / skierg): mean / sd = 2k-equivalent pace in s /500 m */
+  erg?: boolean; watts?: number | null }
 type HomeRow = SearchRow & { dur_s: number | null; type_label?: string | null; fit: boolean; track: boolean; swim?: Activity["swim"] };
 
 /** "6×1200" -> "6×1.2k", "1×1300 + 2×3000" -> "1×1.3k + 2×3k" (the training log on a phone: never clip digits) */
@@ -51,14 +53,17 @@ function pctDelta(v: number, typ: number) {
 }
 
 // ------------------------------------------------------------------ shape line
-const DISC_SHORT: Record<string, string> = { interval: "Interval", long: "Long", ski: "Ski" };
+const DISC_SHORT: Record<string, string> = { run: "Run", ski: "Ski", row: "Row", skierg: "SkiErg" };
+/** erg pace on the shape line: whole seconds, "1:52" */
+const ergPace = (s: number) => { const r = Math.round(s); return `${Math.floor(r / 60)}:${String(r % 60).padStart(2, "0")}`; };
 
 /** a shape without a race / hard session for more than this many days is stale: muted, "last evidence 12 mo ago" in the tooltip */
 const STALE_DAYS = 90;
 /** "12 d" / "5 mo" / "2.5 y" */
 const agoShort = (d: number) => d < 60 ? `${d} d` : d < 730 ? `${Math.round(d / 30.4)} mo` : `${(d / 365).toFixed(1).replace(/\.0$/, "")} y`;
 
-/** plain text: "Shape · Interval 52.8 · Long 58.4 · Ski 55.3", each value links to Fitness */
+/** plain text: "Shape · Run 53.7 · Ski 55.3 · Row 1:45 · SkiErg 1:39" (run = 10k-equivalent VDOT from the distance curve;
+ *  Row / SkiErg = the erg trend's 2k-equivalent pace /500 m), each value links to Fitness */
 function ShapeLine({ fit }: { fit: Record<string, Shape> }) {
   const items = Object.entries(fit).filter(([, s]) => s.mean !== null);
   if (!items.length) return null;
@@ -68,6 +73,11 @@ function ShapeLine({ fit }: { fit: Record<string, Shape> }) {
       {items.map(([k, s]) => {
         const ago = s.last_evidence_date ? daysBetween(s.last_evidence_date, s.date) : null;
         const stale = ago === null || ago > STALE_DAYS;
+        if (s.erg && s.mean !== null) {
+          const tip = [`${s.label}: ${ergPace(s.mean)}${s.sd !== null ? ` ± ${num(s.sd, 1)} s` : ""} ${s.unit}${s.watts ? `, ${Math.round(s.watts)} W` : ""}`,
+            stale ? `no scored session for ${ago === null ? "ever" : agoShort(ago)}: the value is carried forward` : `last session ${s.last_evidence_date}`].join(" · ");
+          return <span key={k}>{" · "}<a href="/fitness#erg" title={tip} class={stale ? "muted" : undefined}>{DISC_SHORT[k] ?? k} {ergPace(s.mean)}</a></span>;
+        }
         const tip = [`${s.label}: ${num(s.mean, 1)}${s.sd !== null ? ` ± ${num(s.sd, 1)}` : ""} ${s.unit}`,
           stale ? `no race or hard session for ${ago === null ? "ever" : agoShort(ago)}: the value is carried forward` : `last hard evidence ${s.last_evidence_date}`].join(" · ");
         return <span key={k}>{" · "}<a href={`/fitness?d=${k}`} title={tip} class={stale ? "muted" : undefined}>{DISC_SHORT[k] ?? k} {num(s.mean, 1)}</a></span>;

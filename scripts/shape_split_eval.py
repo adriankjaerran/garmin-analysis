@@ -24,7 +24,7 @@ Out-of-sample metrics (no look-ahead except the `implausible` cross-check flag, 
   - one-step-ahead forecast of race/hard items (forward filter), interval and long targets separately.
   - current values today.
 
-Usage: uv run scripts/shape_split_eval.py [person ...]     (default: adrian patrik)
+Usage: uv run scripts/shape_split_eval.py [person ...]     (default: the calibration persons, then the validation persons; scripts/calibration_set.py)
 Does not write any files.
 """
 
@@ -390,7 +390,10 @@ def run(person):
 
 
 if __name__ == "__main__":
-    for p in sys.argv[1:] or ["adrian", "patrik"]:
+    import calibration_set as cs
+    for p in sys.argv[1:] or cs.calibration_persons() + cs.validation_persons():
+        if cs.calibration_weight(p) == 0:
+            print(f"\n{p}: VALIDATION ONLY (scripts/calibration_set.py): report, don't choose shared parameters on it")
         if (fm.ROOT / "data" / p / "groups.json").exists():
             run(p)
         else:

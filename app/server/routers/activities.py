@@ -131,6 +131,8 @@ def get_activity(aid: str, max_points: int = Query(3600, ge=100, le=20000), stor
         out["reps"] = meta.get("reps") or []
         if ga.get("type") == "intervals_track" or meta.get("mode") == "track":   # track: reps are the set distance
             out["reps"] = sg.snap_track_reps(out["reps"])
+        elif (ga.get("track") or {}).get("name") in sg.LOOPS and ga.get("track_reps"):   # Frogner loop: whole laps
+            out["reps"] = sg.snap_loop_reps(out["reps"], ga["track_reps"])
         out["breaks"] = meta.get("breaks") or []
         if ga.get("indoor_bislett"):   # watch distance is made up indoors: reps from the whole-lap manual laps
             out["reps"], out["breaks"] = _indoor_reps(ga["indoor_bislett"], arr)
@@ -157,3 +159,34 @@ def get_track(aid: str, format: str = Query("geojson", pattern="^(geojson|column
     coords = [[lo, la] for la, lo in zip(tp["lat"], tp["lon"])]
     return {"type": "Feature", "id": aid, "geometry": {"type": "LineString", "coordinates": coords},
             "properties": {"id": aid, "t": tp["t"], "speed": tp["speed"], "hr": tp["hr"], "alt": tp["alt"]}}
+
+
+@router.get("/activities/{aid}/shared-turns")
+def shared_turns(aid: str):
+    """a shared-machine erg session (Concept2, concept2.clean): every person who has it (their own profile with a
+    copy of the recording, docs/concept2.md) with their turns: handover cut, steady pace and the trimmed stroke pace
+    (concept2.turn_profiles). Same for every person prefix. 404 if nobody has it as a shared session."""
+    import concept2 as c2m
+    from .. import ROOT
+    from ..deps import people
+    out = []
+    for p in people():
+        D = ROOT / "data" / p
+        if not (c2m.c2_dir(D) / "results" / aid / "result.json").exists():
+            continue
+        r = c2m.load_result(D, aid)
+        sh = (r or {}).get("shared")
+        st = c2m.strokes(D, aid)
+        if not sh or not st:
+            continue
+        turns = c2m.turn_profiles(st, sh["turns"])
+        out.append({"person": p, "turns": turns, "on_s": sh["on_s"], "off_s": sh["off_s"],
+                    "second_machine": sh.get("second_machine")})
+    if not out:
+        raise HTTPException(404, "not a shared erg session")
+    mean = lambda x: sum(x) / len(x) if x else None
+    for o in out:   # whole-session steady pace (distance-weighted over the trimmed turns) for sorting / labels
+        ts = [t for t in o["turns"] if t["steady_pace_s"]]
+        o["steady_pace_s"] = round(mean([t["steady_pace_s"] for t in ts]), 1) if ts else None
+    out.sort(key=lambda o: o["steady_pace_s"] or 1e9)
+    return {"activity_id": aid, "people": out}

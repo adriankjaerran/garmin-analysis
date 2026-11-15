@@ -140,6 +140,9 @@ def read_fit(fit: Path) -> dict:
         raw = {**raw, "lap": [{**v, "start_time": gq.unjump(v["start_time"], jumps)} if v.get("start_time") else v
                               for v in raw["lap"]]}
     t0 = recs[0]["timestamp"]
+    # FIT cadence is per cycle: running files store strides (x2 = steps/min); fitness equipment (Concept2 ergs,
+    # FIT sport 4) stores strokes/min as they are
+    cad_k = 1 if (raw["session"] and raw["session"][0].get("sport") == 4) else 2
     swim = sg.pool_swim(raw)
     if swim and raw["session"][0].get("start_time"):   # time origin = session start (records start late)
         t0 = min(t0, raw["session"][0]["start_time"])
@@ -166,7 +169,7 @@ def read_fit(fit: Path) -> dict:
         d = r.get("distance")
         cols["dist"].append(d / 100 if d is not None else nan)
         c = r.get("cadence")
-        cols["cad"].append(c * 2 + (r.get("fractional_cadence") or 0) / 64 if c is not None else nan)
+        cols["cad"].append(c * cad_k + (r.get("fractional_cadence") or 0) / 64 if c is not None else nan)
         p = r.get("power")
         cols["power"].append(p if p is not None else nan)
     arr = {k: np.array(v, np.float64 if k in ("lat", "lon") else np.float32) for k, v in cols.items()}
@@ -281,9 +284,10 @@ def _reps_job(job):
 def groups_rep_source(ga: dict) -> bool:
     """reps of this session come from groups.json, not run_analysis: ski intervals (ski_intervals.py; the running
     detector found 0-16 random "reps" on skis) and Bislett indoor laps (whole manual laps; the watch distance is made
-    up). One rep list for the workout label, the Reps tab, the chart shading, Compare and the shape model."""
+    up) and Concept2 erg intervals (the machine's own work / rest laps, scripts/concept2.py). One rep list for the
+    workout label, the Reps tab, the chart shading, Compare and the shape model."""
     return bool(ga.get("rep_starts")) and bool(ga.get("reps")) and (
-        ga.get("type") == "ski_intervals" or bool(ga.get("indoor_bislett")))
+        ga.get("type") in ("ski_intervals", "erg_intervals") or bool(ga.get("indoor_bislett")))
 
 
 def groups_reps_key(ga: dict) -> str:
@@ -341,7 +345,8 @@ def reps_from_groups(ga: dict, arr: dict) -> dict:
             breaks.append({"start": round(a, 2), "end": round(b, 2), "time": round(b - a, 2), "dist": bd,
                            "speed": round(bd / (b - a), 3) if bd is not None else None, "hr": h, "maxhr": hm,
                            "hr_peak": peak, "hr_drop": peak - end_hr if peak and end_hr else None, "standing": stand})
-    return {"reps": reps, "breaks": breaks, "mode": "indoor" if indoor else "ski", "reps_source": "groups"}
+    mode = "indoor" if indoor else ("erg" if ga.get("type") == "erg_intervals" else "ski")
+    return {"reps": reps, "breaks": breaks, "mode": mode, "reps_source": "groups"}
 
 
 def build(person: str, force: bool = False, workers: int = 8, quiet: bool = False) -> dict:

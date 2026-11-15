@@ -7,6 +7,7 @@ rep detector output per FIT file in data/<person>/cache/session_groups.pkl, keye
 sessions get reps from ski_intervals.py (cheap, recomputed every run, stored in the same cache).
 Start clusters are named by KNOWN spots, then curated LANDMARKS, then the cached reverse geocode
 (scripts/geocode_places.py), else "<loc>-<rank>".
+Session corrections: data/<person>/session_overrides.json {"<id>": {"type", "fitness": "exclude" | "bound", "note"}}.
 Place name overrides: data/<person>/places.json {"<place id>" / "<generic id>" or "lat,lon": "name"}.
 """
 
@@ -27,9 +28,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gps_quality as gq  # noqa: E402
+import concept2 as c2  # noqa: E402  (Concept2 erg workouts: merged index, erg reps / types)
 
 ROOT = Path(__file__).resolve().parent.parent
-CACHE_VERSION = 2   # 2: FIT clock jumps taken out (read_series, run_analysis)
+CACHE_VERSION = 3   # 2: FIT clock jumps taken out (read_series, run_analysis); 3: rep_starts for every run (track_of)
 READER_VERSION = 2   # read_series time base; 2: clock jumps fixed. Part of the caches built on it
 
 # the fast reader decodes only listed fields: add altitude, heart rate and timer events
@@ -61,7 +63,8 @@ LEG_COVER = 0.8                      # a session's leg counts if it covers >= 80
 MIN_ROUTE_N = 3
 SWIM_MAX_MS = 2.5                    # m/s: pool lengths faster than this are glitches (world record ~2.4 m/s)
 FAM = {"running": "run", "track_running": "run", "treadmill_running": "run", "indoor_running": "run",
-       "trail_running": "run", "cross_country_skiing_ws": "ski", "skate_skiing_ws": "ski", "hiking": "hike"}
+       "trail_running": "run", "cross_country_skiing_ws": "ski", "skate_skiing_ws": "ski", "hiking": "hike",
+       **c2.FAMILY}   # Concept2 ergs: indoor_rowing -> row, skierg -> skierg, bikeerg -> bike
 KNOWN = {"Bislet": (59.9253, 10.7331), "Sognsvann": (59.9690, 10.7310), "Frognerseteren": (59.9785, 10.6800),
          "Holmenkollen": (59.9620, 10.6600), "Granåsen": (63.3800, 10.3130), "NTNU Gløshaugen": (63.4190, 10.4040)}
 BISLET = KNOWN["Bislet"]
@@ -99,6 +102,7 @@ FIELDS = {
     "legs": ["t", "dur_s", "dist_m", "kmh", "hr", "hr_max", "climb_m", "desc_m", "grade_pct"],
     "pauses": ["t", "dur_s", "lat", "lon", "km", "timer"],
     "reps": ["time_s", "dist_m", "speed_ms", "hr"],
+    "track_reps": ["start_s", "dur_s", "measured_m", "set_m"],
 }
 
 
@@ -108,6 +112,158 @@ FIELDS = {
 # distance (400–450 m = 400; docs/app.md#rep-pace). Where two fit, the nearer one (1632 m = 1600, not 1500).
 TRACK_SET_M = (100, 150, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 1600, 2000, 2400, 3000, 4000, 5000)
 TRACK_UNDER, TRACK_OVER = 0.05, 0.125
+
+# ---------------------------------------------------------------- running tracks: where the reps happen
+# A run is on a track when its reps (runs without reps: its moving time) happen on a known track, wherever it starts
+# (Rise's Bislett sessions start at Marienlyst, Patrik's at St. Hanshaugen). TRACKS: name -> (centre, radius m); a GPS
+# point within the radius of the centre is on the track. Centres = median position of the reps there (2026-11-04 scan of
+# all reps of adrian / rise / patrik):
+#   Bislet: the 400 m oval, 674 reps whose 95th-percentile distance from their own centre is < 130 m (95-115 m with
+#     GPS noise) -> radius 130 m.
+#   Øya stadion (Trondheim; user decision 2026-11-04): 400 m oval, 13 adrian sessions 2020-2022 (GPS reps, watch in
+#     running mode); median rep position (63.42653, 10.38021), 95th / 99th-percentile distance 81 / 84 m (per session
+#     80-88 m) -> radius 120 m.
+#   Frogner stadion (user decisions 2026-11-04): the loop the reps there run (44 reps of 800+ m from adrian / rise /
+#     patrik): ~890 m per lap (GPS 877-897 m; 3×1800 + 2×900 sets), 330 × 220 m, reaching ~190 m from its centre ->
+#     radius 210 m. Not a 400 m oval and ~12 m up and down per lap: a LOOP (LOOPS), i.e. the session counts as road
+#     (intervals_road, grade-adjusted, road σ), but its GPS reps still snap to whole laps (890 / 1780 m, track_reps).
+# Not a track (user decision): a track in Dubai (25.2149, 55.2743; 10 sessions; soft surface and heat): road sessions.
+TRACKS = {"Bislet": ((59.92503, 10.73339), 130.0), "Frogner stadion": ((59.92873, 10.70436), 210.0),
+          "Øya stadion": ((63.42653, 10.38021), 120.0)}
+OVALS = {"Bislet", "Øya stadion"}   # standard 400 m ovals: rep set distances may also be TRACK_SET_M (group_set_m rule 2)
+LOOPS = {"Frogner stadion": 890.0}  # measured loops (lap m), not flat tracks: road sessions, reps snap to whole laps
+TRACK_REP_SHARE = 0.6      # share of the reps' GPS time on one track -> a track session
+TRACK_RUN_SHARE = 0.8      # runs without reps: share of the moving GPS time on one track
+TRACK_GPS_MIN = 0.5        # below this GPS cover of the reps the rep location is unknown (fall back to the start place)
+TRACK_SPAN_GAP = 10        # s: on-track spans closer than this are joined (GPS dropouts on the bends)
+
+
+def _spans(mask, gap=TRACK_SPAN_GAP):
+    """[[t0, t1), ...] of True runs of a 1 Hz mask, runs closer than `gap` s joined"""
+    out = []
+    for a, b in runs_of(mask):
+        if out and a - out[-1][1] <= gap:
+            out[-1][1] = int(b)
+        else:
+            out.append([int(a), int(b)])
+    return out
+
+
+def track_spans(G) -> dict:
+    """{"_gps": spans with a GPS fix, <track>: spans within the track's radius (TRACKS)} on the 1 Hz grid (to_grid)"""
+    if G.get("gps") is None or "lat" not in G:
+        return {}
+    out = {"_gps": _spans(G["gps"], 0)}
+    for name, ((la, lo), r) in TRACKS.items():
+        dy = (G["lat"] - la) * 111_195.0
+        dx = (G["lon"] - lo) * 111_195.0 * math.cos(math.radians(la))
+        m = G["gps"] & (dx * dx + dy * dy <= r ** 2)
+        if m.any():
+            out[name] = _spans(m)
+    return out
+
+
+def _overlap(spans, a, b):
+    return sum(max(0, min(b, y) - max(a, x)) for x, y in spans)
+
+
+def track_of(spans: dict, windows: list, share_min: float) -> dict | None:
+    """the known track where `windows` [(t0, t1)] happen: {"name", "share"} when >= share_min of their GPS time is on it;
+    {"name": None, ...} when the windows have too little GPS to say (indoors, GPS lost); None when not on a track"""
+    tot = sum(b - a for a, b in windows)
+    if not spans or tot <= 0:
+        return {"name": None, "gps": 0.0} if tot > 0 else None
+    g = sum(_overlap(spans["_gps"], a, b) for a, b in windows)
+    if g < TRACK_GPS_MIN * tot:
+        return {"name": None, "gps": round(g / tot, 2)}
+    best = max(((sum(_overlap(sp, a, b) for a, b in windows) / g, n) for n, sp in spans.items() if n != "_gps"), default=(0, None))
+    return {"name": best[1], "share": round(best[0], 2)} if best[0] >= share_min else None
+
+
+def flat_track(trk) -> bool:
+    """groups.json `track` is a flat running track (no grade adjustment, track σ, intervals_track): any known track
+    except the LOOPS (Frogner stadion: hilly ~890 m loop, scored as road); {"name": None} = Bislett by its start"""
+    return bool(trk) and trk.get("name") not in LOOPS
+
+
+# set distances of GPS reps on a track (fitness scores; session_groups `track_reps`): rep windows from the lap presses when
+# the manual laps are the reps, else the detector's reps; a group of similar reps (rep_groups) with >= 2 reps gets
+#   (1) its 100 m multiple when the group is steady (spread <= 6 %) and its median within 4 % of it (signature's label), else
+#   (2) on a 400 m oval (OVALS) the nearest TRACK_SET_M within 10 % of the median, if the next one is at least twice as
+#       far (clear); not on the Frogner loop, where 1521-1775 m reps would become 1600;
+#   on a loop (LOOPS, Frogner stadion ~890 m) instead only whole laps: n × lap within 5 % of the median (n >= 1), and
+#       only reps within -7 % .. +5 % of it count as it (GPS laps there: 847-897 m, two laps 1685-1803 m). Not laps:
+#       ~1000 m reps (adrian 2026-06-09: 988-1017 m; rise the same day 942-986 m, 6-11 % over a lap) and a 1521 m rep
+#       in rise's 2026-05-19 2-lap set (cut short / GPS) keep their GPS distance;
+# every rep of the group within -15 % .. +20 % of that distance counts as it (GPS on the Bislett oval: Patrik's 1000s at
+# 921-969 m, Rise's 400s at 411-467 m). Not clear (no snapping): groups whose distances spread more than 15 % of their
+# median (Rise's winter sessions: 173-595 m for ~105 s reps, GPS partly lost under the stands), groups whose times spread
+# more than 25 % (one set distance is run at about one pace: Rise 2026-01-13 grouped a 277 s and a 186 s rep by distance)
+# and time-triggered laps.
+SNAP_TOL, SNAP_LO, SNAP_HI, SNAP_SPREAD, SNAP_TIME_SPREAD = 0.10, 0.85, 1.20, 0.15, 0.25
+LOOP_TOL, LOOP_LO, LOOP_HI = 0.05, 0.93, 1.05
+LAP_REP_MIN_S, LAP_REP_OVERLAP, LAP_REP_COVER, LAP_REP_SPEED = 35, 0.5, 0.7, 0.75
+
+
+def lap_rep_windows(laps_c, ana):
+    """[(start, dur, watch m)] of the manual laps that are the reps (each overlaps detected reps for >= half its time and
+    is >= 75 % of the median speed of such laps; >= 3 of them, together >= 70 % of the detected rep time), else None"""
+    starts, times = ana.get("rep_starts") or [], ana.get("rep_times") or []
+    if not laps_c or len(starts) != len(times) or not starts:
+        return None
+    reps = [(s, s + t) for s, t in zip(starts, times)]
+    out, cov = [], 0.0
+    for l in laps_c:
+        t0, dur, m, trig, inten = l[0], l[1], l[2], l[5], l[6]
+        # a press at the line (manual) or a workout step that isn't timed (time-triggered: a time rep, no set distance)
+        if dur < LAP_REP_MIN_S or not m or not (trig in (0, "manual") or (inten == "active" and trig not in (1, "time"))):
+            continue
+        ov = _overlap(reps, t0, t0 + dur)
+        if ov >= LAP_REP_OVERLAP * dur:
+            out.append((float(t0), float(dur), float(m), ov))
+    if out:   # a recovery lap the detector ran into a rep (Rise 2026-10-20: 145 m in 50 s between 400s) is no rep
+        v0 = float(np.median([x[2] / x[1] for x in out]))
+        out = [x for x in out if x[2] / x[1] >= LAP_REP_SPEED * v0]
+    cov = sum(x[3] for x in out)
+    return [x[:3] for x in out] if len(out) >= 3 and cov >= LAP_REP_COVER * sum(times) else None
+
+
+def group_set_m(ds, oval=True, lap=None):
+    """the set distance of a group of similar track reps (see above), else None; oval: a 400 m oval (rule 2 allowed);
+    lap: lap length of a loop (LOOPS): whole laps only"""
+    d_ = float(np.median(ds))
+    if lap:
+        n = round(d_ / lap)
+        return round(n * lap) if n >= 1 and abs(d_ / (n * lap) - 1) <= LOOP_TOL else None
+    r100 = round(d_ / 100) * 100
+    if r100 >= 100 and max(ds) - min(ds) <= 0.06 * d_ and abs(d_ - r100) <= 0.04 * d_:
+        return r100
+    err = sorted((abs(d_ / x - 1), x) for x in TRACK_SET_M)
+    if oval and err[0][0] <= SNAP_TOL and err[1][0] >= 2 * err[0][0]:
+        return err[0][1]
+    return None
+
+
+def track_reps(laps_c, ana, oval=True, lap=None) -> list:
+    """[[start s, dur s, measured m, set m], ...] for the reps of a GPS track session whose set distance is clear
+    (oval: on a 400 m oval, OVALS; lap: on a loop of this lap length, LOOPS)"""
+    if not ana or not ana.get("rep_starts") or len(ana["rep_starts"]) != len(ana["rep_times"]):
+        return []
+    w = lap_rep_windows(laps_c, ana)
+    if w is None:
+        w = [(s, t, d) for s, t, d in zip(ana["rep_starts"], ana["rep_times"], ana["rep_dists"])]
+    out = []
+    for g in rep_groups([x[1] for x in w], [x[2] for x in w]):
+        ds = [w[j][2] for j in g]
+        ts = [w[j][1] for j in g]
+        if len(g) < 2 or not all(ds) or (max(ds) - min(ds)) > SNAP_SPREAD * float(np.median(ds)) \
+                or (max(ts) - min(ts)) > SNAP_TIME_SPREAD * float(np.median(ts)):
+            continue
+        m = group_set_m(ds, oval, lap)
+        if m:
+            lo, hi = (LOOP_LO, LOOP_HI) if lap else (SNAP_LO, SNAP_HI)
+            out += [[r1(w[j][0], 1), r1(w[j][1], 1), r1(w[j][2], 0), m] for j in g if lo * m <= w[j][2] <= hi * m]
+    return sorted(out)
 
 
 # ---------------------------------------------------------------- multisport files
@@ -175,6 +331,17 @@ def snap_track_reps(reps: list, dist="dist", time="time", speed="speed") -> list
     return [snap_track_rep(r, dist, time, speed, m=m) for r, m in zip(reps, ms)]
 
 
+def snap_loop_reps(reps: list, track_reps: list, tol_s=5.0) -> list:
+    """reps (dicts with start / time / dist / speed) at the whole-lap set distance of groups.json `track_reps` on a loop
+    (LOOPS, Frogner: road sessions whose reps count as 890 / 1780 m): a rep starting within tol_s of a track rep gets its
+    set distance (gps_dist keeps the measured one); others unchanged"""
+    out = []
+    for r in reps:
+        m = next((x[3] for x in track_reps or [] if r.get("start") is not None and abs(r["start"] - x[0]) <= tol_s), None)
+        out.append(snap_track_rep(r, m=m) if m else r)
+    return out
+
+
 def snap_track_rep(r: dict, dist="dist", time="time", speed="speed", m="auto") -> dict:
     """a rep dict with its distance set to the track set distance (gps_dist keeps the measured one); `m`: the set
     distance (track_set_dists), default track_set_m of the rep alone"""
@@ -193,7 +360,7 @@ def hav(a, b):
 
 
 def dist_matrix(pts):
-    p = np.radians(np.array(pts, float))
+    p = np.radians(np.array(pts, float).reshape(-1, 2))   # no GPS sessions at all (a Concept2-only profile): 0 x 0
     lat, lon = p[:, 0][:, None], p[:, 1][:, None]
     h = np.sin((lat - lat.T) / 2) ** 2 + np.cos(lat) * np.cos(lat.T) * np.sin((lon - lon.T) / 2) ** 2
     return 2 * 6371008.8 * np.arcsin(np.sqrt(np.minimum(1, h)))
@@ -329,7 +496,7 @@ def name_places(cens, sizes, locs, over=None, geocode=None):
     places.json renames it (keys: id, generic id or "lat,lon")"""
     over, geocode = over or {}, geocode or []
     known_of = {}   # a known name goes to the one cluster nearest to it (within 600 m)
-    for kn, q in KNOWN.items():
+    for kn, q in (KNOWN.items() if cens else ()):   # no places (a Concept2-only profile)
         d, l = min((hav(c, q), l) for l, c in cens.items())
         if d < 600:
             known_of[l] = kn
@@ -641,6 +808,8 @@ def worker(job):
             hh[int(h[i])] += min(t[i + 1] - t[i], 10)
     out["hr_hist"] = dict(hh)
     G = to_grid(s)
+    if FAM.get(typ) == "run" or typ in MULTISPORT:   # when the run was on a known track (track_of)
+        out["track_spans"] = track_spans(G)
     sw = s.get("swim")
     if sw:   # pool swim: moving = swimming time of the active lengths, no legs / pauses from the records
         sw = {k: v for k, v in sw.items() if k != "lengths_detail"}
@@ -684,7 +853,10 @@ def ana_job(fit):
 
 # ---------------------------------------------------------------- session features / types
 def zones_floor(person="adrian"):
-    z = json.loads((ROOT / "data" / person / "profile" / "heart_rate_zones.json").read_text())
+    p = ROOT / "data" / person / "profile" / "heart_rate_zones.json"
+    if not p.exists():   # a Concept2-only profile (no Garmin data): Garmin's default floors (50-90 % of max HR 190)
+        return [95, 114, 133, 152, 171]
+    z = json.loads(p.read_text())
     z = [x for x in z if x.get("sport") in ("DEFAULT", None)][0] if isinstance(z, list) else z
     return [z[f"zone{i}Floor"] for i in range(1, 6)]
 
@@ -709,6 +881,7 @@ def hr_norm(person="adrian"):
     pf = ROOT / "data" / person / "profile"
     try:
         h = json.loads((pf / "hr_settings.json").read_text())
+        h = {**h, **{k: v for k, v in (h.get("manual") or {}).items() if k in ("max_hr", "rest_hr") and v}}
         return float(h["max_hr"]), float(h["rest_hr"]) if h.get("rest_hr") else None
     except (OSError, ValueError, KeyError, TypeError):
         pass
@@ -718,6 +891,16 @@ def hr_norm(person="adrian"):
         return float(z["maxHeartRateUsed"]), None
     except (OSError, ValueError, KeyError, TypeError, IndexError):
         return None, None
+
+
+def hr_flagged(person) -> set:
+    """ids (str) of activities whose HR hr_settings.json flags as implausible (cadence lock, dropout, far above the
+    person's usual at that pace on that device; scripts/hr_settings.py): their HR isn't used for easy / steady"""
+    try:
+        h = json.loads((ROOT / "data" / person / "profile" / "hr_settings.json").read_text())
+        return {i for i, a in (h.get("activities") or {}).items() if a.get("flags")}
+    except (OSError, ValueError, AttributeError):
+        return set()
 
 
 def hrr_of(hr, HN):
@@ -766,7 +949,24 @@ def features(a, ZF):
                  n_active=sum(1 for l in ana["laps"] if l[2] == "active"), mode=ana["mode"])
         r["rec_share"] = recovery_share(rt, [b[0] for b in br])   # share of breaks that are real recoveries
     r["at_bislet"] = bool(a["start"]) and hav(a["start"], BISLET) < 400
+    r["track"] = run_track(a) if a["fam"] == "run" else None
     return r
+
+
+def run_track(a):
+    """where a run happened, track-wise (track_of): from the time of its reps (>= 35 s; >= 2 of them), else from its moving
+    legs; {"name", "share", "basis"} on a known track, {"name": None, ...} unknown (no GPS there), None not on a track"""
+    f = a["f"] or {}
+    spans, ana = f.get("track_spans"), f.get("ana") or {}
+    w = [(s_, s_ + t_) for s_, t_ in zip(ana.get("rep_starts") or [], ana.get("rep_times") or []) if t_ >= 35]
+    if len(w) >= 2 and len(ana["rep_starts"]) == len(ana["rep_times"]):
+        r = track_of(spans, w, TRACK_REP_SHARE)
+        basis = "reps"
+    else:
+        w = [(l[0], l[0] + l[1]) for l in f.get("legs") or []]
+        r = track_of(spans, w, TRACK_RUN_SHARE)
+        basis = "moving"
+    return {**r, "basis": basis} if r else None
 
 
 # ---------------------------------------------------------------- Bislett indoor (winter)
@@ -894,6 +1094,25 @@ def indoor_grid(G, act):
     return True
 
 
+def track_rep_grid(G, act):
+    """In place: speed inside each GPS track rep of groups.json `act["track_reps"]` scaled so the rep covers its set
+    distance (track_reps: Patrik's 921-969 m 1000s count as 1000 m); distance re-integrated. Returns the number of reps."""
+    reps = act.get("track_reps") or []
+    if not reps or act.get("indoor_bislett"):
+        return 0
+    v = G["v"].astype(float).copy()
+    inc = np.diff(G["d"])   # inc[i]: distance from second i to i + 1
+    n = 0
+    for t0, dur, _, m in reps:
+        a_, b_ = max(0, int(round(t0))), min(G["T"], int(round(t0 + dur)))
+        d = float(inc[a_:b_].sum())
+        if b_ > a_ and d > 0 and m:
+            v[a_:b_] *= m / d; inc[a_:b_] *= m / d; n += 1
+    G["v"] = v
+    G["d"] = G["d"][0] + np.concatenate([[0.0], np.cumsum(inc)])
+    return n
+
+
 def other_tags(a):
     """type_detail tags for hikes and other sports (the type stays the sport / activity type)"""
     F, x = a["F"], a["x"]
@@ -918,6 +1137,9 @@ def other_tags(a):
 
 def classify(a, ZF, easy_ref):
     F = a["F"]
+    if c2.is_erg(a["type"]):   # Concept2 erg: intervals (Concept2 interval workout) / short piece / steady
+        t, det = c2.erg_type(a["x"], (a["f"] or {}).get("ana"))
+        return t, det, None
     if a["fam"] == "ski":
         z = F["zones"]; mov = F["moving_s"] / 60; hard = (z[4] + z[5]) if z else None
         surface = "roller?" if a["date"][5:7] in ("05", "06", "07", "08", "09", "10") else "snow"
@@ -964,7 +1186,12 @@ def classify(a, ZF, easy_ref):
     if structured and F.get("rep_med_s", 0) < 35 and F.get("rep_time", 0) < 300:
         structured = False; tags.append("strides")
     if structured:
-        where = "track" if (F["at_bislet"] or F.get("mode") == "track" or a["type"] == "track_running") else (
+        # track: the reps happen on a known track (run_track; not where the run starts), the watch's track mode, or
+        # (rep location unknown: no GPS during the reps) a start at Bislett
+        # (a loop, LOOPS: Frogner stadion, counts as road)
+        trk = F.get("track")
+        on_trk = (bool(trk and trk.get("name")) and flat_track(trk)) or (bool(trk) and trk.get("name") is None and F["at_bislet"])
+        where = "track" if (on_trk or F.get("mode") == "track" or a["type"] == "track_running") else (
             "treadmill" if a["type"] in ("treadmill_running", "indoor_running") else "road")
         L = F["rep_med_s"]; length = "short" if L < 100 else ("medium" if L < 300 else "long")
         return f"intervals_{where}", " ".join([f"{length} reps"] + tags), None
@@ -983,13 +1210,13 @@ STEADY_HRR, STEADY_REL, STEADY_REL_PACE, STEADY_MIN_HRR = 0.68, 1.05, 1.15, 0.60
 EASY_HRR = 0.65   # runs below this mean %HRR are the easy-pace reference
 
 
-def steady_or_easy(a, sref, HN):
+def steady_or_easy(a, sref, HN, hr_ok=True):
     """'steady' for a continuous run (classified 'easy') that was faster than easy: mean HR >= 68 % of the HR reserve
     at >= 1.05 x the person's easy pace, or >= 1.15 x the easy pace (HR >= 60 % HRR or none). Easy pace (`sref`) =
     median speed of the person's own continuous runs with mean HR < 65 % HRR within +-180 days (not the median of all
     runs, which a lot of fast runs pull up: 2026-10-03 4:34 /km at HR 167 was "easy"). >= 15 min moving."""
     F = a["F"]
-    hrr = hrr_of(F.get("avg_hr"), HN)
+    hrr = hrr_of(F.get("avg_hr"), HN) if hr_ok else None   # hr_ok False: HR flagged implausible (hr_flagged)
     if not sref or not F.get("speed") or F["moving_s"] < 900:
         return "easy"
     rel = F["speed"] / sref
@@ -1001,8 +1228,8 @@ def steady_or_easy(a, sref, HN):
 
 
 def is_iv(stype):
-    """interval session types: intervals_track / _road / _treadmill and ski_intervals"""
-    return bool(stype) and (stype.startswith("intervals") or stype == "ski_intervals")
+    """interval session types: intervals_track / _road / _treadmill, ski_intervals and erg_intervals"""
+    return bool(stype) and (stype.startswith("intervals") or stype in ("ski_intervals", "erg_intervals"))
 
 
 def mmss(s):
@@ -1012,13 +1239,28 @@ def mmss(s):
 REP_TOL, SKI_REP_TOL, SKI_ONE_GROUP = 0.15, 0.3, 0.35
 
 
-def rep_groups(times, dists, ski=False):
+def _erg_same(t1, d1, t2, d2):
+    """two erg reps have the same target: equal time (time intervals, +-1 s) or equal distance (+-1 m)"""
+    return abs(t1 - t2) <= 1 or bool(d1 and d2 and abs(d1 - d2) <= 1)
+
+
+def rep_groups(times, dists, ski=False, erg=False):
     """index groups of consecutive similar reps. Runs: same time or distance (+-15 % of the group median);
     stray short reps (< 35 s, groups of <= 2: strides) are left out. Ski (terrain-defined reps, time only):
-    one group if every rep is within +-35 % of the median, else consecutive groups at +-30 %."""
+    one group if every rep is within +-35 % of the median, else consecutive groups at +-30 %. Erg (Concept2
+    intervals, exact targets): consecutive reps with the same time or the same distance (_erg_same)."""
     n = len(times)
     if not n:
         return []
+    if erg:
+        groups = [[0]]
+        for i in range(1, n):
+            j = groups[-1][0]
+            if _erg_same(times[i], dists[i], times[j], dists[j]):
+                groups[-1].append(i)
+            else:
+                groups.append([i])
+        return groups
     if ski:
         med = float(np.median(times))
         if all(abs(math.log(max(t, 1) / max(med, 1))) <= SKI_ONE_GROUP for t in times):
@@ -1051,7 +1293,8 @@ def signature(ana):
     if not times:
         return None
     ski = str(ana.get("mode") or "").startswith("ski")
-    groups = rep_groups(times, dists, ski)
+    erg = ana.get("mode") == "erg"
+    groups = rep_groups(times, dists, ski, erg)
     if len(groups) > 3:
         n = sum(map(len, groups))
         tt = [times[j] for g in groups for j in g]
@@ -1059,6 +1302,13 @@ def signature(ana):
     parts = []
     for g in groups:
         ds = [dists[j] for j in g]; t_ = float(np.median([times[j] for j in g]))
+        if erg:   # Concept2 target: "2:00" for time intervals, "500" (m) for distance intervals
+            tt = [times[j] for j in g]
+            if max(tt) - min(tt) <= 1 or not all(ds):
+                parts.append(f"{len(g)}×{mmss(t_)}")
+            else:
+                parts.append(f"{len(g)}×{float(np.median(ds)):.0f}")
+            continue
         if ski:
             parts.append(f"{len(g)}×{ski_dur_label(t_)}")
             continue
@@ -1338,7 +1588,9 @@ def main():
     T0 = time.time()
     D = ROOT / "data" / args.person
     ZF = zones_floor(args.person)
-    idx = json.loads((D / "activities_index.json").read_text())
+    if any((D / "concept2" / f).exists() for f in ("results.json", "manual.json")):   # Concept2 (+ hand-logged): index rows + cleaning
+        c2.sync(D)
+    idx = c2.load_index(D)   # Garmin activities + Concept2 erg workouts
     fits = {int(p.stem): p for p in (D / "activities").glob("*/*.fit")}
 
     # rep detector cache (runs only; slow fitparse reader)
@@ -1390,13 +1642,35 @@ def main():
         a["summ"] = f.get("summ") if f else None
         acts.append(a)
     A = {a["id"]: a for a in acts}
+    # Concept2 ergs: reps from the work / rest laps + Concept2's intervals (concept2.erg_ana); time = work + rest
+    # (moving = work time, pauses = the rests); no legs / pauses from the records (per-stroke samples, no GPS).
+    # The erg ana goes into the rep cache like ski's, so similarity.py reads it from there.
+    erg_new = 0
+    for a in acts:
+        if not c2.is_erg(a["type"]) or not a["f"]:
+            continue
+        ana = c2.erg_ana(a["x"], a["f"].get("laps_c"))
+        el, mv = a["x"].get("duration") or 0, a["x"].get("movingDuration") or 0
+        a["f"] = {**a["f"], "legs": None, "pauses": None, "ana": ana,
+                  "summ": {"elapsed": round(el), "moving": round(mv), "pause": round(el - mv),
+                           "n_pauses": len(ana["breaks"]) if ana else 0, "n_legs": 0,
+                           "longest": max((b[0] for b in ana["breaks"]), default=0) if ana else 0}}
+        a["summ"] = a["f"]["summ"]
+        p = fits[a["id"]]
+        k = (*key(p), "erg1")
+        if ana and (cache.get(str(p), {}).get("key") != k or cache[str(p)].get("ana") != ana):
+            cache[str(p)] = {"key": k, "ana": ana}; erg_new += 1
+    if erg_new:
+        cfile.write_bytes(pickle.dumps(cache))
     ij = D / "indoor_bislett.json"
     indoor_time_only = json.loads(ij.read_text()).get("time_only", {}) if ij.exists() else {}
     for a in acts:
         a["F"] = features(a, ZF)
         a["gps"] = bool(a["f"] and a["f"]["pts"])
-        a["F"]["dist_ok"] = a["F"]["dist_km"] >= 0.3 and (a["gps"] or a["type"] in ("treadmill_running", "indoor_running")
+        a["F"]["dist_ok"] = a["F"]["dist_km"] >= 0.3 and (a["gps"] or a["type"] in ("treadmill_running", "indoor_running", *c2.ERG_TYPES)
                                                           or bool((a["f"] or {}).get("swim")))   # pool: lengths x pool length
+        if c2.is_erg(a["type"]):   # erg: the machine measures the distance, however short the piece
+            a["F"]["dist_ok"] = a["F"]["dist_km"] > 0
         a["indoor"] = bislett_indoor(a, indoor_time_only)
         if a["indoor"]:   # indoor lap: watch distance untrusted, reps from the laps
             if a["indoor"]["source"] == "no_gps":   # no position at all: place it at Bislet
@@ -1523,19 +1797,47 @@ def main():
     for a in acts:
         a["stype"], a["detail"], a["surface"] = classify(a, ZF, easy_ref)
     # easy vs steady: the easy pace = median speed of own continuous runs at an easy HR (steady_or_easy)
-    HN = hr_norm(args.person)
+    HN, HF = hr_norm(args.person), hr_flagged(args.person)
     ez = [(dord[b["id"]], b["F"]["speed"]) for b in acts
           if b["fam"] == "run" and b["stype"] in ("easy", "long", "tempo", "race?") and b["F"]["dist_ok"]
-          and b["F"]["dist_km"] >= 3 and b["F"].get("speed") and (h := hrr_of(b["F"].get("avg_hr"), HN)) is not None
+          and b["F"]["dist_km"] >= 3 and b["F"].get("speed") and str(b["id"]) not in HF
+          and (h := hrr_of(b["F"].get("avg_hr"), HN)) is not None
           and h < EASY_HRR]
     ez_d = np.array([d for d, _ in ez]); ez_v = np.array([v for _, v in ez])
     for a in acts:
         if a["stype"] == "easy":
             m = np.abs(ez_d - dord[a["id"]]) <= 180 if len(ez_d) else np.zeros(0, bool)
-            a["stype"] = steady_or_easy(a, float(np.median(ez_v[m])) if m.sum() >= 5 else None, HN)
+            a["stype"] = steady_or_easy(a, float(np.median(ez_v[m])) if m.sum() >= 5 else None, HN, str(a["id"]) not in HF)
+    # user corrections (data/<person>/session_overrides.json): {"<activity id>": {"type": "easy", "fitness": "exclude" |
+    # "bound", "note": "..."}}. `type` replaces the rule-based label (the old one is kept in `override.type_from`);
+    # `fitness` is read by fitness_model.score_session (exclude: no evidence; bound: hard items become lower bounds).
+    so = D / "session_overrides.json"
+    S_OVER = json.loads(so.read_text() or "{}") if so.exists() else {}
+    for a in acts:
+        o = S_OVER.get(str(a["id"]))
+        if not o:
+            continue
+        a["override"] = {k: v for k, v in (("type_from", a["stype"] if o.get("type") else None), ("fitness", o.get("fitness")),
+                                           ("note", o.get("note"))) if v}
+        if o.get("type"):
+            a["stype"] = o["type"]
     for a in acts:
         ana = (a["f"] or {}).get("ana")
         a["sig"] = signature(ana) if ana and is_iv(a["stype"]) else None
+        # the track the run was on (run_track: where the reps / the moving time were; Bislett indoor laps; GPS-less reps
+        # of a run starting at Bislett) and, for GPS-mode track interval sessions, the reps at their set distance
+        trk = a["F"].get("track") if a["fam"] == "run" else None
+        if a.get("indoor"):
+            trk = {"name": "Bislet", "basis": "indoor"}
+        elif trk and trk.get("name") is None:
+            trk = {"name": "Bislet", "basis": "start", "gps": trk.get("gps")} if a["F"]["at_bislet"] else None
+        a["track"] = trk
+        # (loops, LOOPS: road sessions whose reps still snap to whole laps)
+        a["track_reps"] = (track_reps((a["f"] or {}).get("laps_c"), ana, trk["name"] in OVALS, LOOPS.get(trk["name"]))
+                           if trk and trk["basis"] in ("reps", "moving")
+                           and (a["stype"] == "intervals_track" or (a["stype"] == "intervals_road" and trk["name"] in LOOPS))
+                           and a["type"] != "track_running" and (ana or {}).get("mode") != "track"
+                           else None)
 
     # ---- similarity
     def comps(q, c):
@@ -1624,7 +1926,10 @@ def main():
              "sig": a["sig"], "surface": a["surface"], "dist_trusted": a["F"]["dist_ok"], "swim": f.get("swim"),
              "indoor_bislett": {k: v for k, v in a["indoor"].items() if not k.startswith("_")} if a.get("indoor") else None,
              # mean HR from the records when the Garmin summary has none (multisport parents)
-             "avg_hr": round(a["F"]["avg_hr"]) if a["F"].get("avg_hr_src") == "records" else None}
+             "avg_hr": round(a["F"]["avg_hr"]) if a["F"].get("avg_hr_src") == "records" else None,
+             "override": a.get("override"),
+             # running track (session_groups.run_track) and GPS track reps at their set distance (track_reps)
+             "track": a.get("track"), "track_reps": a.get("track_reps") or None}
         if f.get("legs") is not None:
             o["legs"] = f["legs"]; o["pauses"] = f["pauses"]
         ana = f.get("ana")

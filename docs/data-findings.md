@@ -10,6 +10,8 @@ lap_swimming 5, rowing_v2 3, multi_sport, kayaking_v2, other, open_water_swimmin
 HR, sleep, SpO2 etc. All 8 stop_watch FITs are ~0.5 KB (summary only, no per-second records), and the 2021
 open-water swim is 1 KB. **No all-day location data:** the API (OpenAPI spec) has no location or
 position-history endpoint; GPS exists only inside activities (FIT, `/details`, start/end lat-lon).
+Confirmed live on 2026-11-03: Connect-web intraday and location paths return 404, and `dailyHeartRate` ignores
+resolution parameters (120 s is the floor). See [endpoints-tested.md](endpoints-tested.md#probe-finer-hr-or-location-outside-activities-2026-11-03).
 
 ## Summary
 
@@ -20,7 +22,7 @@ position-history endpoint; GPS exists only inside activities (FIT, `/details`, s
 | Original FIT file (the watch's own file per activity) | Back to 2018 | **1 s** (current watch); 2–5 s "smart recording" (Forerunner 935, 2018 → 2026-02-17). GPS in ~100 % of records (point every 1 s / ~3 s), HR and cadence in 100 % |
 | Daily summaries (steps, calories, HR min/max/rest, stress, body battery, respiration, SpO2, intensity minutes, floors) | Back to at least 2019 | 1 record/day |
 | Intraday heart rate | **Only from 2026-06-01** (0 samples on 2026-05-31 and every older date tested) | 1 sample / 120 s |
-| Body Battery | Back to 2019 | ~6 points/day (key moments, not continuous) |
+| Body Battery | Back to 2019 | ~6 points/day by default; **every 3 min** with the `chunks` parameter |
 | Stress | Back to 2019 | daily durations per stress level |
 | Sleep | Whenever the watch was worn at night (e.g. 22/30 nights in Apr 2026, none in Oct 2026) | 1 summary/night, **no stage timeline** |
 | SpO2 | Recent days | 24 hourly averages + daily avg/min |
@@ -67,7 +69,8 @@ position-history endpoint; GPS exists only inside activities (FIT, `/details`, s
   qualifiers) and `sleepNeed`. No per-minute stage data in this endpoint.
 - **SpO2** (`spo2acclimation/{date}`): daily avg/min/latest, `spO2HourlyAverages` (24 rows),
   `monitoringEnvironmentValues` (240 rows: altitude/environment), `spO2SingleValues` was empty.
-- **Body Battery**: per day `charged`, `drained`, ~6 `[ts, level]` points, feedback events.
+- **Body Battery**: per day `charged`, `drained`, ~6 `[ts, level]` points, feedback events. With `chunks=N`
+  the day is split into N intervals with min+max each; the underlying points are 3 min apart (`chunks=1440`).
 - **Stress / steps** daily stats: one object per day.
 - **Fitness age**: current fitness age, achievable age, components (RHR, BMI, vigorous days/min).
 

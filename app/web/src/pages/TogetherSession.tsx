@@ -21,7 +21,7 @@ import { TogetherMap, type MapDot, type MapLine } from "../components/TogetherMa
 import { ReplayPanel } from "../components/Replay";
 import { CommunitySessionHero } from "../components/CommunitySessionHero";
 import { CommunitySessionMembers, SamePlace } from "../components/CommunitySessionMembers";
-import { CommunitySessionSplits } from "../components/CommunitySessionSplits";
+import { CommunitySessionSplits, GapToggle, useGapMode, WarmupToggle, type GapMode } from "../components/CommunitySessionSplits";
 import { CommunitySessionPhotos } from "../components/CommunitySessionPhotos";
 import { closestRep, sessionFacts, useCommunity } from "../lib/communitySession";
 import "./together.css";
@@ -45,7 +45,7 @@ const effortLabel = (mode: string | null | undefined) => (mode === "hrr" ? "HRR"
 /** HR as % of max (or of reserve) for one participant */
 function hrPct(p: TParticipant | undefined, hr: N): N {
   const n = p?.hr_norm;
-  if (hr === null || !n?.max) return null;
+  if (hr === null || !n?.max || n.flags?.length) return null;   // flags: HR implausible on this run (hr_settings.json)
   if (n.mode === "hrr" && n.rest) return ((hr - n.rest) / (n.max - n.rest)) * 100;
   return (hr / n.max) * 100;
 }
@@ -147,38 +147,48 @@ function cellMain(c: Cell, timeSlot: boolean) {
 }
 
 /** results per rep: a table (a row per rep, a column per person) or a leaderboard per rep (a column per rep, fastest first) */
-function RepResults({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
+function RepResults({ s, iv, sel, onSel, showWu, onShowWu }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void; showWu: boolean; onShowWu: (v: boolean) => void }) {
   const [view, setView] = useState<"table" | "board">(() => localStorage.getItem("session.repView") === "board" ? "board" : "table");
   const pick = (v: "table" | "board") => { setView(v); localStorage.setItem("session.repView", v); };
+  const [mode, setMode] = useGapMode("session.repGap", "leader");
   return (
     <div class="card tg-rep-results">
       <div class="head sm"><h2>Rep by rep</h2>
-        <span class="sub" title="bold = fastest of the rep · +s behind it · = dead heat · * partial (not ranked) · ≈ from the speed step · ? suspect (hover)">
-          {view === "board" ? "fastest first in each rep" : "bold = fastest of the rep"}</span>
-        <div class="tools"><div class="seg">
+        <div class="tools">{view === "table" && <WarmupToggle iv={iv} show={showWu} onShow={onShowWu} />}<GapToggle mode={mode} onMode={setMode} /><div class="seg">
           <button class={view === "table" ? "on" : ""} aria-pressed={view === "table"} onClick={() => pick("table")}>Table</button>
           <button class={view === "board" ? "on" : ""} aria-pressed={view === "board"} onClick={() => pick("board")}>Leaderboard</button>
         </div></div>
       </div>
-      {view === "board" ? <RepBoards iv={iv} sel={sel} onSel={onSel} /> : <Standings s={s} iv={iv} sel={sel} onSel={onSel} />}
+      {view === "board" ? <RepBoards iv={iv} sel={sel} onSel={onSel} mode={mode} /> : <Standings s={s} iv={iv} sel={sel} onSel={onSel} showWu={showWu} mode={mode} />}
     </div>
   );
 }
 
 /** a column per rep; in each, the people fastest first: the leader with the time, the others with +gap (time in the tooltip) */
 /** one rep's results, fastest first: ranked people, then those who ran it but aren't ranked (partial, or alone) */
-type RepEntry = { person: string; text: string; lead: boolean; ranked: boolean; tip: string };
-function repEntries(iv: Intervals, sl: Intervals["slots"][number]): RepEntry[] {
+type RepEntry = { person: string; text: string; lead: boolean; ranked: boolean; tip: string; close?: boolean };
+function repEntries(iv: Intervals, sl: Intervals["slots"][number], mode: GapMode = "leader"): RepEntry[] {
   const st = iv.standings[sl.slot];
   const timeSlot = sl.target?.kind === "time";
   const out: RepEntry[] = st.order.map((o, i) => {
     const c = iv.reps[o.person][sl.slot]!;
     const main = cellMain(c, timeSlot);
     const gap = timeSlot && o.gap_m !== null ? `+${Math.round(o.gap_m)} m` : `+${o.gap_s.toFixed(1)}`;
-    const text = (i === 0 ? main : o.tie ? "=" : gap) + (c.suspect ? "?" : "") + (c.source === "onset" ? "≈" : "");
-    const tip = [`${o.rank}. ${personName(o.person)} ${main}`, i && !o.tie ? `${gap} s behind` : null, o.tie ? "dead heat" : null,
+    // always the real gap; "close" when the gap to the one above is within the measurement (too close to call)
+    const prev = i > 0 ? st.order[i - 1] : null;
+    const pc = prev ? iv.reps[prev.person][sl.slot] : null;
+    const unsure = Math.max(1, c.unsure_s ?? 0, pc?.unsure_s ?? 0);
+    const close = !!prev && Math.abs(o.gap_s - prev.gap_s) < unsure;
+    const gapNext = timeSlot && o.gap_m !== null && prev?.gap_m != null ? `+${Math.round(o.gap_m - prev.gap_m)} m` : `+${(o.gap_s - (prev?.gap_s ?? 0)).toFixed(1)}`;
+    const shown = i === 0 || mode === "time" ? main : mode === "next" ? gapNext : gap;
+    const text = shown + (c.suspect ? "?" : "") + (c.source === "onset" || c.method === "estimated" ? "≈" : "");
+    const how = c.method === "lap" ? `lap press${c.pos_s ? ` (GPS ${repTime(c.pos_s)})` : ""}`
+      : c.method === "position" ? `timed at ${personName(iv.anchor)}'s finish line (GPS)` : null;
+    const tip = [`${o.rank}. ${personName(o.person)} ${main}`, i ? `${gap} s behind the leader` : null,
+      i > 1 && prev ? `${gapNext} s behind ${personName(prev.person)}` : null,
+      close && prev ? `within ±${unsure.toFixed(0)} s of ${personName(prev.person)}: too close to call` : null, how,
       c.suspect ? `suspect: ${c.suspect}` : null, c.source === "onset" ? "from the speed step" : null].filter(Boolean).join(" · ");
-    return { person: o.person, text, lead: i === 0 && st.order.length >= 2, ranked: true, tip };
+    return { person: o.person, text, lead: i === 0 && st.order.length >= 2, ranked: true, tip, close: close && mode !== "time" };
   });
   for (const k of Object.keys(iv.reps)) {
     const c = iv.reps[k][sl.slot];
@@ -196,13 +206,13 @@ function PersonDot({ k }: { k: string }) {
 
 function RepCell({ e }: { e: RepEntry | undefined }) {
   if (!e) return <td class="rc" />;
-  return <td class={"rc" + (e.ranked ? "" : " unranked")} title={e.tip}><PersonDot k={e.person} /><span class="rv">{e.lead ? <b>{e.text}</b> : e.text}</span></td>;
+  return <td class={"rc" + (e.ranked ? "" : " unranked")} title={e.tip}><PersonDot k={e.person} /><span class={"rv" + (e.close ? " close" : "")}>{e.lead ? <b>{e.text}</b> : e.text}</span></td>;
 }
 
 /** Leaderboard: a column per rep, a row per place (1st on top) */
-function RepBoards({ iv, sel, onSel }: { iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
+function RepBoards({ iv, sel, onSel, mode }: { iv: Intervals; sel: string | null; onSel: (l: string) => void; mode: GapMode }) {
   const slots = iv.slots.filter((sl) => !sl.warmup);
-  const cols = slots.map((sl) => repEntries(iv, sl));
+  const cols = slots.map((sl) => repEntries(iv, sl, mode));
   const places = Math.max(0, ...cols.map((c) => c.length));
   const click = (sl: Intervals["slots"][number]) => iv.rep_closeups.find((c) => c.slot === sl.label)?.available ? () => onSel(sl.label) : undefined;
   return (
@@ -227,9 +237,9 @@ function RepBoards({ iv, sel, onSel }: { iv: Intervals; sel: string | null; onSe
 }
 
 /** Table: a row per rep, fastest to the left */
-function Standings({ s, iv, sel, onSel }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void }) {
+function Standings({ s, iv, sel, onSel, showWu, mode }: { s: TSession; iv: Intervals; sel: string | null; onSel: (l: string) => void; showWu: boolean; mode: GapMode }) {
   void s;
-  const rows = iv.slots.map((sl) => ({ sl, es: repEntries(iv, sl) }));
+  const rows = iv.slots.filter((sl) => showWu || !sl.warmup).map((sl) => ({ sl, es: repEntries(iv, sl, mode) }));
   const places = Math.max(0, ...rows.map((r) => r.es.length));
   return (
     <div class="tg-mxwrap">
@@ -465,10 +475,12 @@ function IntervalsView({ s, iv, replay, between, more, extra, photos }: ViewProp
   const want = query.get("rep") ?? (closest && avail.some((c) => c.slot === closest) ? closest : avail[0]?.slot);
   const cu = avail.find((c) => c.slot === want) ?? avail[0] ?? null;
   const onSel = (l: string) => setQuery({ rep: l });
+  const [showWu, setShowWu] = useState(() => localStorage.getItem("session.warmups") !== "hide");
+  const onShowWu = (v: boolean) => { setShowWu(v); localStorage.setItem("session.warmups", v ? "show" : "hide"); };
   return (
     <>
-      <RepResults s={s} iv={iv} sel={cu?.slot ?? null} onSel={onSel} />
-      <CommunitySessionSplits s={s} />
+      <RepResults s={s} iv={iv} sel={cu?.slot ?? null} onSel={onSel} showWu={showWu} onShowWu={onShowWu} />
+      <CommunitySessionSplits s={s} showWu={showWu} onShowWu={onShowWu} />
       {between}
       <More open={more}>
         <div class="tg-body">

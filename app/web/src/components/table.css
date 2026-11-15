@@ -21,3 +21,10 @@ td .clip { display: inline-block; vertical-align: bottom; overflow: hidden; text
 /* dark theme: the scroll-edge shadows need to be darker than the surface */
 :root[data-theme="dark"] .tablewrap.fade-l .stk-last { box-shadow: 6px 0 6px -6px rgba(0, 0, 0, 0.8); }
 :root[data-theme="dark"] .tablewrap.fade-r { background: linear-gradient(to left, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0)) right / 16px 100% no-repeat scroll; }
+
+/* column reorder (drag header) + resize (drag the right edge) */
+.tablewrap th { position: sticky; }
+.tablewrap th .col-rs { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; }
+.tablewrap th .col-rs:hover { background: var(--accent, #2f5fd0); opacity: .35; }
+.tablewrap th.col-drag { opacity: .45; }
+.tablewrap th.col-over { box-shadow: inset 2px 0 0 var(--accent, #2f5fd0); }

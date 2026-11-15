@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { cssVar, shortDate } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { dateAxis } from "../lib/chartAxes";
-import { DISC_LABEL } from "../lib/fitness";
+import { DISC_LABEL, discOf } from "../lib/fitness";
 import { CATS, delta, monthLabel, type ClubMonth, type Member } from "../lib/community";
 import { navigate } from "../lib/router";
 import "../fitness.css";
@@ -171,7 +171,7 @@ export function ClubFormChart({ series, height = 200 }: { series: Member["form_s
     <div class="cm-chart">
       <div class="cm-readout">
         {s ? <><b>{shortDate(s.date, "x")}</b><span class={s.delta >= 0 ? "up" : "down"}>{delta(s.delta)} vs form</span>
-          <span>score {s.score.toFixed(1)} · shape {s.shape.toFixed(1)}</span><span class="muted">{DISC_LABEL[s.discipline] ?? s.discipline}{s.confidence ? ` · ${s.confidence} confidence` : ""}</span></>
+          <span>score {s.score.toFixed(1)} · shape {s.shape.toFixed(1)}</span><span class="muted">{DISC_LABEL[discOf(s.discipline)] ?? s.discipline}{s.confidence ? ` · ${s.confidence} confidence` : ""}</span></>
           : <span class="muted">Each dot = a club session: the session's score minus the shape the day before (VDOT). Hollow = low confidence. Click = open</span>}
       </div>
       <div ref={box} />

@@ -5,9 +5,9 @@
 import type { Map as MLMap, MapMouseEvent } from "maplibre-gl";
 import { Popup } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { useApi, type ActivityDetail, type Lap, type Leg, type Series, type SwimLength } from "../lib/api";
+import { useApi, type Activity, type ActivityDetail, type Lap, type Leg, type Rep, type Series, type SwimLength } from "../lib/api";
 import { currentPerson, setQuery, useLocation } from "../lib/router";
-import { dur, num, pace, pace100, kmh, time, longDate, onFoot, repLabel, secs, speedText as speedOf } from "../lib/format";
+import { dur, num, pace, pace100, pace500, kmh, time, longDate, onFoot, isErg, repLabel, secs, speedText as speedOf } from "../lib/format";
 import { RAMP, quantile } from "../lib/geo";
 import { MapView, setData, fitBBox, EMPTY } from "../components/MapView";
 import { SeriesCharts, drawablePanels, type Band, type PanelKey } from "../components/SeriesCharts";
@@ -17,6 +17,7 @@ import { RecordChips, WorkoutProgress, fastest } from "../components/ProgressCar
 import { PageHeader } from "../components/PageHeader";
 import { NearestPanel } from "../components/NearestPanel";
 import { ShapeSection } from "../components/ShapeSection";
+import { SharedTurns, ownSeries, type SharedTurnsResp } from "../components/SharedTurns";
 
 interface Track { t: number[]; lat: number[]; lon: number[]; speed: (number | null)[]; hr: (number | null)[]; alt: (number | null)[] }
 type ColorBy = "speed" | "hr" | "alt";
@@ -146,8 +147,10 @@ function ActivityMap({ track, colorBy, sport, pauses, cursor, span, onHover }: {
 const EXTRA_PANELS: PanelKey[] = ["cad", "power"];
 
 const STROKE: Record<string, string> = { 0: "free", 1: "back", 2: "breast", 3: "fly", 4: "drill", 5: "mixed", 6: "IM" };
-const speedCell = (sport: string, ms: number | null | undefined) => (onFoot(sport) ? pace(ms) : sport === "swim" ? pace100(ms) : kmh(ms));
-const speedHead = (sport: string) => (onFoot(sport) ? "Pace /km" : sport === "swim" ? "/100 m" : "km/h");
+const speedCell = (sport: string, ms: number | null | undefined) => (onFoot(sport) ? pace(ms) : sport === "swim" ? pace100(ms) : isErg(sport) ? pace500(ms) : kmh(ms));
+const speedHead = (sport: string) => (onFoot(sport) ? "Pace /km" : sport === "swim" ? "/100 m" : isErg(sport) ? "/500 m" : "km/h");
+/** Concept2 watts from speed (m/s): P = 2.80 / (s per m)^3 */
+const ergWatts = (ms: number | null | undefined) => (ms && ms > 0 ? Math.round(2.8 * ms ** 3) : null);
 /** drop columns whose cells are all empty in these rows (e.g. HR on a swim, intensity on old files) */
 const nonEmpty = <T,>(cols: Col<T>[], rows: T[], keys: Record<string, (r: T) => unknown>) =>
   cols.filter((c) => !keys[c.key] || rows.some((r) => { const v = keys[c.key](r); return v !== null && v !== undefined && v !== ""; }));
@@ -196,18 +199,50 @@ function mergeLegs(legs: Leg[], min = 100): LegRow[] {
 }
 
 type SegTab = "reps" | "legs" | "laps" | "lengths";
+type Turn = Rep & { who?: "me" | "others"; spm?: number | null };
+
+/** a shared-machine erg session, "Full workout": every turn in order, this person's (the reps) and the others' (the
+ *  breaks), metres from the series' distance, stroke rate = median after the handover */
+function allTurns(data: ActivityDetail): Turn[] {
+  const s = data.series, reps = data.reps.filter((r) => r.start !== undefined && r.end !== undefined);
+  if (!s || !s.dist || !reps.length) return reps;
+  const t = s.t, dist = s.dist, cad = s.cad;
+  const T = t[t.length - 1];
+  const at = (x: number) => { const i = nearestIdx(t, x); return dist[i] ?? null; };
+  const spmIn = (a: number, b: number) => {
+    const v = (cad ?? []).filter((_, i) => t[i] >= a + HANDOVER_S && t[i] <= b - HANDOVER_END_S).filter((x): x is number => !!x).sort((p, q) => p - q);
+    return v.length ? v[v.length >> 1] : null;
+  };
+  const other = (a: number, b: number): Turn => {
+    const d0 = at(a), d1 = at(b), m = d0 !== null && d1 !== null ? Math.round(d1 - d0) : undefined;
+    return { start: a, end: b, time: b - a, dist: m, speed: m ? m / (b - a) : undefined, hr: null, who: "others", spm: spmIn(a, b) };
+  };
+  const out: Turn[] = [];
+  let prev = 0;
+  const ivs = data.activity.erg?.intervals ?? [];
+  reps.forEach((r, k) => {
+    if (r.start! - prev >= 30) out.push(other(prev, r.start!));
+    out.push({ ...r, who: "me", spm: ivs[k]?.spm ?? spmIn(r.start!, r.end!) });
+    prev = r.end!;
+  });
+  if (T - prev >= 30) out.push(other(prev, Math.round(T / 60) * 60));
+  return out;
+}
 
 function Segments({ data, sport, setSpan, setCursor }: { data: ActivityDetail; sport: string;
   setSpan: (s: [number, number] | null) => void; setCursor: (c: [number, number] | null) => void }) {
   const { query } = useLocation();
-  const reps = data.reps.filter((r) => r.start !== undefined);
+  const shared = !!data.activity.erg?.shared;
+  const full = shared && query.get("view") === "full";
+  const mine = data.reps.filter((r) => r.start !== undefined);
+  const reps: Turn[] = useMemo(() => (full ? allTurns(data) : mine), [data, full]);
   const legs = useMemo(() => mergeLegs(data.legs), [data]);
   const lengths: SwimLength[] = data.swim?.lengths ?? [];
   const tabs: [SegTab, string, number][] = [];
-  if (reps.length) tabs.push(["reps", "Reps", reps.length]);
+  if (reps.length) tabs.push(["reps", shared ? (full ? "All turns" : "My turns") : "Reps", reps.length]);
   if (lengths.length) tabs.push(["lengths", "Lengths", lengths.length]);
   if (legs.length || data.pauses.length) tabs.push(["legs", "Legs & pauses", legs.length]);
-  if (data.laps.length > 1) tabs.push(["laps", "Watch laps", data.laps.length]);
+  if (data.laps.length > 1) tabs.push(["laps", isErg(sport) ? "Erg laps" : "Watch laps", data.laps.length]);
   // nothing to break down: no tabs, or just one leg (a continuous effort without reps, lengths or laps)
   if (!tabs.length || (tabs.length === 1 && tabs[0][0] === "legs" && legs.length <= 1)) return null;
   const want = query.get("seg") as SegTab | null;
@@ -220,6 +255,13 @@ function Segments({ data, sport, setSpan, setCursor }: { data: ActivityDetail; s
     laps: "as recorded by the watch (lap button, auto-lap or the workout's steps)",
   };
   const sw = (r: { strokes: number | null; time: number }) => (r.strokes && r.time ? (r.strokes / r.time) * 60 : null);
+  const erg = isErg(sport) ? data.activity.erg : null;   // Concept2: reps = the erg's work intervals, in order
+  const ivs = erg?.intervals ?? [];
+  if (erg) {
+    sub.reps = shared ? (full ? "every turn on the machine in order: yours and the others' (metres from the stroke data; stroke rate = median after the handover)"
+      : "your own turns on the shared machine; Break = the others' turns") : "the erg's own work intervals (Concept2 Logbook); Break = rest between them";
+    sub.laps = "work and rest laps as recorded by the erg's monitor";
+  }
   return (
     <section>
       <div class="head">
@@ -234,15 +276,22 @@ function Segments({ data, sport, setSpan, setCursor }: { data: ActivityDetail; s
       </div>
       {tab === "reps" && (
         <Table rows={reps} rowKey={(_r, i) => String(i)} onHover={(r) => setSpan(r ? [r.start!, r.end!] : null)} cols={nonEmpty([
-          { key: "n", label: "Rep", render: (r) => repLabel(reps.indexOf(r) + 1), sort: (r) => r.start },
+          full ? { key: "n", label: "Turn", render: (r: Turn) => <>{reps.indexOf(r) + 1} <span class={r.who === "me" ? "" : "muted"}>{r.who === "me" ? "you" : "others"}</span></>, sort: (r: Turn) => r.start ?? null }
+            : { key: "n", label: "Rep", render: (r) => repLabel(reps.indexOf(r) + 1), sort: (r) => r.start },
           { key: "start", label: "Start", num: true, render: (r) => dur(r.start) },
           { key: "time", label: "Time", num: true, render: (r) => secs(r.time) },
           { key: "dist", label: "Dist (m)", num: true, render: (r) => num(r.dist) },
           { key: "speed", label: speedHead(sport), num: true, render: (r) => speedCell(sport, r.speed) },
+          ...(erg ? [
+            { key: "watts", label: "Watts", num: true, render: (r: Rep) => num(ergWatts(r.speed)), sort: (r: Rep) => r.speed ?? null },
+            { key: "spm", label: "Stroke rate", num: true, render: (r: Turn) => num(full ? r.spm : ivs[reps.indexOf(r)]?.spm), sort: (r: Turn) => (full ? r.spm : ivs[reps.indexOf(r)]?.spm) ?? null },
+            { key: "target", label: "Target", num: true, title: "target pace set on the monitor", render: (r: Rep) => { const t = full ? null : ivs[reps.indexOf(r)]?.target_pace_s; return t ? pace500(500 / t) : ""; } },
+          ] : []),
           { key: "hr", label: "Avg HR", num: true, render: (r) => num(r.hr) },
           { key: "maxhr", label: "Max HR", num: true, render: (r) => num(r.maxhr) },
-          { key: "brk", label: "Break after", num: true, render: (r) => { const b = data.breaks[reps.indexOf(r)]?.time; return b === undefined || b === null ? "" : secs(b); }, sort: (r) => data.breaks[reps.indexOf(r)]?.time ?? null },
-        ], reps, { hr: (r) => r.hr, maxhr: (r) => r.maxhr })} />
+          { key: "brk", label: "Break after", num: true, render: (r) => { const b = full ? undefined : data.breaks[reps.indexOf(r)]?.time; return b === undefined || b === null ? "" : secs(b); }, sort: (r) => data.breaks[reps.indexOf(r)]?.time ?? null },
+        ], reps, { hr: (r) => r.hr, maxhr: (r) => r.maxhr,
+          ...(full ? { target: () => null, brk: () => null } : {}) })} />
       )}
       {tab === "lengths" && (
         <Table rows={lengths} rowKey={(_r, i) => String(i)} maxHeight="420px" cols={[
@@ -289,6 +338,38 @@ function Segments({ data, sport, setSpan, setCursor }: { data: ActivityDetail; s
   );
 }
 
+/** summary rows of a Concept2 erg session (store.erg_info): work / rest, distance in metres, pace /500 m, watts,
+ *  stroke rate, drag factor, link to the Logbook */
+function ErgRows({ a }: { a: Activity }) {
+  const e = a.erg!;
+  return <>
+    <dt>Machine</dt><dd>Concept2 {e.machine}{e.workout_type && e.workout_type !== "unknown" ? <span class="muted"> · {e.workout_type.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()}</span> : null}
+      {e.logbook_url && <> · <a href={e.logbook_url} target="_blank" rel="noopener">Logbook</a></>}</dd>
+    <dt>Work / rest</dt><dd>{dur(e.work_s)} / {e.rest_s ? dur(e.rest_s) : "—"}{e.rest_m ? <span class="muted"> · {num(e.rest_m)} m in the rests</span> : null}</dd>
+    <dt>Distance</dt><dd>{a.dist_km ? `${num(a.dist_km * 1000)} m` : "—"} <span class="muted">work metres (machine distance; not part of km totals)</span></dd>
+    <dt>Pace</dt><dd>{e.pace_500_s ? `${pace500(500 / e.pace_500_s)} ${e.pace_unit}` : "—"} <span class="muted">average over the work</span></dd>
+    <dt>Power</dt><dd>{e.watts ? `${num(e.watts)} W` : "—"}{a.kcal ? <span class="muted"> · {num(a.kcal)} kcal</span> : null}</dd>
+    <dt>Stroke rate</dt><dd>{e.spm ? `${num(e.spm)} spm` : "—"}{e.stroke_count ? <span class="muted"> · {num(e.stroke_count)} strokes</span> : null}</dd>
+    <dt title="the fan damper setting the monitor measured (resistance feel)">Drag factor</dt><dd>{num(e.drag_factor)}</dd>
+    {e.shared && <><dt title="friends took turns on the same machine; the Logbook has everyone's strokes as one piece (docs/concept2.md#cleaning-shared-machine-sessions)">Shared machine</dt>
+      <dd>your turns only ({dur(e.shared.on_s)} on / {dur(e.shared.off_s)} off){e.shared.forced ? " · forced by session_overrides.json" : ""}
+        <span class="muted"> · Logbook total {num(e.shared.logbook_dist_m)} m in {dur(e.shared.logbook_time_s)} · the others {pace500(500 / e.shared.others_pace_500_s)} /500 m</span></dd>
+      {e.shared.second_machine && <><dt title="two machines in the rotation, only one recorded; your metres on the other one = your turns here × (its total / this machine's total)">2nd machine</dt>
+        <dd>≈ {num(e.shared.second_machine.est_m)} m in {dur(e.shared.second_machine.time_s)} (estimated, included in Distance)
+          <span class="muted"> · reps = your {dur(e.shared.second_machine.on_here_s)} turns on the recorded machine · other machine total {num(e.shared.second_machine.logbook_dist_m)} m</span></dd></>}</>}
+    {e.manual && <><dt title="not recorded (no Logbook strokes): the totals from the monitors; who rowed which metres is unknown">Logged by hand</dt>
+      <dd>{e.manual.people.length} people on {e.manual.machines.length} machines, {dur(e.manual.on_s)} on / {dur(e.manual.off_s)} off × {e.manual.rounds}
+        <span class="muted"> · {e.manual.machines.map((m, i) => `machine ${i + 1}: ${num(m.dist_m)} m (${pace500(500 / m.pace_500_s)})`).join(" · ")}
+          {" · "}together {num(e.manual.total_m)} m</span></dd></>}
+    {e.comments && <><dt>Note</dt><dd>{e.comments}</dd></>}
+  </>;
+}
+
+/** handover seconds left out of the stroke rate in "All turns" (the "only me" charts cut adaptively per turn, 8-10 s:
+ *  components/SharedTurns.tsx, concept2.turn_profiles). Measured on 2026-11-07 (60 swaps): the speed carries the
+ *  previous person's pace for 4-8 s, the stroke rate settles by 8-9 s and sags in the last 1-2 s before the swap. */
+const HANDOVER_S = 8;
+const HANDOVER_END_S = 1;
 export function ActivityPage({ id }: { id: string }) {
   const { query } = useLocation();
   const colorBy = (query.get("color") as ColorBy) || "speed";
@@ -301,21 +382,35 @@ export function ActivityPage({ id }: { id: string }) {
   useEffect(() => { setCursor(null); setSpan(null); }, [id]);
   useEffect(() => { document.title = data ? `${data.activity.date} ${data.activity.name ?? ""}` : "Activity"; }, [data]);
 
-  const s: Series | null = data?.series ?? null;
   const a = data?.activity;
+  // shared-machine erg session: "only me" (default) or the full workout as the Logbook recorded it (everyone's strokes)
+  const shared = !!a?.erg?.shared;
+  const fullWorkout = query.get("view") === "full";
+  // every person's turns with the adaptive handover cut (8-10 s per turn): the "only me" charts and the Turns section
+  const st = useApi<SharedTurnsResp>(shared ? `/api/activities/${id}/shared-turns` : null);
+  const myTurns = st.data?.people.find((p) => p.person === currentPerson())?.turns ?? null;
+  const noBreaks = shared && !fullWorkout && query.get("breaks") === "off";
+  const own = useMemo(() => {
+    const s0 = data?.series ?? null;
+    return s0 && shared && !fullWorkout ? ownSeries(s0, data!.reps, myTurns, noBreaks) : null;
+  }, [data, shared, fullWorkout, myTurns, noBreaks]);
+  const s: Series | null = own ? own.series : data?.series ?? null;
   const swim = data?.swim ?? null;
   // pace on foot (run, walk, hike), speed for ski / bike / other (lib/format onFoot)
-  const panels0: PanelKey[] = swim ? ["pace100", "hr", "cad"] : a?.sport === "run" ? ["pace", "hr", "alt", "cad", "power"] : onFoot(a?.sport) ? ["paceSlow", "hr", "alt"] : ["speed", "hr", "alt"];
+  // Concept2 ergs: pace /500 m, watts and stroke rate (all shown; no elevation)
+  const erg = isErg(a?.sport);
+  const panels0: PanelKey[] = erg ? ["pace500", "power", "spm", "hr"] : swim ? ["pace100", "hr", "cad"] : a?.sport === "run" ? ["pace", "hr", "alt", "cad", "power"] : onFoot(a?.sport) ? ["paceSlow", "hr", "alt"] : ["speed", "hr", "alt"];
   // an untrusted distance (indoor / no GPS) makes the pace / speed series nonsense: keep HR / cadence only
   const panels = a?.dist_trusted === false ? panels0.filter((p) => !["pace", "paceSlow", "speed"].includes(p)) : panels0;
   const drawable = useMemo(() => (s ? drawablePanels(s, panels) : []), [s, panels.join(",")]);
   // pace / speed, HR and elevation by default; cadence and power behind "More charts"
   const [moreCharts, setMoreCharts] = useState(false);
-  const onlyExtra = drawable.every((p) => EXTRA_PANELS.includes(p));   // e.g. a treadmill run without HR: show what there is
+  const onlyExtra = erg || drawable.every((p) => EXTRA_PANELS.includes(p));   // e.g. a treadmill run without HR: show what there is
   const nExtra = onlyExtra ? 0 : drawable.filter((p) => EXTRA_PANELS.includes(p)).length;
   const shown = moreCharts || onlyExtra ? drawable : drawable.filter((p) => !EXTRA_PANELS.includes(p));
   const bands = useMemo<Band[]>(() => {
     if (!data) return [];
+    if (own && noBreaks) return own.bands.map((x) => ({ ...x, kind: "rep" as const }));
     const b: Band[] = data.reps.filter((r) => r.start !== undefined).map((r) => ({ a: r.start!, b: r.end!, kind: "rep" as const }));
     if (!b.length) for (const p of data.pauses) b.push({ a: p.t, b: p.t + p.dur_s, kind: "pause" });
     if (!b.length && data.swim) {   // pool swim: rests = gaps ≥ 10 s between lengths
@@ -323,7 +418,7 @@ export function ActivityPage({ id }: { id: string }) {
       for (let i = 0; i + 1 < L.length; i++) { const e = L[i].start + L[i].time; if (L[i + 1].start - e >= 10) b.push({ a: e, b: L[i + 1].start, kind: "pause" }); }
     }
     return b;
-  }, [data]);
+  }, [data, own, noBreaks]);
 
   const onChartHover = (i: number | null) => {
     if (!s || i === null || !s.lat || s.lat[i] === null) { setCursor(null); return; }
@@ -353,7 +448,7 @@ export function ActivityPage({ id }: { id: string }) {
   const hasReps = data.reps.some((r) => r.start !== undefined);
   const hasMap = a.track;
   const hasCharts = shown.length > 0;
-  const shaded = hasReps ? "reps shaded" : bands.length ? (swim ? "rests shaded" : "pauses shaded") : "";
+ const shaded = shared ? (fullWorkout ? "your turns shaded; the rest is the others" : noBreaks ? "your turns joined end to end (x = work time), handover cut" : "your turns only; gaps = breaks (the others' turns)") : hasReps ? "reps shaded" : bands.length ? (swim ? "rests shaded" : "pauses shaded") : "";
   const startDiffers = a.start_place && a.start_place !== a.place;
 
   return (
@@ -364,6 +459,10 @@ export function ActivityPage({ id }: { id: string }) {
           tips={["Hover the chart to move a marker on the map, or hover the track to move the chart cursor", "Hover a rep / leg / lap row to see that stretch on the map",
             "Compare lines this workout up with similar ones", "← Older / Newer → step through your activities",
             "Cadence and power charts are under “More charts”"]}>
+          {shared && <div class="seg" title="friends took turns on one machine. Only me: your own turns (the others' turns are breaks; the handover's first seconds left out of the charts). Full workout: every turn and every stroke the Logbook recorded">
+            <button class={!fullWorkout ? "on" : ""} onClick={() => setQuery({ view: null })}>Only me</button>
+            <button class={fullWorkout ? "on" : ""} onClick={() => setQuery({ view: "full" })}>Full workout</button>
+          </div>}
           {a.together && (
             <a href={`/community/${a.together.gid}`} title="Who did it with you, and who was faster">
               {togetherWith(a.together)}{a.together.kind === "intervals" ? " · results" : ""}</a>
@@ -375,6 +474,7 @@ export function ActivityPage({ id }: { id: string }) {
         </PageHeader>
         <dl class="kv">
           <dt>Type</dt><dd>{typeText(a)}{a.type_detail ? <span class="muted"> · {a.type_detail}</span> : null}</dd>
+          {a.erg ? <ErgRows a={a} /> : <>
           <dt>Place</dt><dd>{a.place ? <a href={placeHref(a.place)}>{a.place_name ?? a.place}</a> : a.location ?? "—"}
             {startDiffers ? <span class="muted"> · start <a href={placeHref(a.start_place!)}>{a.start_place_name ?? a.start_place}</a></span> : a.region && a.region !== a.place_name ? <span class="muted"> · {a.region}</span> : null}</dd>
           <dt>Distance</dt><dd>{a.dist_trusted === false ? <><DistCell a={a} unit=" km" d={1} /><span class="muted" title={a.dist_note ?? ""}>{a.dist_est_km ? " estimated from the laps" : " (no GPS: the watch's distance isn't trusted)"} · watch said {a.dist_km?.toFixed(2) ?? "—"} km</span></>
@@ -382,15 +482,16 @@ export function ActivityPage({ id }: { id: string }) {
           <dt>Route</dt><dd title={data.route?.name}>{data.route ? <><a href={`/places?route=${data.route.id}`}>{data.route.id} {data.route.name}</a> <span class="muted">{g.route_dir === "rev" ? "reverse direction, " : ""}{data.route.n} sessions</span>
             {data.route.rank && <span title="time on the route: moving time from the route's start line to its end (lead-in excluded)">{" · "}{data.route.rank.is_pb ? <b>fastest of {data.route.rank.of}</b>
               : <>{fastest(data.route.rank.rank)} of {data.route.rank.of} <span class="muted">({dur(data.route.rank.route_time_s)} on the route, best <a href={`/activities/${data.route.rank.best_id}`}>{dur(data.route.rank.best_s)}</a>)</span></>}</span>}</> : "—"}</dd>
-          {swim ? <><dt>Swimming / rest</dt><dd>{dur(swim.active_s)} / {dur(swim.rest_s)} <span class="muted">{swim.n_rests ?? 0} rests{swim.longest_rest_s ? `, longest ${dur(swim.longest_rest_s)}` : ""}; pace from swimming time</span></dd></>
+          </>}
+          {a.erg ? null : swim ? <><dt>Swimming / rest</dt><dd>{dur(swim.active_s)} / {dur(swim.rest_s)} <span class="muted">{swim.n_rests ?? 0} rests{swim.longest_rest_s ? `, longest ${dur(swim.longest_rest_s)}` : ""}; pace from swimming time</span></dd></>
             : <><dt>Moving / paused</dt><dd>{dur(g.moving_s ?? a.moving_s)} / {dur(g.pause_s)} <span class="muted">{g.n_pauses ?? 0} pauses{g.longest_pause_s ? `, longest ${dur(g.longest_pause_s)}` : ""}</span></dd></>}
           <dt>Workout</dt><dd title={workoutTip(a)}>{a.workout_label ?? typeText(a)}{a.rep_pace_ms ? <span class="muted" title="average rep pace = total rep distance / total rep time of the main reps"> · avg rep pace {speedOf(sport, a.rep_pace_ms)}</span> : null}</dd>
-          <dt>{onFoot(sport) || swim ? "Pace" : "Speed"}</dt><dd>{speedText(a)}{swim ? null : <span class="muted">{a.dist_trusted === false ? " no trusted distance, so no pace (see the reps)" : " moving"}</span>}</dd>
+          {!a.erg && <><dt>{onFoot(sport) || swim ? "Pace" : "Speed"}</dt><dd>{speedText(a)}{swim ? null : <span class="muted">{a.dist_trusted === false ? " no trusted distance, so no pace (see the reps)" : " moving"}</span>}</dd></>}
           <dt>Heart rate</dt><dd>{a.hr === null ? "—" : <>{num(a.hr)} bpm avg, {num(a.maxhr)} max <span class="muted">whole activity</span></>}</dd>
           {swim ? <>
             <dt>Pool</dt><dd>{swim.pool_m ? `${num(swim.pool_m)} m` : "—"} <span class="muted">{swim.n_lengths ?? swim.lengths?.length} lengths{swim.bad_lengths ? `, ${swim.bad_lengths} glitch lengths dropped` : ""}</span></dd>
             <dt>Strokes</dt><dd>{swim.strokes_per_length ? `${num(swim.strokes_per_length, 1)} per length` : "—"} <span class="muted">timer {dur(swim.timer_s)}, elapsed {dur(swim.elapsed_s)}</span></dd>
-          </> : <>
+          </> : a.erg ? null : <>
             <dt>Climb</dt><dd>{a.elev !== null ? `${a.elev} m` : "—"}</dd>
             <dt title="Garmin training load / aerobic training effect (0–5)">Training load / effect</dt><dd>{num(a.load)} / {a.te ?? "—"}</dd>
           </>}
@@ -403,8 +504,12 @@ export function ActivityPage({ id }: { id: string }) {
         <section>
           <div class="head">
             <h2 title={[shaded, hasMap && hasCharts ? "hover the chart or the track" : "", !hasMap ? "no GPS track" : ""].filter(Boolean).join("; ")}>{hasMap ? "Map and series" : "Series"}</h2>
-            {(hasMap || nExtra > 0) && (
+            {(hasMap || nExtra > 0 || (shared && !fullWorkout)) && (
               <div class="tools">
+                {shared && !fullWorkout && <button class={"toggle" + (noBreaks ? " on" : "")} aria-pressed={noBreaks}
+                  onClick={() => setQuery({ breaks: noBreaks ? null : "off" })}
+                  title="join your turns end to end (x = work time), so the curve shows only your pace and how it progresses">No breaks</button>}
+
                 {nExtra > 0 && <button class={"toggle" + (moreCharts ? " on" : "")} aria-pressed={moreCharts} onClick={() => setMoreCharts(!moreCharts)}
                   title="Cadence and power">More charts</button>}
                 {hasMap && <>
@@ -428,9 +533,11 @@ export function ActivityPage({ id }: { id: string }) {
         </section>
       ) : (
         <section>
-          <p class="note">{a.fit ? "No GPS track and too little per-second data for charts." : "Watch file not downloaded: only Garmin's summary is available (no track, charts or segments)."}</p>
+          <p class="note">{a.erg?.manual ? "Logged by hand from the monitors: no stroke data, and the metres aren't split per person." : a.erg ? "No stroke data for this erg session: only the Concept2 Logbook summary is available." : a.fit ? "No GPS track and too little per-second data for charts." : "Watch file not downloaded: only Garmin's summary is available (no track, charts or segments)."}</p>
         </section>
       )}
+
+      {st.data && <SharedTurns resp={st.data} me={currentPerson()} />}
 
       <Segments data={data} sport={sport} setSpan={setSpan} setCursor={setCursor} />
 

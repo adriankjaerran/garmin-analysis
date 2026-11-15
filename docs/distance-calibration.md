@@ -125,7 +125,7 @@ Based on all 492 runs (FIT backfill: 393 calls at 3 s, no 429).
   1.2–1.5 % (assumed), unknown 1.6 %, indoor 5 %. GPS jitter turned out not to predict error (slope ≤ 0),
   so it's not in the model. 72 % of cluster runs fall within 1σ.
 - Caveats: the environment guess is a jitter threshold and doesn't really find cities (Copenhagen and Rome count as
-  "open"). Satellites and accuracy can't be decoded from `gps_metadata`. A third device (product 3077, 6 runs in 2021) exists.
+  "open"). Satellites and accuracy can't be decoded from `gps_metadata`. A third device (product 3077, 6 runs in 2021) is Patrik's watch, borrowed ([fit-files.md](fit-files.md)); not calibrated.
 
 ### Bislett indoor lap, winter (27 sessions; `session_groups.bislett_indoor`)
 In winter the reps are run on the indoor lap under the Bislett stands: **546.5 m per lap** (Adrian), and each rep
@@ -143,19 +143,19 @@ stops 7–8 m before the line, so **rep = n laps × 546.5 m − 7.5 m** (1 lap 5
   (100 s → 1, 220 s → 2, 345 s → 3); no unique n → time-only. Per rep, 2:40–4:30 /km or no distance.
 - **Override** `data/adrian/indoor_bislett.json` `time_only`: 2025-01-21 (5 × 5:00, jogged rests: 3 laps = 3:03 /km,
   2 laps = 4:36 /km, neither fits) has no rep distance.
-- In the fitness model the no-GPS sessions give 19 interval items (47.5–56.2), scored from the whole-lap reps with
+- In the fitness model (interval_offset −0.5, 2026-11-04) the no-GPS sessions give 19 interval items (49.5–58.2), scored from the whole-lap reps with
   speed 0 between reps (standing rests); no continuous / long items. The 7 GPS-lost sessions, with what the speed
   detector would make of them:
 
 | Date | Reps | n laps | Pace /km | Speed-detector sig | Fitness interval item |
 |---|---|---|---|---|---|
-| 2024-12-10 | 3 × 6:00 | 3 | 3:31–3:40 | 1×1500 + 3×7:00 | 50.6 |
-| 2024-12-17 | 9 × 1:28–1:43 | 1 | 2:51–3:10 | 8 reps (mixed) | 55.0 |
-| 2025-01-07 | 6 × ~4:00 | 2 | 3:29–3:50 | 4×4:00 + 1×3000 | 50.1 |
-| 2025-01-28 | 6 × 4:00 | 2 | 3:26–3:42 | 7 reps (mixed) | 48.2 |
-| 2025-02-04 | 6 × 3:45 | 2 | 3:17–3:34 | 3×4:00 + 1×3600 | 51.1 |
-| 2026-01-13 | 3 × 5:45, 3:45, 1:30 | 3, 2, 1 | 3:27–3:37 (1 lap 2:53) | 5 reps (mixed) | 50.9 |
-| 2026-01-20 | 10 × ~1:42 | 1 | 3:05–3:15 (last 2:53) | 1×2400 + 1×7700 + 2×8:45 | 54.4 |
+| 2024-12-10 | 3 × 6:00 | 3 | 3:31–3:40 | 1×1500 + 3×7:00 | 52.6 |
+| 2024-12-17 | 9 × 1:28–1:43 | 1 | 2:51–3:10 | 8 reps (mixed) | 57.0 |
+| 2025-01-07 | 6 × ~4:00 | 2 | 3:29–3:50 | 4×4:00 + 1×3000 | 52.1 |
+| 2025-01-28 | 6 × 4:00 | 2 | 3:26–3:42 | 7 reps (mixed) | 50.2 |
+| 2025-02-04 | 6 × 3:45 | 2 | 3:17–3:34 | 3×4:00 + 1×3600 | 53.1 |
+| 2026-01-13 | 3 × 5:45, 3:45, 1:30 | 3, 2, 1 | 3:27–3:37 (1 lap 2:53) | 5 reps (mixed) | 52.9 |
+| 2026-01-20 | 10 × ~1:42 | 1 | 3:05–3:15 (last 2:53) | 1×2400 + 1×7700 + 2×8:45 | 56.4 |
 
 ## Which number to believe
 1. **Track mode, lap button pressed:** Garmin lap distance (exactly the nominal lane-1
@@ -164,6 +164,8 @@ stops 7–8 m before the line, so **rep = n laps × 546.5 m − 7.5 m** (1 lap 5
 2. **Rep timing:** detector v2 (speed jump, lag-compensated), ±0.5 s typical. The lap press is a cross-check.
    The report flags presses more than 1 s off.
 3. **GPS-mode rep distance:** the detector's distance (median −0.4..+0.2 % vs geometry), *not* Garmin's lap
-   distance (−0.7..−1.25 %, booked ~1.5 s before the press).
+   distance (−0.7..−1.25 %, booked ~1.5 s before the press). On a known track (Bislett, Øya stadion) the fitness model
+   and the rep tables use the set distance instead (400, 1000 m; whole ~890 m laps on the Frogner loop) when it is
+   clear (`track_reps`, `snap_track_reps`; [session-groups.md](session-groups.md)); the measurement stays in `gps_dist`.
 4. **Normal GPS runs:** the watch distance, with the report's ± (1σ, typically 0.8 %). Don't add a buffer.
    Against a measured course it reads ~0.2–1.2 % long, mostly course measurement (shortest line).

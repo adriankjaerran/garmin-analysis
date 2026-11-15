@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useApi, qs, type Activity } from "../lib/api";
 import { navigate, setQuery, useLocation } from "../lib/router";
 import { useTheme } from "../lib/theme";
-import { SPORT_LABEL, dur, num, stypeLabel, typeLabel, onFoot } from "../lib/format";
+import { SPORT_LABEL, dur, num, stypeLabel, typeLabel, onFoot, isErg } from "../lib/format";
 import { PageHeader } from "../components/PageHeader";
 import { Table, type Col } from "../components/Table";
 import { DistCell, distSort } from "../components/ActivityBits";
@@ -23,8 +23,8 @@ import { CompareMap } from "../components/CompareMap";
 import { paceRange, speedRange } from "../lib/chartAxes";
 import {
   MODES, buildGrid, interp, stats, colorsFor, sgn, kmhToPace, xLabel, alignedTicks, spans as spansOf, posAt, focusColor, slotName, repGap,
-  sdur, secTxt, metres, gapTxt, gapTick, repFromUrl, repToUrl, smoothRep, pRange, breakName,
-  type Mode, type CmpResult, type CmpSession, type Suggest, type SuggestSet, type AlignSession,
+  sdur, secTxt, metres, gapTxt, gapTick, repFromUrl, repToUrl, smoothRep, pRange, breakName, paceUnit, scaleP,
+  type PaceUnit, type Mode, type CmpResult, type CmpSession, type Suggest, type SuggestSet, type AlignSession,
 } from "../lib/compare";
 import "./compare.css";
 
@@ -77,7 +77,7 @@ function Landing() {
   const [q, setQ] = useState("");
   const rows = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const all = (acts?.activities ?? []).filter((a) => a.fit && (words.length || a.sport === "run" || a.sport === "ski"));
+    const all = (acts?.activities ?? []).filter((a) => a.fit && (words.length || a.sport === "run" || a.sport === "ski" || isErg(a.sport)));
     const hay = (a: Activity) => [a.date, a.name, shortWhat(a), a.place_name, a.place, a.route, a.route_name, a.type_label, SPORT_LABEL[a.sport]].join(" ").toLowerCase();
     return (words.length ? all.filter((a) => { const h = hay(a); return words.every((w) => h.includes(w)); }) : all).slice(0, words.length ? 200 : 40);
   }, [acts, q]);
@@ -86,7 +86,7 @@ function Landing() {
       <div class="head"><h2 title="Click a row to compare it with its suggested set (same workout, same route, most similar), or paste ids above. Also: the Compare button on any activity page.">Pick a session</h2>
         <input type="search" placeholder="Filter: 6×1000, Bislett, Holmenkollen, 2025…" value={q} style={{ width: "260px" }}
           onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
-        <span class="count" title={q ? undefined : "the 40 most recent runs and ski sessions"}>{rows.length}</span></div>
+        <span class="count" title={q ? undefined : "the 40 most recent runs, ski and erg sessions"}>{rows.length}</span></div>
       <Table rows={rows} rowKey={(a) => a.id} onRow={(a) => navigate(`/compare?suggest=${a.id}`)} empty={acts ? "No activity matches." : "Loading…"} cols={[
         { key: "start", label: "Date", render: (a) => a.date },
         { key: "type", label: "Workout", render: (a) => shortWhat(a) },
@@ -323,9 +323,11 @@ export function ComparePage() {
   useEffect(() => { setCur(null); setRc(null); }, [r, repSel, perRep]);
 
   const firstSport = (r?.sessions[0]?.sport ?? actMap.get(ids[0])?.sport) || "run";
-  // pace for on-foot sports (run, hike), km/h for ski, bike and the rest; breaks view: speed only (pace is
-  // meaningless while standing / walking)
-  const defMetric = onFoot(firstSport) ? "pace" : "speed";
+  // pace for on-foot sports (run, hike) and ergs (/500 m), km/h for ski, bike and the rest; breaks view: speed only
+  // (pace is meaningless while standing / walking)
+  const erg = isErg(firstSport);
+  const pu = paceUnit(firstSport);
+  const defMetric = onFoot(firstSport) || erg ? "pace" : "speed";
   const tableMetric = (query.get("metric") as "pace" | "speed") || defMetric;
   const metric = mode === "breaks" ? "speed" : tableMetric;
 
@@ -396,9 +398,10 @@ export function ComparePage() {
     };
     const pace = metric === "pace";
     const sp: Record<string, N[]> = {};
-    for (const i of D.sids) sp[i] = pace ? D.speed[i].map(kmhToPace) : D.speed[i];
+    for (const i of D.sids) sp[i] = pace ? D.speed[i].map(pu.erg ? (v) => scaleP(pu, kmhToPace(v)) ?? null : kmhToPace) : D.speed[i];
     const P: CPanel[] = [];
-    const speedP = mk("speed", pace ? "Pace (min/km)" : "Speed (km/h)", sp, pace ? (v) => dur(v) : (v) => v.toFixed(1), 170, pace ? { dir: -1 } : {});
+    const speedP = mk("speed", pace ? `Pace (${pu.mu})` : "Speed (km/h)", sp, pace ? (pu.erg ? pu.fmt : (v) => dur(v)) : (v) => v.toFixed(1), 170,
+      pace ? (pu.erg ? { dir: -1, tickFmt: pu.tick } : { dir: -1 }) : {});
     const hrP = mk("hr", "Heart rate (bpm)", D.hr, (v) => String(Math.round(v)), 130);
     if (mode === "distance") {
       P.push(mk("delta", `Gap to the ${refKind === "median" ? "median" : "reference"} (${deltaKind} time; up = ahead)`, D.delta,
@@ -431,7 +434,7 @@ export function ComparePage() {
     else { P.push(hrP); if (Object.values(speedP.ys).some((a) => a.some((v) => v !== null))) P.push(speedP); }
     // drop panels without any data (pool swims: no HR / elevation) instead of an empty chart with a 0–1 axis
     return P.filter((p) => p.single || Object.values(p.ys).some((a) => a.some((v) => v !== null && v !== undefined)));
-  }, [V, metric, refKind, mode, repView, repW]);
+  }, [V, metric, refKind, mode, repView, repW, pu]);
 
   const ticks = useMemo(() => (r && !repView ? alignedTicks(r) : null), [r, repView]);
   const sp = useMemo(() => (repView ? [{ a: 0, b: repW }] : r ? spansOf(r) : []), [r, repView, repW]);
@@ -496,7 +499,7 @@ export function ComparePage() {
     : sug.data?.comparable === false ? <>This activity can't be compared: {sug.data.why_not ?? "no usable data"}. <a href={`/activities/${suggestId}`}>Back to the activity</a></>
     : "Finding sessions to compare…"}</div></main>;
   const opts: Opts = { mode, iv, perRep, repOne: !!repSel, refKind, startQ, rep1, hasReps, metric: tableMetric, defMetric, deltaKind,
-    repAxis, gap, rgap, match, rawRep, startName: startQ && ids.includes(startQ) && startQ !== ids[0] ? (actMap.get(startQ)?.date ?? startQ) : null };
+    repAxis, gap, rgap, match, rawRep, pu, erg, startName: startQ && ids.includes(startQ) && startQ !== ids[0] ? (actMap.get(startQ)?.date ?? startQ) : null };
   const head = (
     <section class="first">
       <PageHeader title="Compare" sub={<>{ids.length ? `${ids.length} session${ids.length > 1 ? "s" : ""}` : "one session vs one or many"}{loading || modeWait ? " · loading…" : ""}</>}
@@ -509,7 +512,7 @@ export function ComparePage() {
         ]} />
       <Picker ids={ids} refKind={refKind} acts={actMap} colors={D?.colors ?? {}} focus={pinned} sug={sug.data} mode={mode}
         anchor={!iv && startQ && !rep1 ? (startQ === "ref" || startQ.includes(",") ? ids[0] : startQ) : null}
-        align={r?.align?.applied ? r.align.sessions ?? null : null} canStart={!iv} />
+        align={r?.align?.applied ? r.align.sessions ?? null : null} canStart={!iv && !erg} />
       {ids.length > 0 && (
         <div class="modebar">
           <div class="seg tabs">
@@ -530,7 +533,8 @@ export function ComparePage() {
 
   if (!ids.length) return <main class="cmp">{head}<Landing /></main>;
   if (error) return <main class="cmp">{head}<div class="err">{error}{iv ? " — reps exist only for runs classified as intervals and ski interval sessions; try Moving time or Route position."
-    : allowed && !allowed.includes(mode) ? " — the first session has no distance; try Moving time, Elapsed or Intervals." : ""}</div></main>;
+    : allowed && !allowed.includes(mode) ? " — the first session has no distance; try Moving time, Elapsed or Intervals."
+    : erg && startQ && !rep1 ? <> — erg sessions have no GPS, so no common start line. <a href="#" onClick={(e) => { e.preventDefault(); setQuery({ start: null, srad: null }); }}>Use own starts</a></> : ""}</div></main>;
   if (!r || !D || !V) return <main class="cmp">{head}<div class="empty">{loading ? "Comparing…" : "Nothing to show."}</div></main>;
   const sel = selK >= 0 ? selK : null;
 
@@ -540,10 +544,11 @@ export function ComparePage() {
       <section>
         <div class="cmp-top">
           <div class="cmp-left">
-            <div class="cmp-map">
+            {/* erg sessions have no GPS track: no empty map */}
+            {!(erg && !Object.keys(r.tracks ?? {}).length) && <div class="cmp-map">
               <CompareMap tracks={r.tracks ?? {}} order={D.order} colors={D.mapColors} refId={D.refId} focus={focus} many={D.many}
                 positions={positions} routeRef={r.route_ref} onPick={setHover} onClick={pick} cut={cut} win={win} />
-            </div>
+            </div>}
             <CursorLegend r={r} D={V} panels={panels} cur={perRep ? null : cur} focus={focus} onHover={setHover} onPick={pick} pace={tableMetric === "pace"} xl={repXl}
               sel={repView ? selK : null} />
           </div>
@@ -627,7 +632,7 @@ function CursorLegend({ r, D, panels, cur, focus, onHover, onPick, pace, xl, sel
     return <RepRank r={r} D={D} RD={repData(r, D, ids, pace, sel)} focus={focus} onHover={onHover} onPick={onPick} compact
       slot={sel !== null && r.slots?.[sel] ? slotName(r.slots[sel]) : null} />;
   }
-  if (cur === null) return <div class="legend empty">Hover the charts to see every session at that point{r.mode === "distance" ? " (and on the map: where each was at the reference's time)" : ""}.</div>;
+  if (cur === null) return <div class="legend empty">Hover the charts to see every session at that point{r.mode === "distance" && !isErg(r.sessions[0]?.sport) ? " (and on the map: where each was at the reference's time)" : ""}.</div>;
   const x = D.X[cur];
   const P = panels.filter((p) => !p.single);
   const dP = P.find((p) => p.key === "delta" || p.key === "gap");
@@ -683,6 +688,7 @@ function SummaryTable({ r, D, focus, onHover, onPick, deltaKind, metric }: {
     return { ...s, sid, a: r.activities[sid], fin, rs: r.rep_summary?.[sid] ?? null };
   });
   const run = r.sessions[0]?.sport === "run";
+  const pu = paceUnit(r.sessions[0]?.sport), erg = pu.erg;
   const pace = metric === "pace";
   const iv = !!r.rep_summary;
   const refRow = rows.find((x) => x.sid === D.refId) ?? null;
@@ -703,16 +709,16 @@ function SummaryTable({ r, D, focus, onHover, onPick, deltaKind, metric }: {
     // interval modes: the rep summary first, the whole session after it
     const pk = (x: Row) => x.rs?.rep_pace_s_km as N | undefined;
     add("n_reps", "Reps", (x) => x.rs?.n_reps, (v) => String(v), null);
-    if (pace) add("rep_pace", "Avg rep pace", pk, (v) => dur(v), "min", "avg rep pace = total rep distance / total rep time (min/km)");
+    if (pace) add("rep_pace", "Avg rep pace", erg ? (x) => scaleP(pu, pk(x)) : pk, erg ? pu.fmt : (v) => dur(v), "min", `avg rep pace = total rep distance / total rep time (${pu.mu})`);
     else add("rep_kmh", "Avg rep km/h", (x) => toKmh(pk(x)), (v) => v.toFixed(1), "max", "avg rep speed = total rep distance / total rep time");
-    add("d_rep", pace ? "Δ s/km" : "Δ km/h", (x) => {
+    add("d_rep", pace ? `Δ ${pu.su}` : "Δ km/h", (x) => {
       const d = x.rs?.d_rep_pace_matched_s_km as N | undefined;
-      if (d === null || d === undefined || pace) return d;
+      if (d === null || d === undefined || pace) return erg ? scaleP(pu, d) : d;
       // speed: same matched comparison, converted around this session's own rep pace
       const p = pk(x);
       return p ? 3600 / p - 3600 / (p - d) : null;
-    }, (v) => (pace ? sgn(v, (s) => `${Math.round(s)}`) : sgn(v, (s) => s.toFixed(1))), pace ? "min" : "max",
-      `rep ${pace ? "pace (s/km)" : "speed (km/h)"} vs the reference over the reps both have (matched slots)`);
+    }, (v) => (pace ? sgn(v, pu.d) : sgn(v, (s) => s.toFixed(1))), pace ? "min" : "max",
+      `rep ${pace ? `pace (${pu.su})` : "speed (km/h)"} vs the reference over the reps both have (matched slots)`);
     add("rep_hr", "Rep HR", (x) => x.rs?.rep_hr, (v) => String(v), null, "mean HR during the reps");
     add("brk", "Rest", (x) => x.rs?.break_median_s, (v) => dur(v), null, "this session's median break between reps (measured, not the “rest ~2:30” group bin)");
     add("drop", "HR drop 60 s", (x) => x.rs?.drop_60_median, (v) => String(v), "max", "median HR drop in the first 60 s of the breaks");
@@ -748,14 +754,14 @@ function SummaryTable({ r, D, focus, onHover, onPick, deltaKind, metric }: {
   add("d_moving", "Δ", (x) => x.delta.moving_s, (v) => sgn(v, dur), null, "moving time vs reference");
   add("elapsed_s", "Elapsed", (x) => x.elapsed_s, (v) => dur(v), null, undefined, wTip("elapsed_s"));
   add("pause_s", "Stopped", (x) => x.pause_s, (v, x) => `${dur(v)}${x.n_pauses ? ` (${x.n_pauses})` : ""}`, null, "paused time (number of pauses)", wTip("pause_s"));
-  if (pace) add("pace", "Pace", (x) => x.moving_pace_s_km, (v) => dur(v), "min", "moving pace (min/km)");
+  if (pace) add("pace", "Pace", (x) => (erg ? scaleP(pu, x.moving_pace_s_km) : x.moving_pace_s_km), erg ? pu.fmt : (v) => dur(v), "min", `moving pace (${pu.mu})`);
   else add("kmh", "km/h", (x) => x.moving_kmh, (v) => v.toFixed(1), "max", "moving speed");
-  add("d_pace", "Δ", (x) => (pace ? x.delta.moving_pace_s_km : x.delta.moving_kmh), (v) => (pace ? sgn(v, (s) => `${Math.round(s)} s`) : sgn(v, (s) => s.toFixed(1))), null, pace ? "s/km vs reference" : "km/h vs reference");
+  add("d_pace", "Δ", (x) => (pace ? (erg ? scaleP(pu, x.delta.moving_pace_s_km) : x.delta.moving_pace_s_km) : x.delta.moving_kmh), (v) => (pace ? sgn(v, (s) => `${pu.d(s)} s`) : sgn(v, (s) => s.toFixed(1))), null, pace ? `${pu.su} vs reference` : "km/h vs reference");
   if (run) add("gap", pace ? "GAP" : "GAP km/h", (x) => (pace ? x.gap_pace_s_km : toKmh(x.gap_pace_s_km)), (v) => (pace ? dur(v) : v.toFixed(1)), pace ? "min" : "max", "grade-adjusted pace (Minetti)");
   add("hr", "HR moving", (x) => x.hr_avg, (v) => String(v), null, "average HR while moving (stops excluded); hover for Δ and the whole-activity average shown on the activity page",
     (x) => `${hrTip(x)} · ${dTip((y) => y.delta.hr_avg, (v) => sgn(v), "bpm")(x)}`);
   add("hr_max", "Max", (x) => x.hr_max, (v) => String(v), null);
-  add("climb", "Climb", (x) => x.climb_m, (v) => String(v), null);
+  if (!erg) add("climb", "Climb", (x) => x.climb_m, (v) => String(v), null);
   add("eff", "m/beat", (x) => x.eff_m_per_beat, (v) => v.toFixed(2), "max", "distance per heartbeat (GAP speed for runs): higher = more economical; hover for Δ %",
     dTip((y) => y.delta.eff_pct, (v) => sgn(v, (s) => s.toFixed(1)) + " %", "efficiency"));
   return <Table rows={rows} rowKey={(x) => x.sid} cols={cols} highlight={focus} onHover={(x) => onHover(x ? x.sid : null)} onRow={(x) => onPick(x.sid)} />;
@@ -771,6 +777,7 @@ function Detail({ r, D, focus, onHover, onPick, tab, metric, sel = null }: {
   const { query } = useLocation();
   const label = (id: string) => { const a = r.activities[id]; return <span>{a?.date ?? id}{id === D.refId ? <span class="muted"> ref</span> : ""}</span>; };
   const pace = metric === "pace";
+  const pu = paceUnit(r.sessions[0]?.sport), erg = pu.erg;
   if (r.mode === "distance" && r.legs?.length) {
     type L = NonNullable<CmpResult["legs"]>[number]["sessions"][string] & {};
     const units = r.legs.map((l, k) => ({ key: "l" + k, label: `${(l.from_m / 1000).toFixed(1)}–${(l.to_m / 1000).toFixed(1)}`,
@@ -780,7 +787,7 @@ function Detail({ r, D, focus, onHover, onPick, tab, metric, sel = null }: {
       { id: "time", label: "Moving time", get: (c) => c.moving_s, fmt: (v) => dur(v), best: "min" },
       { id: "d", label: "Δ leg", get: (c) => c.d_moving_s, fmt: (v) => sgn(v, dur), best: "min" },
       { id: "gap", label: "Gap at leg end", get: (c) => c.delta_moving_s, fmt: (v) => gapTxt(v, secTxt), best: "min" },
-      pace ? { id: "speed", label: "Pace", get: (c) => (c.speed_kmh ? 3600 / c.speed_kmh : null), fmt: (v) => dur(v), best: "min" }
+      pace ? { id: "speed", label: "Pace", get: (c) => (c.speed_kmh ? (3600 / c.speed_kmh) * pu.k : null), fmt: erg ? pu.fmt : (v) => dur(v), best: "min" }
         : { id: "speed", label: "km/h", get: (c) => c.speed_kmh, fmt: (v) => v.toFixed(1), best: "max" },
       { id: "hr", label: "HR", get: (c) => c.hr, fmt: (v) => String(v), best: null },
       { id: "stop", label: "Stopped", get: (c) => c.pause_s, fmt: (v) => dur(v), best: null },
@@ -809,7 +816,7 @@ function Detail({ r, D, focus, onHover, onPick, tab, metric, sel = null }: {
     type R = NonNullable<NonNullable<CmpResult["reps"]>[string][number]>;
     type Bk = NonNullable<NonNullable<CmpResult["breaks"]>[string][number]>;
     const repMetrics: Metric<R>[] = [
-      pace ? { id: "pace", label: "Pace", get: (c) => c.pace_s_km, fmt: (v) => dur(v), best: "min", vsRef: true, dfmt: (d) => sgn(d) }
+      pace ? { id: "pace", label: "Pace", get: (c) => (erg ? scaleP(pu, c.pace_s_km) ?? null : c.pace_s_km), fmt: erg ? pu.fmt : (v) => dur(v), best: "min", vsRef: true, dfmt: (d) => (erg ? sgn(d, pu.d) : sgn(d)) }
         : { id: "pace", label: "km/h", get: (c) => c.speed_kmh, fmt: (v) => v.toFixed(1), best: "max", vsRef: true, dfmt: (d) => sgn(d, (x) => x.toFixed(1)) },
       { id: "time", label: "Time", get: (c) => c.time_s, fmt: (v) => dur(v), best: "min", vsRef: true, dfmt: (d) => sgn(d, (x) => x.toFixed(Math.abs(x) < 10 ? 1 : 0)) },
       { id: "d", label: "Δ time", get: (c) => c.d_time_s, fmt: (v) => sgn(v, (s) => `${s.toFixed(1)} s`), best: "min" },
@@ -884,12 +891,12 @@ function RepLadder({ r, D, ids, pace, focus, onHover, onPick, sel = null }: {
   }, []);
   const slots = r.slots ?? [];
   const RD = repData(r, D, ids, pace);
-  const { byTime, lines, med, refV, fmt, dvs } = RD;
+  const { byTime, lines, med, refV, fmt, dvs, pu } = RD;
   pace = RD.pace;
   const all = [...lines.flatMap((l) => l.v), ...(med ?? [])].filter((x): x is number => x !== null);
   if (!all.length || slots.length < 1) return null;
   let lo = Math.min(...all), hi = Math.max(...all);
-  const pad = Math.max((hi - lo) * 0.08, pace ? 2 : 0.1);
+  const pad = Math.max((hi - lo) * 0.08, pace ? (byTime ? 2 : 2 * pu.k) : 0.1);
   lo -= pad; hi += pad;
   const H = 200, L = 46, R = 12, T = 8, Bm = 22;
   const x = (k: number) => L + 16 + (slots.length === 1 ? (W - L - R - 32) / 2 : (k * (W - L - R - 32)) / (slots.length - 1));
@@ -909,9 +916,9 @@ function RepLadder({ r, D, ids, pace, focus, onHover, onPick, sel = null }: {
   return (
     <div class="ladder">
       <div class="ladder-chart" ref={box} title="faster is up; dots = one rep; hover a dot for its value">
-        <div class="title">{byTime ? "Time per rep (no distance)" : pace ? "Pace per rep (min/km)" : "Speed per rep (km/h)"} </div>
+        <div class="title">{byTime ? "Time per rep (no distance)" : pace ? `Pace per rep (${pu.mu})` : "Speed per rep (km/h)"} </div>
         <svg width={W} height={H} onMouseLeave={() => onHover(null)}>
-          {ticks.map((v) => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} class="grid" /><text x={L - 6} y={y(v) + 4} class="ax" text-anchor="end">{fmt(v)}</text></g>)}
+          {ticks.map((v) => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} class="grid" /><text x={L - 6} y={y(v) + 4} class="ax" text-anchor="end">{pace && !byTime ? pu.tick(v) : fmt(v)}</text></g>)}
           {sel !== null && slots[sel] && <rect x={x(sel) - 14} y={T} width={28} height={H - T - Bm} class="selcol" />}
           {slots.map((s, k) => <text key={k} x={x(k)} y={H - 6} class={"ax slotlink" + (k === sel ? " on" : "")} text-anchor="middle"
             onClick={() => setQuery({ rep: k === sel ? null : repToUrl(s.label), view: null })}><title>{k === sel ? "Back to all reps" : `Show only ${slotName(s)}`}</title>{slotName(s, true)}</text>)}
@@ -927,7 +934,7 @@ function RepLadder({ r, D, ids, pace, focus, onHover, onPick, sel = null }: {
                 <path d={path(l.v)} fill="none" stroke={c} stroke-width={wdt} stroke-opacity={D.many && !on && !isRef ? 0.8 : 1} />
                 {l.v.map((p, k) => p === null ? null : (
                   <circle key={k} cx={x(k)} cy={y(p)} r={on || isRef ? 4 : 3} fill={c} style={{ stroke: "var(--surface)" }} stroke-width={1}>
-                    <title>{`${a?.date ?? l.id} · ${slotName(slots[k])}: ${fmt(p)}${byTime ? "" : pace ? " /km" : " km/h"}${refV && refV[k] !== null && refV[k] !== undefined && !isRef ? ` (${dvs(p - refV[k]!, D.refId ? "reference" : "median")})` : ""}`}</title>
+                    <title>{`${a?.date ?? l.id} · ${slotName(slots[k])}: ${fmt(p)}${byTime ? "" : pace ? ` ${pu.unit}` : " km/h"}${refV && refV[k] !== null && refV[k] !== undefined && !isRef ? ` (${dvs(p - refV[k]!, D.refId ? "reference" : "median")})` : ""}`}</title>
                   </circle>))}
               </g>
             );
@@ -945,11 +952,12 @@ function repData(r: CmpResult, D: DD, ids: string[], pace: boolean, only: number
   // sessions without distance: rep times instead (shorter = up, like pace)
   const byTime = !ids.some((id) => (r.reps?.[id] ?? []).some((c) => c?.pace_s_km));
   if (byTime) pace = true;
-  const val = (c: any): N => (!c ? null : byTime ? c.time_s ?? null : pace ? c.pace_s_km ?? null : c.speed_kmh ?? null);
+  const pu = paceUnit(r.sessions[0]?.sport);
+  const val = (c: any): N => (!c ? null : byTime ? c.time_s ?? null : pace ? (pu.erg ? scaleP(pu, c.pace_s_km) ?? null : c.pace_s_km ?? null) : c.speed_kmh ?? null);
   const keep = <T,>(a: (T | null)[]) => (only === null ? a : a.map((c, k) => (k === only ? c : null)));
   const lines = ids.map((id) => ({ id, v: keep(r.reps?.[id] ?? []).map(val) }));
   const med = !D.refId && r.reps_ref ? keep(r.reps_ref as any[]).map(val) : null;
-  // ranking: mean difference to the reference over the reps both have (s/km or km/h); the reference itself = 0
+  // ranking: mean difference to the reference over the reps both have (s/km, s/500 m or km/h); the reference itself = 0
   const refV = D.refId ? lines.find((l) => l.id === D.refId)?.v ?? null : med;
   const avg = (id: string): N => {
     const cs = keep(r.reps?.[id] ?? []).filter((c): c is NonNullable<typeof c> => !!c);
@@ -958,24 +966,24 @@ function repData(r: CmpResult, D: DD, ids: string[], pace: boolean, only: number
     if (!n) return null;
     if (byTime) return t / n;
     if (!d) return null;
-    return pace ? (1000 * t) / d : (3.6 * d) / t;
+    return pace ? (pu.erg ? (500 * t) / d : (1000 * t) / d) : (3.6 * d) / t;
   };
   const rank = lines.map((l) => {
     const d: number[] = [];
     if (refV) l.v.forEach((p, k) => { if (p !== null && refV[k] !== null && refV[k] !== undefined) d.push(p - refV[k]!); });
     return { id: l.id, n: d.length, d: d.length ? d.reduce((a, b) => a + b, 0) / d.length : null, mean: avg(l.id) };
   }).sort((a, b) => (a.d === null ? 1 : b.d === null ? -1 : pace ? a.d - b.d : b.d - a.d));
-  const fmt = (v: number) => (pace ? dur(v) : v.toFixed(1));
-  // a difference in words: "3 s/km faster", "0.4 km/h slower", "2.1 s faster" (time)
+  const fmt = (v: number) => (pace ? (pu.erg && !byTime ? pu.fmt(v) : dur(v)) : v.toFixed(1));
+  // a difference in words: "3 s/km faster", "1.4 s/500 m faster", "0.4 km/h slower", "2.1 s faster" (time)
   const dtxt = (d: number) => {
     const fast = pace ? d < 0 : d > 0, a = Math.abs(d);
-    const t = byTime ? secTxt(a) : pace ? `${Math.round(a)} s/km` : `${a.toFixed(1)} km/h`;
+    const t = byTime ? secTxt(a) : pace ? `${pu.d(a)} ${pu.su}` : `${a.toFixed(1)} km/h`;
     return !/[1-9]/.test(t) ? "same" : `${t} ${fast ? "faster" : "slower"}`;
   };
   /** "3 s/km faster than the reference" / "same as the median" */
   const dvs = (d: number, who: string) => { const t = dtxt(d); return t === "same" ? `same as the ${who}` : `${t} than the ${who}`; };
   const faster = (d: number) => (pace ? d < 0 : d > 0);
-  return { byTime, pace, lines, med, refV, rank, fmt, dtxt, dvs, faster };
+  return { byTime, pace, lines, med, refV, rank, fmt, dtxt, dvs, faster, pu };
 }
 
 function RepRank({ r, D, RD, focus, onHover, onPick, compact, slot = null }: {
@@ -1072,6 +1080,8 @@ interface Opts {
   mode: Mode; iv: boolean; perRep: boolean; repOne: boolean; refKind: "first" | "median"; startQ: string | null; rep1: boolean; hasReps: boolean;
   metric: "pace" | "speed"; defMetric: "pace" | "speed"; deltaKind: string; repAxis: string; gap: string; rgap: string; match: string;
   rawRep: boolean; startName: string | null;
+  /** pace unit (/km, /500 m for ergs); erg = no GPS: no common start line */
+  pu: PaceUnit; erg: boolean;
 }
 const ROUTE_MODES = "Route position, Moving time and Elapsed";
 
@@ -1133,7 +1143,7 @@ function OptionsBar({ o }: { o: Opts }) {
           <Row label="Start" on={!o.iv} why={`${ROUTE_MODES} only`}>
             <Seg items={[
               { on: !o.startQ, label: "Own", title: "Every session from its own watch start", q: { start: null } },
-              { on: !!o.startQ && !o.rep1, label: "Common", q: { start: !o.startQ || o.rep1 ? "ref" : o.startQ },
+              { on: !!o.startQ && !o.rep1, label: "Common", show: !o.erg || (!!o.startQ && !o.rep1), q: { start: !o.startQ || o.rep1 ? "ref" : o.startQ },
                 title: "Common start line at the first session's start (“start” on a chip: use that session's start). Lead-ins are cut off, sessions that started later join where their recording begins on the start session's path, sessions that never get on it are left out" },
               { on: o.rep1, label: "Rep 1", show: o.hasReps || o.rep1, q: { start: "rep1" },
                 title: "t = 0 at rep 1: every session starts at the detected start of its first rep (the rep matched to the reference's rep 1, as in Intervals); the warm-up is cut off, real breaks are kept. Sessions without reps are left out. Route position: x = own distance since rep 1" },
@@ -1141,7 +1151,7 @@ function OptionsBar({ o }: { o: Opts }) {
           </Row>
           <Row label="Show" on={o.mode !== "breaks"} why="Breaks: always speed (pace is meaningless while standing)">
             <Seg items={[
-              { on: o.metric === "pace", label: "Pace", title: "min/km", q: { metric: o.defMetric === "pace" ? null : "pace" } },
+              { on: o.metric === "pace", label: "Pace", title: o.pu.mu, q: { metric: o.defMetric === "pace" ? null : "pace" } },
               { on: o.metric === "speed", label: "Speed", title: "km/h", q: { metric: o.defMetric === "speed" ? null : "speed" } },
             ]} />
           </Row>
@@ -1184,10 +1194,11 @@ function PerRep({ r, D, metric, focus, onHover, onCursor, raw }: {
   onCursor: (c: { k: number; i: number } | null) => void;
 }) {
   const pace = metric === "pace";
+  const pu = paceUnit(r.sessions[0]?.sport);
   const charts = useMemo(() => {
     if (!r.rep_series || !r.slots) return [];
     const vs = r.rep_series.slots.map((_s, k) => repViewD(r, D, k, raw));
-    const conv = (a: N[]) => (pace ? a.map(kmhToPace) : a);
+    const conv = (a: N[]) => (pace ? a.map(pu.erg ? (v) => scaleP(pu, kmhToPace(v)) ?? null : kmhToPace) : a);
     // shared y range: p3–p97 of the reps themselves (from 8 s in, each session's own rep time) of every slot,
     // padded, so the reps fill the chart and only stray spikes leave it
     const all: N[] = [];
@@ -1196,11 +1207,11 @@ function PerRep({ r, D, metric, focus, onHover, onCursor, raw }: {
     return vs.map((V, k) => {
       const ys: Record<string, N[]> = {};
       for (const id of V.sids) ys[id] = conv(V.speed[id]);
-      const P: CPanel = { key: "speed", label: "", ys, fmt: pace ? (v) => dur(v) : (v) => v.toFixed(1), height: 120, dir: pace ? -1 : 1, yRange: yr,
-        axis: pace ? "pace" : "speed" };
+      const P: CPanel = { key: "speed", label: "", ys, fmt: pace ? (pu.erg ? pu.fmt : (v) => dur(v)) : (v) => v.toFixed(1), height: 120, dir: pace ? -1 : 1, yRange: yr,
+        axis: pace ? "pace" : "speed", ...(pace && pu.erg ? { tickFmt: pu.tick } : {}) };
       return { V, P: [P], spans: [{ a: 0, b: r.rep_series!.slots[k].width }], slot: r.slots![k] };
     });
-  }, [r, D, pace, raw]);
+  }, [r, D, pace, raw, pu]);
   if (!charts.length) return <div class="empty">Loading the reps…</div>;
   return (
     <div class="perrep">
