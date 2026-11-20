@@ -1191,8 +1191,9 @@ def goal_progress(B, store, tdoc, g, today=None) -> dict:
     per = Counter()
     for x in gids:
         for k in C[x]["per_person"]:
-            if "#" not in k:
-                per[k] += val(x, k)
+            # a 2nd file (patrik#2) counts towards its person like it does in the total; not as a 2nd session
+            if "#" not in k or m != "sessions":
+                per[k.split("#")[0]] += val(x, k)
     a, b = dt.date.fromisoformat(g["from"]), dt.date.fromisoformat(g["to"])
     days = (b - a).days + 1
     gone = min(days, max(0, (today - a).days + 1))
