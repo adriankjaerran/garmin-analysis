@@ -69,9 +69,17 @@ i.sw { margin-right: 6px; vertical-align: -1px; }
 /* rep ladder (pace per rep, one line per session) + ranking */
 .ladder { margin-bottom: var(--space-3); }
 .ladder .title { font-size: var(--fs-12); margin-bottom: var(--space-1); }
+.ladder .title.chart-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .ladder svg { display: block; }
 .ladder svg .grid { stroke: var(--hairline); stroke-width: 1; }
 .ladder svg .ax { font-size: 12px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ladder svg .cellt { font-size: 11px; font-weight: 600; fill: #fff; pointer-events: none; }
+.ladder svg .cellm { font-size: 10px; fill: #fff; fill-opacity: 0.9; font-variant-numeric: tabular-nums; pointer-events: none; }
+.ladder.rounds .scroll { overflow-x: auto; }
+.rounds-t { font-size: var(--fs-12); font-variant-numeric: tabular-nums; width: auto; min-width: 100%; }
+.rounds-t th, .rounds-t td { padding: 4px 6px; text-align: center; border-bottom: 1px solid var(--hairline); }
+.rounds-t tbody th { text-align: left; font-weight: 600; }
+.rounds-t td .parts { font-size: 10px; color: var(--text-muted); display: flex; gap: 4px; justify-content: center; }
 .ladder svg .med { fill: none; stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .ladder-rank table { width: 100%; font-size: var(--fs-12); }
 .ladder-rank td { height: 24px; padding: 0 var(--space-2); white-space: nowrap; font-variant-numeric: tabular-nums; }

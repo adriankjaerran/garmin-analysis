@@ -135,6 +135,11 @@ def test_shared_machine_cleaning():
     assert c2.shared_turns(r, three, {"who": 2})["pattern"] == "X.." * 12
     sh3 = c2.shared_turns(r, three, {"who": 3})
     assert sh3["pattern"] == ".X." * 12 and sh3["n_turns"] == 12 and sh3["off_s"] == 120
+    # a fixed rotation (by order, not speed): the 2nd person's first turn as fast as yours doesn't move it
+    rot = _shared_strokes("XXM" + "X.M" * 11)
+    assert c2.shared_turns(r, rot, {"rotation": [3, 1]})["pattern"] == "X.." * 12
+    sr = c2.shared_turns(r, rot, {"rotation": [3, 2]})
+    assert sr["pattern"] == ".X." * 12 and sr["n_turns"] == 12 and not sr["forced"]
     # a second, unrecorded machine in the rotation (1:00 here + 1:00 there): totals = both, the other one estimated
     sh2 = c2.shared_turns(r, three, {"who": 2, "second_machine_m": 9900})
     sm = sh2["second_machine"]
@@ -148,6 +153,51 @@ def test_shared_machine_cleaning():
     assert c2.shared_turns(r, _shared_strokes("X" * 30)) is None
     assert c2.shared_turns(r, _shared_strokes(".X" * 20), False) is None
     assert c2.shared_turns(r, _shared_strokes("XXX" + "." * 12 + "X.X"), True)["forced"]
+
+
+
+def test_two_recorded_machines(tmp_path):
+    """2:00 on (1:00 on each of two machines) / 1:00 off, three people in a fixed rotation, the second machine on
+    another Logbook (override "machine_b"): split by the same order, rounds = A + B, measured metres on both"""
+    ra = _result(id=111, type="skierg", workout_type="FixedTimeSplits", time=18000, rest_time=0, distance=7500,
+                 date="2026-11-18 20:15:00", workout={})
+    rb = _result(id=222, type="skierg", workout_type="FixedTimeSplits", time=18000, rest_time=0, distance=7200,
+                 date="2026-11-18 20:15:00", workout={}, drag_factor=120)
+    sa = _shared_strokes("X.M" * 10)                    # A: me, the 2nd, the 3rd (X fast, . middle, M slow)
+    sb = _shared_strokes("MX." * 10, fast=4.7, slow=4.3)   # B: one slot later (B reads a bit slower)
+    for place, a_pat in ((1, "X.."), (2, ".X."), (3, "..X")):
+        sh = c2.shared_turns(ra, sa, {"rotation": [3, place], "machine_b": {"id": 222, "from": "x"}}, (rb, sb))
+        mb = sh["machine_b"]
+        assert sh["pattern"] == a_pat * 10 and mb["shift"] == 1 and mb["offset_s"] == 0
+        rounds = sh["rounds"]
+        if place < 3:   # B one slot after each A turn
+            assert len(mb["turns"]) == 10 and all(t[0] == a + 60 for t, (a, *_) in zip(mb["turns"], sh["turns"]))
+            assert len(rounds) == 10 and all(len(x[4]) == 2 for x in rounds)
+        else:   # the 3rd starts on B (slot 0) and ends on A (slot 29, no B after it): 1:00 rounds at both ends
+            assert [t[0] for t in mb["turns"]][:2] == [0, 180] and len(mb["turns"]) == 10
+            assert len(rounds) == 11 and [len(x[4]) for x in rounds] == [1] + [2] * 9 + [1]
+        assert (sh["on_s"], sh["off_s"]) == (120, 60)
+        cr = c2.clean(ra, sh)
+        assert cr["distance"] == round(sum(x[2] for x in rounds)) or abs(cr["distance"] - sum(x[2] for x in rounds)) <= 10
+        assert c2.workout_name(cr) == ("10×2:00, 2 machines" if place < 3 else "9×2:00 + 2×1:00, 2 machines")
+        row = c2.index_row(cr)
+        assert "turns" not in row["c2"]["shared"]["machine_b"] and "rounds" not in row["c2"]["shared"]
+    # the order the other way round (B first, then A) is found too; an explicit shift wins
+    sb2 = _shared_strokes(".MX" * 10)
+    assert c2.shared_turns(ra, sa, {"rotation": [3, 1], "machine_b": {"id": 222}}, (rb, sb2))["machine_b"]["shift"] == 2
+    assert c2.shared_turns(ra, sa, {"rotation": [3, 1], "machine_b": {"id": 222, "shift": 1}}, (rb, sb2))["machine_b"]["shift"] == 1
+    # B started a minute later: offset from the start times
+    rb3 = {**rb, "date": "2026-11-18 20:16:00"}
+    sh3 = c2.shared_turns(ra, sa, {"rotation": [3, 1], "machine_b": {"id": 222}}, (rb3, _shared_strokes("X.M" * 10)))
+    assert sh3["machine_b"]["offset_s"] == 60 and sh3["machine_b"]["shift"] == 1
+    # files: the owner's copy of B is hidden (part of the session); copied.json rows survive a fetch's results.json
+    D = tmp_path / "maren"
+    (D / "concept2").mkdir(parents=True)
+    (D / "concept2" / "results.json").write_text(json.dumps([{"id": 222}]))
+    (D / "concept2" / "copied.json").write_text(json.dumps([{"id": 111}, {"id": 222}]))
+    (D / "session_overrides.json").write_text(json.dumps({"111": {"erg_shared": {"rotation": [3, 3], "machine_b": {"id": 222, "from": "maren"}}}}))
+    assert [r["id"] for r in c2.listed(D)] == [222, 111] and c2.merged_ids(D) == {222} and c2.copied_ids(D) == {111, 222}
+    assert c2.machine_b_dir(D, c2.overrides(D)["111"]) == D / "concept2" / "results" / "222"   # falls back to the owner's
 
 
 def test_turn_profiles_handover_cut():

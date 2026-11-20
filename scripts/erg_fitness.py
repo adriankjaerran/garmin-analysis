@@ -107,20 +107,17 @@ def concept2_paths(person: str) -> list[Path]:
     """inputs whose mtime decides whether erg_fitness.json is stale"""
     d = concept2_dir(person)
     # activities_index.json is rewritten by concept2.sync (also after cleaning); overrides can force / undo cleaning
-    return [d / "results.json", d / "results", d / "activities_index.json", ROOT / "data" / person / "session_overrides.json"]
+    return [d / "results.json", d / "copied.json", d / "results", d / "activities_index.json", ROOT / "data" / person / "session_overrides.json"]
 
 
 def load_results(person: str) -> list[dict]:
     """every result with its intervals / splits, as this person did it: concept2.load_result (results/<id>/result.json,
     else the list row; shared-machine sessions cleaned to the person's own turns, docs/concept2.md#cleaning)"""
     import concept2 as c2
-    d = concept2_dir(person)
-    p = d / "results.json"
-    if not p.exists():
-        return []
     D = ROOT / "data" / person
+    skip = c2.merged_ids(D)   # a session's second machine counts inside that session
     out = []
-    for row in json.loads(p.read_text()):
+    for row in [x for x in c2.listed(D) if x["id"] not in skip]:
         try:
             r = c2.load_result(D, row["id"], row) or row
         except (ValueError, OSError):

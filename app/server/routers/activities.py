@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -161,6 +163,19 @@ def get_track(aid: str, format: str = Query("geojson", pattern="^(geojson|column
             "properties": {"id": aid, "t": tp["t"], "speed": tp["speed"], "hr": tp["hr"], "alt": tp["alt"]}}
 
 
+def _own_strokes(st: list[dict], turns: list, off: float, machine: str) -> list:
+    """[[t (session s), speed m/s, spm, watts, machine]] for the strokes inside these turns (turn starts on the session
+    clock; this machine's clock = session - off)"""
+    out = []
+    for a, dur, *_ in turns:
+        for x in st:
+            t = x.get("t", 0) / 10 + off
+            if a <= t < a + dur and x.get("p"):
+                pace = x["p"] / 10
+                out.append([round(t, 1), round(500 / pace, 3), x.get("spm") or None, round(2.80 / (pace / 500) ** 3), machine])
+    return out
+
+
 @router.get("/activities/{aid}/shared-turns")
 def shared_turns(aid: str):
     """a shared-machine erg session (Concept2, concept2.clean): every person who has it (their own profile with a
@@ -169,7 +184,7 @@ def shared_turns(aid: str):
     import concept2 as c2m
     from .. import ROOT
     from ..deps import people
-    out = []
+    out, machines = [], []
     for p in people():
         D = ROOT / "data" / p
         if not (c2m.c2_dir(D) / "results" / aid / "result.json").exists():
@@ -179,14 +194,33 @@ def shared_turns(aid: str):
         st = c2m.strokes(D, aid)
         if not sh or not st:
             continue
-        turns = c2m.turn_profiles(st, sh["turns"])
-        out.append({"person": p, "turns": turns, "on_s": sh["on_s"], "off_s": sh["off_s"],
-                    "second_machine": sh.get("second_machine")})
+        turns = [t | {"machine": "A"} for t in c2m.turn_profiles(st, sh["turns"])]
+        o = {"person": p, "turns": turns, "on_s": sh["on_s"], "off_s": sh["off_s"],
+             "second_machine": sh.get("second_machine"), "pattern": sh.get("pattern"), "slot_s": sh.get("slot_s"),
+             "rounds": [{"start_s": x[0], "time_s": x[1], "dist_m": x[2], "spm": x[3],
+                         "parts": [{"start_s": q[0], "time_s": q[1], "dist_m": q[2], "machine": q[4]} for q in x[4]]}
+                        for x in sh.get("rounds") or []]}
+        if mb := sh.get("machine_b"):   # the second machine (another Logbook): profiles on B's own clock, back to ours
+            bd = c2m.machine_b_dir(D, c2m.overrides(D).get(aid))
+            stb = json.loads((bd / "strokes.json").read_text()) if bd and (bd / "strokes.json").exists() else None
+            off = mb["offset_s"]
+            o["turns_b"] = [t | {"machine": "B", "start_s": t["start_s"] + off} for t in
+                            c2m.turn_profiles(stb, [[x[0] - off, *x[1:4]] for x in mb["turns"]])] if stb else []
+            o["machine_b"] = {k: v for k, v in mb.items() if k != "turns"}
+            # the person's own strokes on both machines, session clock: the "only me" charts (A's FIT has only A)
+            o["strokes"] = _own_strokes(st, sh["turns"], 0.0, "A") + (_own_strokes(stb, mb["turns"], off, "B") if stb else [])
+            o["strokes"].sort(key=lambda x: x[0])
+        machines = machines or [{"id": aid, "label": "A", "dist_m": r.get("shared", {}).get("logbook_dist_m"),
+                                 "time_s": sh.get("logbook_time_s"), "drag_factor": r.get("drag_factor")}]
+        if (mb := sh.get("machine_b")) and len(machines) == 1:
+            machines.append({"id": str(mb["id"]), "label": "B", "dist_m": mb["dist_m"], "time_s": mb["time_s"],
+                             "drag_factor": mb["drag_factor"], "from": mb.get("from")})
+        out.append(o)
     if not out:
         raise HTTPException(404, "not a shared erg session")
     mean = lambda x: sum(x) / len(x) if x else None
     for o in out:   # whole-session steady pace (distance-weighted over the trimmed turns) for sorting / labels
-        ts = [t for t in o["turns"] if t["steady_pace_s"]]
+        ts = [t for t in o["turns"] + o.get("turns_b", []) if t["steady_pace_s"]]
         o["steady_pace_s"] = round(mean([t["steady_pace_s"] for t in ts]), 1) if ts else None
     out.sort(key=lambda o: o["steady_pace_s"] or 1e9)
-    return {"activity_id": aid, "people": out}
+    return {"activity_id": aid, "people": out, "machines": machines}

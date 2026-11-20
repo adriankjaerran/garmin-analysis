@@ -84,7 +84,9 @@ def index_row(r: dict) -> dict:
                "intervals": [_iv(x) for x in (w.get("intervals") or [])] or None,
                "splits": [_iv(x) for x in (w.get("splits") or [])] or None,
                # shared-machine session (clean): own turns are the intervals; Logbook totals, pattern, others' pace
-               "shared": {k: v for k, v in r["shared"].items() if k != "turns"} if r.get("shared") else None,
+               "shared": ({k: v for k, v in r["shared"].items() if k not in ("turns", "rounds")}
+                          | ({"machine_b": {k: v for k, v in r["shared"]["machine_b"].items() if k != "turns"}}
+                             if r["shared"].get("machine_b") else {})) if r.get("shared") else None,
                # hand-logged (manual.json): what the monitors showed, who was there; no per-person split
                "manual": man},
     }
@@ -116,6 +118,11 @@ def workout_name(r: dict) -> str:
     sh = r.get("shared") or {}
     if sh.get("second_machine"):
         return f"{len(sh['turns'])}×{mmss(sh['on_s'])}, 2 machines"
+    if sh.get("machine_b"):   # full rounds (+ the 1:00 ends of whoever starts on B / ends on A)
+        full = [x for x in sh["rounds"] if abs(x[1] - sh["on_s"]) < 2]
+        part = [x for x in sh["rounds"] if abs(x[1] - sh["on_s"]) >= 2]
+        return (f"{len(full)}×{mmss(sh['on_s'])}" + (f" + {len(part)}×{mmss(part[0][1])}" if part else "")
+                + ", 2 machines")
     wt = r.get("workout_type") or ""
     ivs = (r.get("workout") or {}).get("intervals") or []
     if wt in INTERVAL_TYPES and ivs:
@@ -144,6 +151,30 @@ def c2_dir(D: Path) -> Path:
 def rows(D: Path) -> list[dict]:
     p = c2_dir(D) / "activities_index.json"
     return json.loads(p.read_text()) if p.exists() else []
+
+
+def listed(D: Path) -> list[dict]:
+    """the person's Logbook rows: results.json (their own Logbook, rewritten by every fetch) + copied.json (sessions
+    copied from someone else's Logbook, e.g. a shared machine; the fetch never touches it), by id, own rows first"""
+    C, out, seen = c2_dir(D), [], set()
+    for f in ("results.json", "copied.json"):
+        p = C / f
+        for r in (json.loads(p.read_text() or "[]") if p.exists() else []):
+            if r["id"] not in seen:
+                seen.add(r["id"])
+                out.append(r)
+    return out
+
+
+def copied_ids(D: Path) -> set:
+    p = c2_dir(D) / "copied.json"
+    return {r["id"] for r in json.loads(p.read_text() or "[]")} if p.exists() else set()
+
+
+def merged_ids(D: Path) -> set[int]:
+    """results that are the second machine of another session (override "machine_b"): part of that session, not
+    activities of their own"""
+    return {int(o["machine_b"]["id"]) for o in overrides(D).values() if isinstance(o, dict) and o.get("machine_b")}
 
 
 def manual(D: Path) -> list[dict]:
@@ -192,7 +223,9 @@ def load_result(D: Path, aid, row: dict | None = None) -> dict | None:
         return None
     d = c2_dir(D) / "results" / str(aid)
     ov = overrides(D).get(str(aid))
-    key = [CLEAN_VERSION, ov] + [(p.stat().st_mtime_ns if p.exists() else 0) for p in (d / "result.json", d / "strokes.json")]
+    bd = machine_b_dir(D, ov)
+    key = [CLEAN_VERSION, ov] + [(p.stat().st_mtime_ns if p.exists() else 0) for p in
+                                 (d / "result.json", d / "strokes.json") + ((bd / "result.json", bd / "strokes.json") if bd else ())]
     cp = d / "clean.json"
     cached = None
     if cp.exists():
@@ -203,14 +236,27 @@ def load_result(D: Path, aid, row: dict | None = None) -> dict | None:
             pass
     if cached is None:
         st = strokes(D, aid) if r.get("stroke_data") else None
-        cached = {"key": key, "shared": shared_turns(r, st, ov) if st else None}
+        b = None
+        if bd and (bd / "result.json").exists() and (bd / "strokes.json").exists():
+            b = (json.loads((bd / "result.json").read_text()), json.loads((bd / "strokes.json").read_text()))
+        cached = {"key": key, "shared": shared_turns(r, st, ov, b) if st else None}
         if d.exists():
             cp.write_text(json.dumps(cached, ensure_ascii=False))
     return clean(r, cached["shared"])
 
 
+def machine_b_dir(D: Path, ov) -> Path | None:
+    """the result folder of a session's second machine (override "machine_b": {"id", "from": person}): the person's
+    own copy if there is one, else the owner's (data/<from>/concept2/results/<id>)"""
+    mb = ov.get("machine_b") if isinstance(ov, dict) else None
+    if not mb:
+        return None
+    own = c2_dir(D) / "results" / str(mb["id"])
+    return own if (own / "result.json").exists() else c2_dir(D.parent / mb["from"]) / "results" / str(mb["id"])
+
+
 # ---------------------------------------------------------------- cleaning: shared-machine sessions
-CLEAN_VERSION = 8
+CLEAN_VERSION = 9
 SHARED = {"slot_s": 60.0,        # turns change on whole minutes from the start
           "settle_s": 15.0,      # the first 15 s of a slot are left out when telling people apart (flywheel carry-over)
           "min_s": 600.0,        # only continuous sessions of >= 10 min
@@ -241,7 +287,7 @@ def _jenks(x, k: int):
     return xs, sorted(cuts), float(dp[k, n])
 
 
-def shared_turns(r: dict, st: list[dict] | None, override=None) -> dict | None:
+def shared_turns(r: dict, st: list[dict] | None, override=None, mb_in: tuple | None = None) -> dict | None:
     """Detect a shared-machine session: friends take turns on one erg (1 min on / 1 min off, 2 on / 1 off, 1 on /
     2 off ...) and the Logbook records everyone's strokes as one continuous piece. The session is cut into slots of
     `slot_s` (60 s) from the start; each slot's speed (leaving out its first 15 s, where the flywheel still carries the
@@ -251,7 +297,9 @@ def shared_turns(r: dict, st: list[dict] | None, override=None) -> dict | None:
     override (session_overrides.json "erg_shared"): false = never shared; true = shared whatever the checks say;
     {"slot_s": 120} = other turn length (implies true); {"who": "others"} = this person is the slower one (a friend's
     profile with a copy of the owner's recording, docs/concept2.md); {"who": 2} / {"who": 3} = the 2nd / 3rd fastest
-    of three people; {"second_machine_m": 10842} = a second, unrecorded machine in the rotation (its Logbook total;
+    of three people; {"machine_b": {"id": 123, "from": "maren"}} = the second machine was recorded too (another
+    Logbook; mb_in = (its result, its strokes)): split by the same rotation, see `machine_b`; {"rotation": [3, 2]} = a fixed rotation of 3 people, this person rows every 3rd slot starting
+    with the 2nd (by order, not speed: when the turns' speeds overlap); {"second_machine_m": 10842} = a second, unrecorded machine in the rotation (its Logbook total;
     this person's share there is estimated from their turns here, see `clean`). Returns {turns: [[start s, dur s, m, spm]], pattern, ...} or None."""
     import numpy as np
     if override is False or not st or (r.get("workout_type") in INTERVAL_TYPES and not override):
@@ -289,13 +337,22 @@ def shared_turns(r: dict, st: list[dict] | None, override=None) -> dict | None:
               and (~me).sum() >= 3 and max(others) <= P["max_other_run"])
         return me, runs, others, checks, ok
 
-    cands = [c for c in (candidate(3), candidate(2)) if c]
-    pick = next((c for c in cands if c[4]), None) or (cands[-1] if cands and override else None)
-    if pick is None:
-        return None
-    me, runs, others, checks, ok = pick
-    me = _rhythm(me, sp, runs, others, P)
-    who = P.get("who")
+    rot = P.get("rotation")
+    if rot:   # a fixed rotation, [people, this person's place 1..people]: slots by order, not speed (2026-11-18)
+        k, pos = int(rot[0]), int(rot[1])
+        me = np.array([i % k == pos - 1 for i in range(n)])
+        runs, others = _runs(me), [j - i for i, j in _runs(~me)]
+        checks = {"contrast": round(float(sp[me].mean() / sp[~me].mean() - 1), 3), "n_turns": len(runs),
+                  "own_slots": int(me.sum()), "longest_other_run": max(others), "groups": k}
+        ok = True
+    else:
+        cands = [c for c in (candidate(3), candidate(2)) if c]
+        pick = next((c for c in cands if c[4]), None) or (cands[-1] if cands and override else None)
+        if pick is None:
+            return None
+        me, runs, others, checks, ok = pick
+        me = _rhythm(me, sp, runs, others, P)
+    who = None if rot else P.get("who")
     if who == "others":   # the friend's profile, from the owner's recording: the other slots are theirs
         me = ~me
     elif isinstance(who, int) and who > 1:   # the who-th fastest of three or more people (2026-11-15: 3 on one SkiErg)
@@ -314,6 +371,17 @@ def shared_turns(r: dict, st: list[dict] | None, override=None) -> dict | None:
     on = float(np.median([j - i for i, j in runs])) * L
     off = float(np.median(others)) * L
     second = None
+    mb = machine_b(r, sp, L, P, turns, mb_in) if mb_in and P.get("rotation") and P.get("machine_b") else None
+    if mb:
+        rounds = _rounds(turns + mb["turns"])
+        mb["turns"] = [x[:4] for x in mb["turns"]]
+        gaps = [rounds[i + 1][0] - rounds[i][0] - rounds[i][1] for i in range(len(rounds) - 1)]
+        on, off = float(np.median([x[1] for x in rounds])), float(np.median(gaps)) if gaps else 0.0
+        return {"slot_s": L, "second_machine": None, "machine_b": mb, "rounds": rounds, "turns": turns,
+                "pattern": "".join("X" if x else "." for x in me), "on_s": on, "off_s": off,
+                "others_pace_500_s": round(500 / float(sp[~me].mean()), 1),
+                "logbook_time_s": (r.get("time") or 0) / 10, "logbook_dist_m": r.get("distance"),
+                "forced": bool(override) and not ok, **checks}
     if P.get("second_machine_m") and r.get("distance"):
         # two machines, only this one recorded (2026-11-15: 3 people, 1:00 here + 1:00 on the other = 2:00 on / 1:00
         # off): this person's metres on the other machine ~ their turns here x (other machine's total / this one's)
@@ -327,6 +395,88 @@ def shared_turns(r: dict, st: list[dict] | None, override=None) -> dict | None:
             "on_s": on, "off_s": off, "others_pace_500_s": round(500 / float(sp[~me].mean()), 1),
             "logbook_time_s": (r.get("time") or 0) / 10, "logbook_dist_m": r.get("distance"),
             "forced": bool(override) and not ok, **checks}
+
+
+def _slot_speeds(st: list[dict], L: float, sk: float):
+    """(t, d, spm, speed per slot after the first sk s) of a stroke list; slots of L s from the start"""
+    import numpy as np
+    t = np.array([s.get("t", 0) for s in st], float) / 10
+    d = np.array([s.get("d", 0) for s in st], float) / 10
+    spm = np.array([s.get("spm") or 0 for s in st], float)
+    n = int((t[-1] + 0.1 * L) // L)
+    at = lambda x: float(np.interp(x, t, d))
+    end = lambda i: min((i + 1) * L, t[-1])
+    return t, d, spm, np.array([(at(end(i)) - at(i * L + sk)) / max(1e-9, end(i) - i * L - sk) for i in range(n)])
+
+
+def machine_b(r: dict, sp_a, L: float, P: dict, turns_a: list, b: tuple) -> dict | None:
+    """the second machine of a two-machine rotation, recorded on another Logbook (2026-11-18: Adrian / Magnus / Maren,
+    2:00 on = 1:00 on each machine, 1:00 off). Machine A (this result) is split by the rotation ([people, place]);
+    on machine B everyone rows in the same order, one slot before or after their turn on A (`shift`). The shift is
+    the one whose B slots best match each person's speed on A (log speed, after taking out a per-machine scale:
+    two monitors read differently), unless the override sets it ("machine_b": {"shift": 1}). B's slot j is session
+    slot j + offset, offset = the difference of the two start times, in whole slots ("offset_s" overrides it).
+    Returns {id, from, shift, offset_s, fit, scale, dist_m, time_s, drag_factor, turns: [[start s (session clock),
+    dur, m, spm, "B"]]} or None (too short / no strokes)."""
+    import numpy as np
+    from datetime import datetime
+    rb, stb = b
+    MB = P["machine_b"]
+    k, pos = int(P["rotation"][0]), int(P["rotation"][1])
+    if not stb or len(stb) < 30:
+        return None
+    tb, db, spmb, spb = _slot_speeds(stb, L, float(P["settle_s"]))
+    if not len(spb) or not np.all(np.isfinite(spb)) or spb.max() <= 0:
+        return None
+    if "offset_s" in MB:
+        off = int(round(float(MB["offset_s"]) / L))
+    else:
+        f = "%Y-%m-%d %H:%M:%S"
+        off = int(round((datetime.strptime(rb["date"][:19], f) - datetime.strptime(r["date"][:19], f)).total_seconds() / L))
+    # each person's speed on A (place q = 1..k): the median of their slots
+    la = np.log(np.maximum(np.asarray(sp_a, float), 1e-6))
+    ref = {q: float(np.median(la[[i for i in range(len(la)) if i % k == q - 1]])) for q in range(1, k + 1)}
+    lb = np.log(np.maximum(spb, 1e-6))
+    def place(j, s):   # who rows B's slot j when people come to B s slots after A
+        return ((j + off - s) % k) + 1
+    def fit(s):
+        e = np.array([lb[j] - ref[place(j, s)] for j in range(len(lb))])
+        return float(np.mean((e - np.median(e)) ** 2)), float(np.exp(np.median(e)))
+    shift = int(MB["shift"]) if "shift" in MB else min(range(1, k), key=lambda s: fit(s)[0])
+    err, scale = fit(shift)
+    at = lambda x: float(np.interp(x, tb, db))
+    out = []
+    for j in range(len(spb)):
+        if place(j, shift) != pos:
+            continue
+        a, e = j * L, min((j + 1) * L, float(tb[-1]))
+        m = (tb >= a) & (tb < e)
+        out.append([round((j + off) * L, 1), round(e - a, 1), round(at(e) - at(a), 1),
+                    int(round(float(np.median(spmb[m])))) if m.any() and spmb[m].any() else None, "B"])
+    if not out:
+        return None
+    return {"id": rb["id"], "from": MB.get("from"), "shift": shift, "offset_s": off * L, "fit": round(err, 5),
+            "scale": round(scale, 4), "dist_m": rb.get("distance"), "time_s": (rb.get("time") or 0) / 10,
+            "drag_factor": rb.get("drag_factor"), "turns": out}
+
+
+def _rounds(turns: list) -> list:
+    """own turns on both machines, in time order, joined into rounds where one follows the other (1:00 on A then
+    1:00 on B = one 2:00 round): [[start, dur, m, spm (time-weighted), parts: [[start, dur, m, spm, "A"|"B"]]]]"""
+    ts = sorted([list(x[:4]) + [x[4] if len(x) > 4 else "A"] for x in turns], key=lambda x: x[0])
+    out = []
+    for x in ts:
+        if out and abs(out[-1][0] + out[-1][1] - x[0]) < 1.5:
+            o = out[-1]
+            o[4].append(x)
+            o[1] = round(x[0] + x[1] - o[0], 1)
+            o[2] = round(o[2] + x[2], 1)
+        else:
+            out.append([x[0], x[1], x[2], None, [x]])
+    for o in out:
+        w = [(p[3], p[1]) for p in o[4] if p[3]]
+        o[3] = int(round(sum(a * b for a, b in w) / sum(b for _, b in w))) if w else None
+    return out
 
 
 def _rhythm(me, sp, runs, others, P):
@@ -369,7 +519,7 @@ def clean(r: dict, sh: dict | None) -> dict:
     totals stay in `shared`. Calories and the Logbook's splits (everyone's) are dropped."""
     if not sh:
         return r
-    T = sh["turns"]
+    T = [x[:4] for x in sh.get("rounds") or sh["turns"]]   # two recorded machines: a rep = a round on both
     ivs = []
     for k, (a, dur, m, spm) in enumerate(T):
         nxt = T[k + 1][0] if k + 1 < len(T) else None
@@ -401,7 +551,8 @@ def sync(D: Path) -> tuple[int, int]:
     """concept2/results -> concept2/activities_index.json + activities/<date>_<id>_<typeKey>/ folders.
     Returns (rows, FIT files linked). Folders of results no longer in the Logbook are removed."""
     C = c2_dir(D)
-    lst = json.loads((C / "results.json").read_text()) if (C / "results.json").exists() else []
+    skip = merged_ids(D)   # a session's second machine is part of that session, not an activity of its own
+    lst = [r for r in listed(D) if r["id"] not in skip]
     lst = sorted(lst + manual(D), key=lambda r: r["date"], reverse=True)   # + hand-logged sessions, newest first
     out, n_fit, keep = [], 0, set()
     for r0 in lst:
@@ -496,13 +647,19 @@ def erg_type(row: dict, ana: dict | None) -> tuple[str, str]:
     c2 = row.get("c2") or {}
     wt = c2.get("workout_type") or "unknown"
     if (man := c2.get("manual")) and man.get("on_s"):   # hand-logged rotation (manual.json): no reps, totals only
-        return "erg_intervals", (f"logged by hand: {mmss(man['on_s'])} on / {mmss(man['off_s'])} off, "
+        if len(man.get("people") or []) <= 1:   # solo, from the monitor: own splits, still no strokes / reps
+            return "erg_intervals", (f"logged by hand: {man.get('rounds')}×{mmss(man['on_s'])} / "
+                                     f"{mmss(man.get('off_s') or 0)} rest, solo")
+        return "erg_intervals", (f"logged by hand: {mmss(man['on_s'])} on / {mmss(man['off_s'] or 0)} off, "
                                  f"{len(man.get('machines') or [])} machines, no per-person split")
     if ana and len(ana["rep_times"]) >= 2:
         med = sorted(ana["rep_times"])[len(ana["rep_times"]) // 2]
         length = "short" if med < 100 else ("medium" if med < 300 else "long")
         sh = c2.get("shared")
         if sh:
+            if sh.get("machine_b"):
+                return "erg_intervals", (f"shared, 2 machines: {mmss(sh['on_s'])} on / {mmss(sh['off_s'])} off; reps = own "
+                                         f"rounds on both machines (both recorded)")
             if sh.get("second_machine"):
                 return "erg_intervals", (f"shared, 2 machines: {mmss(sh['on_s'])} on / {mmss(sh['off_s'])} off; reps = own "
                                          f"turns on the recorded machine, the other machine estimated")

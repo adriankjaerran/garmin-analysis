@@ -36,15 +36,21 @@ Regenerate, and put the new token in `.env` as `CONCEPT2_ADRIAN_TOKEN=…`.
 `CONCEPT2_<NAME>_TOKEN=…` to `.env` and run `uv run scripts/refresh_concept2.py <name>` (the person needs a folder
 `data/<name>/` from the Garmin fetch first).
 
-**A friend's half of a shared session** (no own Logbook / token, e.g. Kristoffer 2026-11-07): copy the result into
-their profile and mark them as the other turns:
+**A friend's half of a shared session** (e.g. Kristoffer 2026-11-07): copy the result into their profile and mark
+them as the other turns:
 ```sh
 mkdir -p data/kristoffer/concept2/results/<id> && cp data/adrian/concept2/results/<id>/* data/kristoffer/concept2/results/<id>/
 ```
-then add the result's row from `data/adrian/concept2/results.json` to `data/kristoffer/concept2/results.json`, put
+then add the result's row from `data/adrian/concept2/results.json` to `data/kristoffer/concept2/copied.json` (sessions
+copied from someone else's Logbook: the fetch rewrites `results.json` from the person's own Logbook but never touches
+`copied.json`, so copies survive once the friend has a token), put
 `{"<id>": {"erg_shared": {"who": "others"}}}` in `data/kristoffer/session_overrides.json`, and run
-`uv run scripts/refresh_concept2.py kristoffer --no-fetch` (always `--no-fetch`: there's no token). A new profile needs
-`data/<name>/activities_index.json` (`[]` without Garmin data) and a line in `data/people.json`.
+`uv run scripts/refresh_concept2.py kristoffer --no-fetch` (`--no-fetch` without a token). A new profile needs
+`data/<name>/activities_index.json` (`[]` without Garmin data), `concept2/results.json` (`[]`) and a line in
+`data/people.json`.
+**A fixed rotation** (split by order, not speed): when the turns' speeds overlap (2026-11-18: Magnus's first turn was
+faster than some of Adrian's), give everyone their place in the order: `{"erg_shared": {"rotation": [3, 1]}}` for
+whoever rowed first on the recorded machine, `[3, 2]` the second, `[3, 3]` the third.
 **Three people on one machine** (e.g. 2026-11-15: Adrian, Kristoffer, Maren, 1:00 on / 2:00 off): the same, but pick
 the friend's speed rank instead of `"others"`: `{"who": 2}` = the 2nd fastest turns (Kristoffer), `{"who": 3}` = the
 slowest (Maren). Your own profile needs nothing (you = the fastest).
@@ -52,6 +58,20 @@ That day there were **two machines** (1:00 on each = 2:00 on / 1:00 off) and onl
 showed 10,842 m. `"second_machine_m": 10842` in each person's override adds the other machine as an estimate (their
 turns here × 10842 / the recorded total): the session totals (distance, 30:00 work, pace, name "15×2:00, 2 machines")
 include it, the reps and charts stay the measured turns on the recorded machine.
+
+**Two machines, both recorded** (2026-11-18: Adrian / Magnus / Maren, 2:00 on = 1:00 on each machine, 1:00 off;
+machine A on Adrian's Logbook, B on Maren's): once the other person has a token (see *Another person*),
+```sh
+uv run scripts/merge_second_machine.py 123062870 --from maren --order adrian,magnus,maren
+```
+fetches their Logbook, finds B (same machine type, started closest to A, within 15 min; `--b ID` to pick), sets
+`"rotation"` + `"machine_b": {"id", "from"}` in everyone's override, refreshes everyone and prints each person's
+metres on A / B. B is split by the same rotation: each person rows B one slot before or after their turn on A
+(`shift`, found from the speeds after taking out a per-machine scale, since two monitors read differently; set
+`"shift"` / `"offset_s"` in `machine_b` to force it). A rep is then a **round** = 1:00 on A + 1:00 on B with measured
+metres on both (whoever starts on B / ends on A gets a 1:00 round at that end: "9×2:00 + 2×1:00"). B is hidden from
+the owner's activity list and fitness trend (it's part of the session); the charts are machine A's strokes, the Turns
+section shows both. `fit` > 0.003 in the printout means B's slots don't follow the rotation well: check the order.
 
 **A session that wasn't recorded** (no ErgData, only monitor photos; e.g. 2026-11-13 17:30: Adrian, Maren, Besjan, 2 machines,
 2:00 on / 1:00 off × 10): add a Logbook-shaped row to `data/<person>/concept2/manual.json` for each person who was there
@@ -189,8 +209,10 @@ Found for adrian (2026-11): 16 SkiErg sessions (Nov 2025 – Oct 2026), mostly 1
   Adrian after Maren 8-24 s, Kristoffer after Adrian ~4 s).
 - **No breaks** (Series, Only me, `?breaks=off`): the turns joined end to end, x = work time, so the curve shows the
   pace and its progression only.
-- **Turns** section (shared sessions, `components/SharedTurns.tsx`): the steady pace per person, "Pace per turn"
-  (x = turn, a line per person) and "Pace curve" (each person's stroke pace inside their turns, handover cut, turns
+- **Turns** section (shared sessions, `components/SharedTurns.tsx`): the steady pace per person, "Who rowed when" (a
+  lane per machine, a cell per minute in the rower's colour with metres; with both machines recorded, a resting lane),
+  "Rounds" / "Turns" (metres per round and person, green / red = faster / slower than the person's own average; A / B
+  split, totals and pace per machine), "Pace per turn" (x = the session clock, a line per person, ● A ■ B) and "Pace curve" (each person's stroke pace inside their turns, handover cut, turns
   joined), for **Me** or **Everyone**, in each person's colour (`data/people.json`).
 - FIT cadence of fitness equipment (FIT sport 4) is strokes/min as stored (running files store strides, doubled to
   steps/min in `fitcache.read_fit`).

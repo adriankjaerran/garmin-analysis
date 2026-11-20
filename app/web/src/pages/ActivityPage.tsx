@@ -17,7 +17,7 @@ import { RecordChips, WorkoutProgress, fastest } from "../components/ProgressCar
 import { PageHeader } from "../components/PageHeader";
 import { NearestPanel } from "../components/NearestPanel";
 import { ShapeSection } from "../components/ShapeSection";
-import { SharedTurns, ownSeries, type SharedTurnsResp } from "../components/SharedTurns";
+import { SharedTurns, allTurns as sharedAllTurns, ownSeries, type SharedTurnsResp } from "../components/SharedTurns";
 
 interface Track { t: number[]; lat: number[]; lon: number[]; speed: (number | null)[]; hr: (number | null)[]; alt: (number | null)[] }
 type ColorBy = "speed" | "hr" | "alt";
@@ -358,9 +358,9 @@ function ErgRows({ a }: { a: Activity }) {
         <dd>≈ {num(e.shared.second_machine.est_m)} m in {dur(e.shared.second_machine.time_s)} (estimated, included in Distance)
           <span class="muted"> · reps = your {dur(e.shared.second_machine.on_here_s)} turns on the recorded machine · other machine total {num(e.shared.second_machine.logbook_dist_m)} m</span></dd></>}</>}
     {e.manual && <><dt title="not recorded (no Logbook strokes): the totals from the monitors; who rowed which metres is unknown">Logged by hand</dt>
-      <dd>{e.manual.people.length} people on {e.manual.machines.length} machines, {dur(e.manual.on_s)} on / {dur(e.manual.off_s)} off × {e.manual.rounds}
-        <span class="muted"> · {e.manual.machines.map((m, i) => `machine ${i + 1}: ${num(m.dist_m)} m (${pace500(500 / m.pace_500_s)})`).join(" · ")}
-          {" · "}together {num(e.manual.total_m)} m</span></dd></>}
+      <dd>{e.manual.people.length <= 1 ? `solo, ${e.manual.rounds} × ${dur(e.manual.on_s)} / ${dur(e.manual.off_s ?? 0)} rest` : `${e.manual.people.length} people on ${e.manual.machines.length} machines, ${dur(e.manual.on_s)} on / ${dur(e.manual.off_s)} off × ${e.manual.rounds}`}
+        {e.manual.people.length > 1 && <span class="muted"> · {e.manual.machines.map((m, i) => `machine ${i + 1}: ${num(m.dist_m)} m (${pace500(500 / m.pace_500_s)})`).join(" · ")}
+          {" · "}together {num(e.manual.total_m)} m</span>}</dd></>}
     {e.comments && <><dt>Note</dt><dd>{e.comments}</dd></>}
   </>;
 }
@@ -388,12 +388,14 @@ export function ActivityPage({ id }: { id: string }) {
   const fullWorkout = query.get("view") === "full";
   // every person's turns with the adaptive handover cut (8-10 s per turn): the "only me" charts and the Turns section
   const st = useApi<SharedTurnsResp>(shared ? `/api/activities/${id}/shared-turns` : null);
-  const myTurns = st.data?.people.find((p) => p.person === currentPerson())?.turns ?? null;
+  const meShared = st.data?.people.find((p) => p.person === currentPerson()) ?? null;
+  // two recorded machines: my turns on both, and the series from my strokes on both (the FIT is machine A only)
+  const myTurns = meShared ? (meShared.strokes?.length ? sharedAllTurns(meShared) : meShared.turns) : null;
   const noBreaks = shared && !fullWorkout && query.get("breaks") === "off";
   const own = useMemo(() => {
     const s0 = data?.series ?? null;
-    return s0 && shared && !fullWorkout ? ownSeries(s0, data!.reps, myTurns, noBreaks) : null;
-  }, [data, shared, fullWorkout, myTurns, noBreaks]);
+    return s0 && shared && !fullWorkout ? ownSeries(s0, data!.reps, myTurns, noBreaks, meShared?.strokes) : null;
+  }, [data, shared, fullWorkout, myTurns, noBreaks, meShared]);
   const s: Series | null = own ? own.series : data?.series ?? null;
   const swim = data?.swim ?? null;
   // pace on foot (run, walk, hike), speed for ski / bike / other (lib/format onFoot)
@@ -533,7 +535,7 @@ export function ActivityPage({ id }: { id: string }) {
         </section>
       ) : (
         <section>
-          <p class="note">{a.erg?.manual ? "Logged by hand from the monitors: no stroke data, and the metres aren't split per person." : a.erg ? "No stroke data for this erg session: only the Concept2 Logbook summary is available." : a.fit ? "No GPS track and too little per-second data for charts." : "Watch file not downloaded: only Garmin's summary is available (no track, charts or segments)."}</p>
+          <p class="note">{a.erg?.manual ? (a.erg.manual.people.length <= 1 ? "Logged by hand from the monitor: no stroke data, only the splits." : "Logged by hand from the monitors: no stroke data, and the metres aren't split per person.") : a.erg ? "No stroke data for this erg session: only the Concept2 Logbook summary is available." : a.fit ? "No GPS track and too little per-second data for charts." : "Watch file not downloaded: only Garmin's summary is available (no track, charts or segments)."}</p>
         </section>
       )}
 

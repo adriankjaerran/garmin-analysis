@@ -138,7 +138,8 @@ def main() -> None:
         print(f"  {r['date']}  {r['type']:<8} {r['distance']:>6} m  {r['time_formatted']:>9}  {r['id']}")
     save_json(out / "results.json", rows)
 
-    gone = [p for p in rdir.glob("*") if p.is_dir() and p.name.isdigit() and int(p.name) not in {r["id"] for r in rows}]
+    mine = {r["id"] for r in rows} | concept2.copied_ids(ROOT / "data" / person)   # copied.json: not from this Logbook
+    gone = [p for p in rdir.glob("*") if p.is_dir() and p.name.isdigit() and int(p.name) not in mine]
     if gone and a.prune:
         for p in gone:
             shutil.rmtree(p)
