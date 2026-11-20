@@ -47,11 +47,6 @@ def _doc(store: Store) -> dict:
     return store._memoize("fitness", lambda: [p], lambda: _prepare(json.loads(p.read_text()), store))
 
 
-def _view(store: Store) -> dict:
-    """Kept for callers (home, progress): the same as `_doc` since the distance-curve-off setting was removed."""
-    return _doc(store)
-
-
 # ------------------------------------------------------------------ formatting helpers
 def _dur(s) -> str:
     if s is None:
