@@ -105,10 +105,11 @@ def test_activity_endpoints_sample(client, activities):
 
 # ---- invariants the pages rely on
 def test_bislett_6x1000_same_workout_group_is_17(client):
+    """17 sessions as of 2026-10-27; new 6×1000s at Bislett (2026-11-03, …) add to it"""
     groups = {g["key"]: g for g in client.get("/api/groups?kind=exact").json()["groups"]}
-    assert groups[SIX_K]["n"] == 17
+    assert groups[SIX_K]["n"] >= 17
     d = client.get(f"/api/search?exact_key={quote(SIX_K)}&place=Bislet&place_mode=main").json()
-    assert d["n"] == 17
+    assert d["n"] == groups[SIX_K]["n"] and len(d["rows"]) == d["n"]
     assert {r["place"] for r in d["rows"]} == {"Bislet"}
 
 

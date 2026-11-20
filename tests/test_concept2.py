@@ -83,14 +83,15 @@ def test_erg_rows_in_app(client, activities):
     erg = [a for a in activities if a.get("erg")]
     assert erg, "Concept2 rows in /api/activities"
     assert {a["sport"] for a in erg} <= {"row", "skierg", "bike"}
-    a = next(x for x in erg if x["stype"] == "erg_intervals")
+    # a recorded one (hand-logged sessions from manual.json have no FIT laps, so no reps)
+    a = next(x for x in erg if x["stype"] == "erg_intervals" and not x["erg"].get("manual"))
     assert a["erg"]["pace_500_s"] and a["erg"]["watts"]
     d = client.get(f"/api/activities/{a['id']}").json()
     reps = d["reps"]
     assert reps and all(r.get("start") is not None for r in reps)
     if d["series"] and d["series"].get("cad"):   # strokes per minute, not doubled like running cadence
-        spm = [v for v in d["series"]["cad"] if v]
-        assert max(spm) < 80
+        spm = sorted(v for v in d["series"]["cad"] if v)
+        assert spm[len(spm) // 2] < 80        # the median: a few stroke-rate spikes (99 on 2026-11-18) aren't doubling
 
 
 @needs_c2

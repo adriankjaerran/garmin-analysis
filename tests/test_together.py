@@ -12,12 +12,19 @@ from .conftest import ROOT
 TJ = ROOT / "data" / "together.json"
 pytestmark = pytest.mark.skipif(not TJ.exists() or not (ROOT / "data" / "patrik" / "activities_index.json").exists(),
                                 reason="no data/together.json or no second person")
-B400 = "2026-10-20_2007_Bislet"     # adrian 15×400 vs patrik 10×400
-NEAR = "2026-10-27_2004_Bislet"     # adrian 6×1000 while patrik ran steady: near-miss, hidden
+B400 = "2026-10-20_2007_Bislet"     # adrian 15×400 vs patrik 10×400 (rise joined with 8×400 + 2×1:45 once her data came in)
+NEAR = "2026-10-27_2004_Bislet"     # adrian 6×1000 while patrik ran steady: near-miss, hidden (rise's group with adrian is shown)
 
 
 def _gids(r):
     return [g["gid"] for g in r.json()["groups"]]
+
+
+def _patrik_role(r, gid):
+    """patrik's role in group gid of a list response (None: not listed). The adrian x patrik near-miss is never a member:
+    a group of its own (hidden by default) or, since rise's data, role "other" in her group with adrian"""
+    g = next((g for g in r.json()["groups"] if g["gid"] == gid), None)
+    return next((p["role"] for p in g["participants"] if p["person"] == "patrik"), None) if g else None
 
 
 def test_people_keeps_person_folders_only(client):
@@ -37,21 +44,25 @@ def test_list_under_any_prefix(client, prefix):
     d = r.json()
     assert {"n", "groups", "people", "viewer"} <= set(d) and "h2h" not in d
     assert d["viewer"] == (prefix.split("/")[2] if prefix != "/api" else None)
-    assert B400 in _gids(r) and NEAR not in _gids(r)   # near-misses hidden by default
+    assert B400 in _gids(r) and _patrik_role(r, NEAR) in (None, "other")   # near-misses hidden by default
     row = next(g for g in d["groups"] if g["gid"] == B400)
-    assert row["label"] == "same_workout" and row["kind"] == "intervals" and set(row["people"]) == {"adrian", "patrik"}
-    # a neutral headline: workout · members · fastest rep, no win counts
+    assert row["label"] == "same_workout" and row["kind"] == "intervals" and {"adrian", "patrik"} <= set(row["people"])
+    # a neutral headline: workout · members · fastest rep (one set distance) or rep count (mixed targets), no win counts
     h = row["headline"]
-    assert h["text"] == "15×400 · 2 members · fastest rep 1:15.6" and "winner" not in h and "rep_wins" not in h
-    assert {(p["person"], p["reps_done"], p["of"]) for p in row["participants"]} == {("adrian", 15, 15), ("patrik", 10, 15)}
+    assert h["n_members"] == len(row["people"]) and "winner" not in h and "rep_wins" not in h
+    assert h["text"] in (f"15×400 · {h['n_members']} members · fastest rep 1:15.6", f"15×400 · {h['n_members']} members · {h['reps']} reps")
+    assert {(p["person"], p["reps_done"], p["of"]) for p in row["participants"]} >= {("adrian", 15, 15), ("patrik", 10, 15)}
 
 
 def test_list_filters(client):
-    assert NEAR in _gids(client.get("/api/together?near=1"))
-    assert _gids(client.get("/api/together?label=same_race")) == ["2023-05-07_1200_Lier-1"]
+    near = client.get("/api/together?near=1")
+    assert _patrik_role(near, NEAR) == "other" and set(_gids(client.get("/api/together"))) <= set(_gids(near))
+    assert "2023-05-07_1200_Lier-1" in _gids(client.get("/api/together?label=same_race"))
+    assert all(g["label"] == "same_race" for g in client.get("/api/together?label=same_race").json()["groups"])
     assert all(g["kind"] == "intervals" for g in client.get("/api/together?kind=intervals").json()["groups"])
     assert _gids(client.get("/api/together?from=2026-10-20&to=2026-10-20")) == [B400]
-    assert _gids(client.get("/api/together?place=Frogner")) == ["2026-10-06_1911_Frogner-stadion"]
+    fr = client.get("/api/together?place=Frogner").json()["groups"]
+    assert "2026-10-06_1911_Frogner-stadion" in [g["gid"] for g in fr] and all("Frogner" in g["place"]["name"] for g in fr)
     assert B400 in _gids(client.get("/api/together?q=bislett+400"))
     assert all("hike" in g["sports"] for g in client.get("/api/together?sport=hike").json()["groups"])
 
@@ -62,20 +73,24 @@ def test_session_intervals(client):
     s = r.json()
     assert s["viewer"] == "patrik" and s["kind"] == "intervals"
     iv = s["intervals"]
-    assert len(iv["slots"]) == 15 and "shared_slots" not in iv and all("shared" not in sl for sl in iv["slots"])
-    assert all(sl["target"] == {"kind": "dist", "value": 400, "text": "400 m"} for sl in iv["slots"])
+    assert "shared_slots" not in iv and all("shared" not in sl for sl in iv["slots"])
+    # 15 slots of 400 m (adrian's); slots only someone else ran (rise's 1:45 reps) come on top
+    s400 = [sl for sl in iv["slots"] if sl["target"] == {"kind": "dist", "value": 400, "text": "400 m"}]
+    assert len(s400) == 15 and all(any(iv["reps"][p][sl["slot"]] for p in iv["reps"] if p not in ("adrian", "patrik"))
+                                   for sl in iv["slots"] if sl not in s400)
     lb = {x["person"]: x for x in iv["leaderboard"]}
-    assert lb["adrian"]["rank"] == 1 and lb["patrik"]["rank"] == 2
+    assert lb["adrian"]["rank"] == 1 and lb["adrian"]["rank"] < lb["patrik"]["rank"]
     assert not {"rep_wins", "rep_ties", "gap_s", "all_n"} & set(lb["adrian"])
     # each person's own time so far: every full rep, also the ones only they ran (patrik stops after 10)
     cu = iv["cumulative"]["people"]
-    assert len(cu["adrian"]) == 15 and cu["adrian"][-1]["n"] == 15 and cu["patrik"][9]["n"] == 10 and cu["patrik"][10] is None
-    assert cu["adrian"][-1]["total_s"] == pytest.approx(sum(c["result_s"] for c in iv["reps"]["adrian"]), abs=0.5)
+    cu_a, cu_p = [x for x in cu["adrian"] if x], [x for x in cu["patrik"] if x]
+    assert len(cu_a) == 15 and cu["adrian"][-1]["n"] == 15 and len(cu_p) == 10 and cu_p[-1]["n"] == 10 and cu["patrik"][-1] is None
+    assert cu["adrian"][-1]["total_s"] == pytest.approx(sum(c["result_s"] for c in iv["reps"]["adrian"] if c), abs=0.5)
     for st in iv["standings"]:
         o = st["order"]
         assert not o or (o[0]["rank"] == 1 and o[0]["gap_s"] == 0 and all(a["result_s"] <= b["result_s"] for a, b in itertools.pairwise(o)))
     for p in ("adrian", "patrik"):
-        for c in iv["reps"][p][:10]:
+        for c in [c for c in iv["reps"][p] if c][:10]:
             assert 60 < c["result_s"] < 100       # 400 m reps
     cu = iv["rep_closeups"][0]
     assert cu["available"] and cu["leader"] == "adrian"
@@ -103,7 +118,7 @@ def test_replay(client):
     r = client.get(f"/api/adrian/together/{B400}/replay?step_s=2")
     assert r.status_code == 200
     d = r.json()
-    assert set(d["people"]) == {"adrian", "patrik"} and len(d["reps"]) == 15
+    assert {"adrian", "patrik"} <= set(d["people"]) and len(d["reps"]) == len(client.get(f"/api/together/{B400}").json()["intervals"]["slots"])
     for v in d["people"].values():
         assert len(v["t"]) == len(v["lat"]) == len(v["lon"]) > 500
         assert all(a < b for a, b in zip(v["t"], v["t"][1:]))
@@ -111,16 +126,19 @@ def test_replay(client):
 
 def test_replay_segments_and_passes(client):
     d = client.get(f"/api/together/{B400}/replay").json()
-    assert d["segment_kind"] == "rep" and len(d["segments"]) == 15
-    s1 = d["segments"][0]
-    assert set(s1["people"]) == {"adrian", "patrik"} and s1["target_m"] == 400
+    seg = {x["label"]: x for x in d["segments"]}
+    assert d["segment_kind"] == "rep" and len(d["segments"]) == len(client.get(f"/api/together/{B400}").json()["intervals"]["slots"])
+    s1 = seg["1"]
+    assert {"adrian", "patrik"} <= set(s1["people"]) and s1["target_m"] == 400
     assert s1["total"]["adrian"]["rank"] == 1 and s1["moves"] == []          # same reps so far: ranked, adrian ahead
-    # patrik's 3 s watch: his lap presses are the rep times (86.1 … 81.8 s; was 78.4 from his detector reps)
-    assert d["segments"][9]["total"]["patrik"]["gap_s"] == pytest.approx(81.1, abs=0.2)
+    # patrik's 3 s watch: his lap presses are the rep times (86.1 … 85.9 s; adrian 75.6 … 78.1 s): 9 reps in, 76.1 s
+    # behind (was 73.4 from his detector reps)
+    assert seg["9"]["total"]["patrik"]["n"] == 9 and seg["9"]["total"]["patrik"]["gap_s"] == pytest.approx(76.1, abs=0.2)
     # rep 11 only adrian ran: his own time so far (11 reps), not a race
-    t11 = d["segments"][10]["total"]
-    assert set(t11) == {"adrian"} and t11["adrian"]["n"] == 11 and len(d["segments"][10]["people"]) == 1
-    assert d["passes"] == []                                                  # adrian ahead in every rep
+    t11 = seg["11"]["total"]
+    assert set(t11) == {"adrian"} and t11["adrian"]["n"] == 11 and len(seg["11"]["people"]) == 1
+    # adrian ahead in every rep: patrik (who starts each rep on the clock a few s earlier) never passes him
+    assert not any(p["who"] == "patrik" and p["whom"] == "adrian" for p in d["passes"])
     # 2026-10-06 (3 × 1800 + 2 × 900): adrian's GPS measured his 1800s at 1744-1762 m; the rep ends at his lap press
     # (6:43 for rep 2), not 46 m further into the walking recovery (9:48, which let patrik "pass" him at 1780 m)
     f = client.get("/api/together/2026-10-06_1911_Frogner-stadion/replay").json()
@@ -171,10 +189,11 @@ def test_unknown_group_404(client):
 
 def test_activity_rows_link_to_group(client):
     a = client.get("/api/activities/24795195699").json()["activity"]
-    assert a["together"]["gid"] == B400 and a["together"]["with"] == ["patrik"]
+    assert a["together"]["gid"] == B400 and "patrik" in a["together"]["with"]
     p = client.get("/api/patrik/activities/24795299858").json()["activity"]
-    assert p["together"]["gid"] == B400 and p["together"]["with"] == ["adrian"]
-    assert client.get("/api/activities/24874084265").json()["activity"]["together"] is None   # near-miss: no link
+    assert p["together"]["gid"] == B400 and "adrian" in p["together"]["with"]
+    nm = client.get("/api/activities/24874084265").json()["activity"]["together"]
+    assert nm is None or "patrik" not in nm["with"]                       # near-miss with patrik: no link to him
 
 
 def test_leaderboard_every_rep_counts(client):
@@ -195,7 +214,7 @@ def test_leaderboard_every_rep_counts(client):
                                    "best_s": min(c["result_s"] for c in cells)}]
     assert a["pace_s_km"] < p["pace_s_km"] and a["gap_s_km"] == 0 and p["gap_s_km"] == pytest.approx(p["pace_s_km"] - a["pace_s_km"], abs=0.11)
     # adrian's reps 11-14 (only he ran them) are in his average: it differs from the first 10 alone
-    first10 = sum(c["result_s"] for c in iv["reps"]["adrian"][:10]) / 10
+    first10 = sum(c["result_s"] for c in [c for c in iv["reps"]["adrian"] if c][:10]) / 10
     assert abs(a["avg_s"] - first10) > 0.1
 
 
