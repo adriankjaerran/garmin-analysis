@@ -862,7 +862,7 @@ def forecast_errors(obs, q, kinds=("race", "hard")):
 # One shared running fitness trend plus a personal distance curve: VDOT(km, t) = theta_t + slope_t * x,
 # x = log2(km / 5). theta (VDOT at 5 km) is a random walk with the interval q, slope (VDOT change per doubling of
 # distance) a slow mean-reverting walk towards 0 (shrunk unless the evidence is strong and recent). Every running item (race / hard / bound) is an observation of the curve at its own
-# effective distance (`evidence_km`). Choice of q / x-mapping / reference: scripts/shape_split_eval.py (model D),
+# effective distance (`evidence_km`). Choice of q / x-mapping / reference: scripts/research/shape_split_eval.py (model D),
 # docs/fitness-model.md "Coupled distance curve".
 CURVE = {
     "ref_km": 5.0,
@@ -875,7 +875,7 @@ CURVE = {
                                              # sd (was 1.5; research S used 2.0)
     "slope_revert": True,                    # slope = AR(1) towards 0 (not a random walk): the shrinkage towards the
                                              # Daniels default (0) holds at every date, so an old distance profile fades
-                                             # (time constant 2·sd²/q ≈ 600 days); scripts/slope_prior_eval.py
+                                             # (time constant 2·sd²/q ≈ 600 days); scripts/research/slope_prior_eval.py
     "interval_km": 5.0,                      # interval session scores are calibrated (interval_offset) to races
     "tempo_km": None,                        # None: the offset-calibration distance below; a number: fixed km
     "tempo_cal_km": (10.0, 21.0975),         # tempo_offset +3.0 was fitted against the 10k / half long shape:

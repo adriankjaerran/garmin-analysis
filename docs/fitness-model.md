@@ -225,7 +225,7 @@ Running is one model since model_version 2 (`smooth_curve`, parameters in `CURVE
 - **Overall** counts running once, as `run` % of best (model_version ≤ 2: the mean of interval and long %),
   precision-weighted with ski.
 
-**Eval** (`scripts/shape_split_eval.py`, 2026-11-01, adrian, run with the random-walk slope of that day — q_s 0.001,
+**Eval** (`scripts/research/shape_split_eval.py`, 2026-11-01, adrian, run with the random-walk slope of that day — q_s 0.001,
 prior N(0, 3²); rerunning it now uses the mean-reverting `CURVE`; forward filter = data strictly before the race; forecast =
 one-step-ahead of race / hard items, first 3 skipped; loglik with z clipped at 3). A = separate shapes (v1),
 A-blend = v1 `race_prediction`, C = θ + gap (long obs = θ + gap), D = the distance curve.
@@ -254,7 +254,7 @@ races improve most (1.07 → 0.84), the long forecast improves (2.38 → 1.90), 
 interval shape: today 52.8 ± 1.0 in both). patrik has no race to back-test; his single long forecast is 1.26 (D) vs
 3.67 (A), today θ 48.7 ± 1.5, slope −0.8 ± 1.2.
 
-### Slope shrinkage (`scripts/slope_prior_eval.py`, 2026-11-01)
+### Slope shrinkage (`scripts/research/slope_prior_eval.py`, 2026-11-01)
 adrian's random-walk slope was +2.0 per doubling; his 2025 races alone give +1.2 (least squares through 5k 56.3,
 10k 57.1 / 59.4, half 58.8; a races-only curve: +2.5 with the soft 19:01 5k, +1.4 without). Grid: prior / stationary
 sd × q_s, random walk (RW) vs mean-reverting (OU). Same out-of-sample metrics as above (forward race prediction from
@@ -420,12 +420,12 @@ consecutive hard road interval scores ≤ 14 days apart (pairs). patrik is valid
 
 ## Calibration set
 Shared parameters (tau_scale, interval_offset, tempo_offset, SIG, distance-curve priors, HR / detection thresholds) are
-chosen on the **calibration persons** only (`scripts/calibration_set.py`): ≥ 30 interval sessions with a trusted
+chosen on the **calibration persons** only (`scripts/research/calibration_set.py`): ≥ 30 interval sessions with a trusted
 distance and ≥ 2 running races (official in data/races.json or auto `race?` not in `not_races`) → weight 1, else 0
 (validation only: reported, never minimised). `data/calibration.json` {"weights": {person: w}} overrides the rule.
 2026-11-04: adrian (99 / 5) and rise (62 / 5) calibrate; patrik (11 / 1: few runs, 3–9 s smart recording, several
 mislabelled sessions) is validation only. Personal quantities (shape, slope, easy pace, HR max / rest) always come from
-the person's own data. `scripts/calibration_eval.py` pools tau / offset / tempo / forecast MAE over the calibration
+the person's own data. `scripts/research/calibration_eval.py` pools tau / offset / tempo / forecast MAE over the calibration
 persons with per-person and validation rows; `shape_split_eval.py` and `slope_prior_eval.py` default to the
 calibration persons, then the validation persons (flagged VALIDATION ONLY).
 

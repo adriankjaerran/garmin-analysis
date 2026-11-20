@@ -17,7 +17,7 @@ Model:   sigma(%) = sqrt(base[device][env]^2 + (k_jitter * max(0, jitter - j_ref
          base = sqrt(precision^2 + scale^2): precision from cluster deviations, scale from Bislet.
 Output:  data/<person>/route_accuracy.json  (uncertainty_model, races, clusters, osm, activities)
 
-Usage: uv run scripts/route_accuracy.py adrian [--no-osm] [--osm-fetch] [--osm-clusters N]
+Usage: uv run scripts/research/route_accuracy.py adrian [--no-osm] [--osm-fetch] [--osm-clusters N]
 (OSM: cache only by default; result is informative only, see OSM_VERDICT)
 """
 

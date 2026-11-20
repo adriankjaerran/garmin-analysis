@@ -13,7 +13,7 @@ Detector v2 (`analyse`), see docs/run-analysis.md:
    before / after a kink) to the raw distance records around it.
 5. Lag compensation per mode/watch (calibration.json `lag_compensation`, else defaults) is
    subtracted. The speed jump is the boundary; lap presses are a cross-check and a label.
-Detector v1.1 (`analyse_v1`) is kept for comparison (scripts/evaluate_detector.py).
+Detector v1.1 (`analyse_v1`) is kept for comparison (scripts/research/evaluate_detector.py).
 """
 
 from __future__ import annotations

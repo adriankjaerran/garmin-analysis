@@ -15,7 +15,7 @@ Models (all on the VDOT scale, same per-item sigma, kinds and robust weights as 
            distance (with the +3.0 offset or a re-fitted +1.0 / 0.0).
            D uses the current fm.CURVE otherwise (since 2026-11-01 a mean-reverting slope, sd 1.5; the
            docs/fitness-model.md table of this script was run with the random-walk slope, prior sd 3). Slope prior /
-           q / mean reversion: scripts/slope_prior_eval.py.
+           q / mean reversion: scripts/research/slope_prior_eval.py.
 
 Out-of-sample metrics (no look-ahead except the `implausible` cross-check flag, which production computes once):
   - race prediction: model fitted on data strictly before the race day (robust smoother, last day = forward
@@ -24,7 +24,7 @@ Out-of-sample metrics (no look-ahead except the `implausible` cross-check flag, 
   - one-step-ahead forecast of race/hard items (forward filter), interval and long targets separately.
   - current values today.
 
-Usage: uv run scripts/shape_split_eval.py [person ...]     (default: the calibration persons, then the validation persons; scripts/calibration_set.py)
+Usage: uv run scripts/research/shape_split_eval.py [person ...]     (default: the calibration persons, then the validation persons; scripts/research/calibration_set.py)
 Does not write any files.
 """
 
@@ -394,7 +394,7 @@ if __name__ == "__main__":
     import calibration_set as cs
     for p in sys.argv[1:] or cs.calibration_persons() + cs.validation_persons():
         if cs.calibration_weight(p) == 0:
-            print(f"\n{p}: VALIDATION ONLY (scripts/calibration_set.py): report, don't choose shared parameters on it")
+            print(f"\n{p}: VALIDATION ONLY (scripts/research/calibration_set.py): report, don't choose shared parameters on it")
         if (fm.ROOT / "data" / p / "groups.json").exists():
             run(p)
         else:

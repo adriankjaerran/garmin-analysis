@@ -14,7 +14,7 @@ v2 is scored three ways: raw change points (no lag), lags from calibration.json/
 analyse() reports), and leave-one-session-out lags (median detected - press per mode/watch,
 fitted on the other sessions). The PELT penalty and windows are fixed, not fitted.
 
-Usage: uv run scripts/evaluate_detector.py adrian  -> data/<person>/detector_eval.json
+Usage: uv run scripts/research/evaluate_detector.py adrian  -> data/<person>/detector_eval.json
 """
 
 from __future__ import annotations

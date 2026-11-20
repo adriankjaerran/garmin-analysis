@@ -5,12 +5,12 @@ same with a mean-reverting slope ("OU": AR(1) towards 0 whose stationary sd is t
 at every date, not only at the first evidence: fm.smooth_curve revert=True); plus
 variants that give interval sessions less say in the slope: "int σ×k" = interval-session sigma multiplied by k
 (they pin theta at 5 km less firmly, so the 5k races weigh more against the long items).
-Same out-of-sample metrics as scripts/shape_split_eval.py (model D): forward race prediction (data strictly before
+Same out-of-sample metrics as scripts/research/shape_split_eval.py (model D): forward race prediction (data strictly before
 the race day; with and without adrian's soft 2025-10-24 19:01 5k), calibration (share of races within ±1 / ±2
 predictive sd), one-step-ahead forecasts of interval / long race+hard items, today's slope ± sd. Also the
 races-only slope (curve fitted on race items only, weak prior) for reference.
 
-Usage: uv run scripts/slope_prior_eval.py [person ...]     (default: the calibration persons, then the validation persons; scripts/calibration_set.py)
+Usage: uv run scripts/research/slope_prior_eval.py [person ...]     (default: the calibration persons, then the validation persons; scripts/research/calibration_set.py)
 Does not write any files.
 """
 
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     import calibration_set as cs
     for p in sys.argv[1:] or cs.calibration_persons() + cs.validation_persons():
         if cs.calibration_weight(p) == 0:
-            print(f"\n{p}: VALIDATION ONLY (scripts/calibration_set.py): report, don't choose shared parameters on it")
+            print(f"\n{p}: VALIDATION ONLY (scripts/research/calibration_set.py): report, don't choose shared parameters on it")
         if (fm.ROOT / "data" / p / "groups.json").exists():
             run(p)
         else:

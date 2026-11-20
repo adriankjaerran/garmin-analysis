@@ -1,6 +1,6 @@
 """How well does the interval W'-balance model capture rest length? (analysis only, changes nothing)
 
-Usage: uv run scripts/rest_model_eval.py [person] [--no-cache]
+Usage: uv run scripts/research/rest_model_eval.py [person] [--no-cache]
 
 1. Model predictions: "just possible" rep pace for synthetic sessions at VDOT 50/53/56 and rest 60..240 s
    (standing and jogging), s/km gained per extra minute of rest, for several tau_scale values.

@@ -1,4 +1,4 @@
-"""Shared running calibration pooled over the calibration persons (scripts/calibration_set.py), with every other person
+"""Shared running calibration pooled over the calibration persons (scripts/research/calibration_set.py), with every other person
 as out-of-sample validation. Same criteria as the per-person tables of scripts/fitness_eval.py:
 
   tau_scale        rep-length bias: slope of (session score - median of sessions within 30 days) vs log2(median rep
@@ -10,7 +10,7 @@ as out-of-sample validation. Same criteria as the per-person tables of scripts/f
 Pooling: each person's items enter with that person's calibration weight (0 = validation only). Rows per person
 are printed too, so one person's pull on the pooled number is visible.
 
-Usage: uv run scripts/calibration_eval.py [--persons a,b] [--validate c]     (prints only)
+Usage: uv run scripts/research/calibration_eval.py [--persons a,b] [--validate c]     (prints only)
 """
 
 from __future__ import annotations
