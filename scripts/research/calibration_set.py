@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]   # repo root (this file is scripts/research/)
 MIN_INTERVALS = 30
 MIN_RACES = 2
 

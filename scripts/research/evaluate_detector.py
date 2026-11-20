@@ -23,14 +23,16 @@ import argparse
 import json
 import math
 import statistics
+import sys
 import time
 from pathlib import Path
 
 import fitparse
 
-from run_analysis import _read, analyse, analyse_v1, lag_for
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # scripts/ (engine modules)
+from run_analysis import _read, analyse, analyse_v1, lag_for  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]   # repo root (this file is scripts/research/)
 SEMI = 180 / 2 ** 31
 
 

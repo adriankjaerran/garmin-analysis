@@ -34,10 +34,11 @@ import urllib.request
 from collections import defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # scripts/ (engine modules)
+sys.path.insert(0, str(Path(__file__).resolve().parent))          # scripts/research/ (siblings)
 from gps_quality import DEFAULT_MODEL, ENV_JITTER, hav, load, quality_from, uncertainty_pct  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]   # repo root (this file is scripts/research/)
 RACES = {  # id: (label, metres, certified)
     20380305975: ("Copenhagen Half Marathon 2025", 21097.5, True),
     3533402624: ("Rome Marathon 2019", 42195.0, True),

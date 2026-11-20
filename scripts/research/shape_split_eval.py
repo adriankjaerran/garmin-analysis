@@ -37,7 +37,8 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # scripts/ (engine modules)
+sys.path.insert(0, str(Path(__file__).resolve().parent))          # scripts/research/ (siblings)
 import fitness_model as fm  # noqa: E402
 
 Q_TH = fm.P["q_per_day"]["interval"]   # θ random walk (0.05) for merged / coupled
