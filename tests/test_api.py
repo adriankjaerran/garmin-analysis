@@ -503,7 +503,9 @@ def test_indoor_rep_pace_uses_lap_distance(client, activities):
         ga = g.get(a["id"]) or {}
         if ga.get("indoor_bislett") and a.get("rep_pace_ms") and ga.get("reps"):
             reps = [r for r in ga["reps"] if r[0] and r[1]]
-            whole = sum(r[1] for r in reps) / sum(r[0] for r in reps)
+            # the main reps (e.g. the 3-lap ones) can be slower than the session average when fast 1-lap reps
+            # count too (2026-11-17), so check against the slowest whole-lap rep: 1086 m snapped to 1000 is -8 %
+            whole = min(r[1] / r[0] for r in reps)
             assert a["rep_pace_ms"] > whole * 0.95, (a["id"], a["rep_pace_ms"], whole)
             n += 1
     assert n

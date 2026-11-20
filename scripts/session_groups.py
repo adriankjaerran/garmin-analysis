@@ -35,7 +35,7 @@ CACHE_VERSION = 3   # 2: FIT clock jumps taken out (read_series, run_analysis); 
 READER_VERSION = 2   # read_series time base; 2: clock jumps fixed. Part of the caches built on it
 
 # the fast reader decodes only listed fields: add altitude, heart rate and timer events
-gq._WANT[20].update({2: "altitude", 3: "heart_rate", 78: "enhanced_altitude"})
+gq._WANT[20].update({2: "altitude", 3: "heart_rate", 4: "cadence", 78: "enhanced_altitude"})
 gq._WANT[21] = {0: "event", 1: "event_type"}
 gq._NAMES[21] = "event"
 gq._WANT[19][10] = "total_cycles"   # lap strides (running): cadence per lap, for the Bislett indoor laps
@@ -623,7 +623,7 @@ def read_series(fit: Path) -> dict:
     swim = pool_swim(raw)
     if swim and raw["session"][0].get("start_time"):   # pool swim records start late (bursts): session start
         t0 = min(t0, raw["session"][0]["start_time"])
-    t, lat, lon, dist, alt, hr = [], [], [], [], [], []
+    t, lat, lon, dist, alt, hr, cad = [], [], [], [], [], [], []
     last = None
     for r in recs:
         if r["timestamp"] == last:
@@ -636,7 +636,8 @@ def read_series(fit: Path) -> dict:
         d = r.get("distance"); dist.append(d / 100 if d is not None else np.nan)
         a = r.get("enhanced_altitude", r.get("altitude")); alt.append(a / 5 - 500 if a is not None else np.nan)
         h = r.get("heart_rate"); hr.append(h if h and 30 < h < 230 else np.nan)
-    s = {k: np.array(v, float) for k, v in dict(t=t, lat=lat, lon=lon, dist=dist, alt=alt, hr=hr).items()}
+        c = r.get("cadence"); cad.append(c if c is not None and c < 255 else np.nan)   # strides/min (x2 = steps)
+    s = {k: np.array(v, float) for k, v in dict(t=t, lat=lat, lon=lon, dist=dist, alt=alt, hr=hr, cad=cad).items()}
     # timer stop intervals (event 0 = timer; type 1/4 = stop/stop_all, 0 = start)
     stops, cur = [], None
     for e in sorted((e for e in raw["event"] if "timestamp" in e and e.get("event") == 0), key=lambda e: e["timestamp"]):
@@ -777,6 +778,25 @@ def ana_compact(fit):
             "laps": [(l.get("time"), l.get("dist"), l.get("intensity"), l.get("trigger")) for l in x["laps"]]}
 
 
+LAP_SPM_OFF = 0.15   # lap steps/min (FIT total_cycles) this far off the records' mean cadence: use the records
+
+
+def lap_spm_records(s, a, b, spm):
+    """Steps/min of a lap: the lap's own total_cycles, unless the per-second record cadence over the lap (>= 80 % of
+    its seconds) differs by more than LAP_SPM_OFF; then the records. (adrian 2026-11-17 / 11-10: the last 1-lap rep's
+    lap said 143 steps/min, its records 198, so the Bislett indoor rep was taken for rest.)"""
+    cad = s.get("cad")
+    if cad is None or b - a < 5:
+        return spm
+    m = (s["t"] >= a) & (s["t"] < b)
+    c = cad[m]
+    c = c[~np.isnan(c)]
+    if len(c) < 0.8 * (b - a):
+        return spm
+    rec = round(2 * float(c.mean()))
+    return rec if spm is None or abs(spm - rec) > LAP_SPM_OFF * max(rec, 1) else spm
+
+
 def worker(job):
     fit, typ, need_ana, hr_hard = job
     fit = Path(fit)
@@ -824,11 +844,13 @@ def worker(job):
     hrg = G.get("hr")
     out["laps_c"] = []   # [start s, dur s, watch dist m, steps/min, mean HR, lap trigger (0 = manual), intensity] per lap
     for l in s["laps"]:
+        spm = round(120 * l["cycles"] / l["dur"]) if l.get("cycles") is not None and l["dur"] > 0 else None
+        spm = lap_spm_records(s, l["t"], l["t"] + l["dur"], spm)
         a_, b_ = int(max(0, l["t"])), int(min(G["T"], l["t"] + l["dur"]))
         hs = hrg[a_:b_] if hrg is not None and b_ > a_ else np.array([])
         hs = hs[~np.isnan(hs)] if len(hs) else hs
         out["laps_c"].append([round(float(l["t"]), 1), round(l["dur"], 1), round(l["dist"]),
-                              round(120 * l["cycles"] / l["dur"]) if l.get("cycles") is not None and l["dur"] > 0 else None,
+                              spm,
                               round(float(hs.mean())) if len(hs) > 5 else None, l.get("trigger"), l.get("intensity")])
     if FAM.get(typ) == "ski":   # ski interval detector (ski_intervals.py, ~10 ms on the grid)
         import ski_intervals as si
@@ -978,6 +1000,8 @@ INDOOR_WORK_SPM = 160          # steps/min: a lap at or above this is (part of) 
 INDOOR_MIN_REPS = 3            # no-GPS runs: at least this many reps with a clear lap count
 INDOOR_LAPS = (1, 2, 3)        # a rep is 1, 2 or 3 whole laps ...
 INDOOR_N_PACE = (1000 / 255, 1000 / 165)   # ... if exactly one of them gives a pace of 4:15-2:45 /km
+INDOOR_N_FAST = {1: 1000 / 145, 2: 1000 / 155, 3: 1000 / 165}   # fastest pace per lap count: 2:25 / 2:35 / 2:45 /km
+                                           # (one lap is run faster than three; 1-lap reps were at 2:47)
 
 
 def _indoor_reps(laps):
@@ -1014,19 +1038,21 @@ def _indoor_reps(laps):
 
 
 def _clear_n(dur):
-    """Whole laps of a rep from its time: the only n in 1..3 whose pace (n x 546.5 - 7.5 m) is 4:15-2:45 /km."""
+    """Whole laps of a rep from its time: the only n in 1..3 whose pace (n x 546.5 - 7.5 m) is 4:15 /km to the
+    fastest for n laps (INDOOR_N_FAST: 2:25 / 2:35 / 2:45 /km)."""
     ok = [n for n in INDOOR_LAPS
-          if INDOOR_N_PACE[0] <= (n * BISLETT_INDOOR_M - INDOOR_STOP_SHORT_M) / dur <= INDOOR_N_PACE[1]]
+          if INDOOR_N_PACE[0] <= (n * BISLETT_INDOOR_M - INDOOR_STOP_SHORT_M) / dur <= INDOOR_N_FAST[n]]
     return ok[0] if len(ok) == 1 else None
 
 
-def bislett_indoor(a, time_only=()):
+def bislett_indoor(a, time_only=(), rep_start=None):
     """Bislett indoor lap (546.5 m, under the stands) sessions: runs at Bislet whose GPS track covers < 30 % of the
     watch distance, and runs (incl. "Indoor Running" mode) without any GPS in Oct-Mar with >= 3 reps of a clear lap
     count. The session distance is untrusted (rest laps at ~10-70 steps/min still log 200-1100 m). Reps = laps at
     >= 160 steps/min (see _indoor_reps). Each rep is n whole laps - 7.5 m (stop line): n per block of similar-time
     reps (+-15 %) from the block's median time, only if exactly one n in 1..3 gives 4:15-2:45 /km; else the rep is
-    time-only; ids in `time_only` (data/<person>/indoor_bislett.json) are time-only. Returns None (not indoor) or {source, gps_cover, n_reps, rep_laps: [[start s, dur s, n or None]],
+    time-only; ids in `time_only` (data/<person>/indoor_bislett.json) are time-only. `rep_start` {id: {"reps": {"<rep no.,
+    1-based>": shift s}}} (same file) moves a rep's start by shift s, its end stays (a lap pressed late / early). Returns None (not indoor) or {source, gps_cover, n_reps, rep_laps: [[start s, dur s, n or None]],
     rep_m: [m or None]}."""
     F, f = a["F"], a["f"] or {}
     if a["fam"] != "run" or a["type"] == "treadmill_running" or F["dist_km"] < 1:
@@ -1042,6 +1068,11 @@ def bislett_indoor(a, time_only=()):
     else:
         return None
     reps = _indoor_reps(laps)
+    for k, sh in ((rep_start or {}).get(str(a["id"])) or {}).get("reps", {}).items():
+        j = int(k) - 1
+        if 0 <= j < len(reps):
+            t, d, h = reps[j]
+            reps[j] = (t + sh, d - sh, h)
     tw = [r[1] for r in reps]
     n = [None] * len(reps)
     for g in rep_groups(tw, [None] * len(tw)) if str(a["id"]) not in time_only else []:
@@ -1051,7 +1082,7 @@ def bislett_indoor(a, time_only=()):
     rep_m = []
     for j, (_, dur, _) in enumerate(reps):
         m = n[j] * BISLETT_INDOOR_M - INDOOR_STOP_SHORT_M if n[j] else None
-        rep_m.append(round(m, 1) if m and INDOOR_PACE_MS[0] <= m / dur <= INDOOR_PACE_MS[1] else None)
+        rep_m.append(round(m, 1) if m and INDOOR_PACE_MS[0] <= m / dur <= INDOOR_PACE_FAST[n[j]] else None)
     if src == "no_gps" and sum(1 for k in n if k) < INDOOR_MIN_REPS and str(a["id"]) not in time_only:
         return None
     return {"source": src, "gps_cover": round(cover, 3), "n_reps": len(reps),
@@ -1070,6 +1101,7 @@ def indoor_ana(a, ind):
 
 
 INDOOR_PACE_MS = (1000 / 270, 1000 / 160)   # per rep: implied pace must be 4:30-2:40 /km, else no distance
+INDOOR_PACE_FAST = {1: 1000 / 140, 2: 1000 / 150, 3: 1000 / 160}   # ... fastest per lap count: 2:20 / 2:30 / 2:40 /km
 
 
 def indoor_grid(G, act):
@@ -1663,7 +1695,8 @@ def main():
     if erg_new:
         cfile.write_bytes(pickle.dumps(cache))
     ij = D / "indoor_bislett.json"
-    indoor_time_only = json.loads(ij.read_text()).get("time_only", {}) if ij.exists() else {}
+    ij_d = json.loads(ij.read_text()) if ij.exists() else {}
+    indoor_time_only, indoor_rep_start = ij_d.get("time_only", {}), ij_d.get("rep_start", {})
     for a in acts:
         a["F"] = features(a, ZF)
         a["gps"] = bool(a["f"] and a["f"]["pts"])
@@ -1671,7 +1704,7 @@ def main():
                                                           or bool((a["f"] or {}).get("swim")))   # pool: lengths x pool length
         if c2.is_erg(a["type"]):   # erg: the machine measures the distance, however short the piece
             a["F"]["dist_ok"] = a["F"]["dist_km"] > 0
-        a["indoor"] = bislett_indoor(a, indoor_time_only)
+        a["indoor"] = bislett_indoor(a, indoor_time_only, indoor_rep_start)
         if a["indoor"]:   # indoor lap: watch distance untrusted, reps from the laps
             if a["indoor"]["source"] == "no_gps":   # no position at all: place it at Bislet
                 a["start"] = BISLET

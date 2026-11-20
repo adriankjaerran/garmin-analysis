@@ -87,7 +87,7 @@ data/<person>/
   osm_cache/                             Overpass replies (route_accuracy.py)
   places.json                            optional: start-cluster name overrides (session_groups.py)
   regions.json                           optional: extra / replaced named places and regions (similarity.py)
-  indoor_bislett.json                    optional: `time_only` overrides for Bislett indoor sessions (session_groups.py)
+  indoor_bislett.json                    optional: `time_only` / `rep_start` overrides for Bislett indoor sessions (session_groups.py)
   session_overrides.json                 optional: user corrections of session type / fitness use (session_groups.py, below)
   report.html                            build_report.py
   screenshots/<YYYY-MM-DD>/              report screenshots for visual checks

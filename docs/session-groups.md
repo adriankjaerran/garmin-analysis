@@ -125,10 +125,11 @@ the reader (similarity tracks, fitness features, compare) and the rep cache vers
   `fast: part by vehicle / bike?` (moving ≥ 7.5 km/h for ≥ 30 min: 5 hikes, e.g. a 112 km "hike").
   No-GPS distances are `dist_trusted: false`. **Bislett indoor** (GPS track < 30 % of the watch distance at Bislet, or
   no GPS at all in Oct–Mar with ≥ 3 whole-lap reps; the latter are placed at Bislet): `dist_trusted: false`, type
-  `intervals_track` with detail `indoor laps (546.5 m)` (`, no GPS`), reps from the laps (≥ 160 steps/min, ending on
-  a manual press) as whole laps n × 546.5 m − 7.5 m (n = 1–3 from the rep time); `indoor_bislett` {source
+  `intervals_track` with detail `indoor laps (546.5 m)` (`, no GPS`), reps from the laps (≥ 160 steps/min: the lap's FIT total_cycles, or the records' mean cadence when the two differ
+  by > 15 % (`lap_spm_records`; the last 1-lap rep of 2026-11-10 / 11-17 said 143 vs 198), ending on
+  a manual press) as whole laps n × 546.5 m − 7.5 m (n = 1–3 from the rep time; fastest pace per lap count 2:25 / 2:35 / 2:45 /km, `INDOOR_N_FAST`); `indoor_bislett` {source
   (bislet_gps_lost / no_gps), gps_cover, n_reps, rep_laps [[start_s, dur_s, n]], rep_m}. Overrides:
-  `data/<person>/indoor_bislett.json` `time_only` {id: reason}. `indoor_grid()` gives consumers the matching 1 Hz speed
+  `data/<person>/indoor_bislett.json` `time_only` {id: reason}, `rep_start` {id: {reps: {"<rep no., 1-based>": shift s}, note}} (a lap pressed late / early: moves the rep's start, its end stays; adrian 2026-11-17 rep 1 −10.5 s). `indoor_grid()` gives consumers the matching 1 Hz speed
   (rep distance / rep time in reps, 0 between, no altitude). See [distance-calibration.md](distance-calibration.md). Intervals (runs and ski) get `sig` ("6×1000", "10×4:00",
   "3×1800 + 2×900"; ski: durations only, "4×4:00"), `reps` [time_s, dist_m, speed_ms, hr], `breaks_s` and
   `rep_starts` (s on the read_series time base; ski intervals, Bislett indoor and run reps analysed after 2026-11-01;
